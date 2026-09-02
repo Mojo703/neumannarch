@@ -1,7 +1,7 @@
 # Overseer instructions
 
 Read by the overseer session only. CLAUDE.md is for every agent; this file is
-for the one that talks to the owner.
+for the one that talks to the owner. Project state lives in TODO.md.
 
 ## How to work with the owner (2026-09-02)
 
@@ -13,29 +13,16 @@ for the one that talks to the owner.
 - Do not write to the Claude memory directory. Everything persistent lives in
   this repo, where the owner can review it.
 - Commit only on the owner's explicit word, once per commit. There is no
-  standing authorization in this repo.
-
-## Rulings not yet folded into the design doc (2026-09-02)
-
-These move into the design doc when it is reconciled; delete them here then.
-
-- Numerics: f64, with the pure-Rust `libm` crate for transcendentals. Forbid
-  std float transcendentals by lint. The sim owns its vector type with a
-  closed op set; conversion to the engine's f32 math happens at the render
-  wall.
-- No speed limit of any kind, per row or global. Sim tick rate is 120 per
-  second from the start.
-- Targets: native and web from the first commit. Networking is one
-  WebSocket relay protocol that both targets use.
-- Never a 2D prototype. The playable runs on the mirage-renderer engine at
-  `../../mirage-renderer` relative to this repo, as a path dependency.
-- The sim step reads an immutable state and produces effects that apply at
-  the end of the step, so a unit destroyed this tick still acts this tick.
-  Targeting reads the snapshot plus a table of damage already assigned this
-  tick, shooters resolve in sub-tick ready-time order then id, and a target
-  whose assigned damage is lethal is skipped.
-- The prototype from the web sessions was moved out of the repo to
-  `/tmp/probe-game-previous-work` on 2026-09-02. The owner does not need
-  it kept; the two design documents in it are the only written spec until
-  the new design doc exists.
-- The Linear issue list is deferred; it is not part of the start.
+  standing authorization in this repo. Stop before a commit so the owner can
+  verify the working tree.
+- Text written in the same turn as a tool call is collapsed to one line in
+  the owner's terminal. Reading material goes out as a text-only turn; the
+  question tool follows in the next turn.
+- The owner reads design in full. Write the mechanism: what is drawn, where,
+  when it changes. Never imagery, never a summary of a mechanism.
+- Design conversations run on the owner's questions: answer the question
+  asked, at the level asked. When the owner says a shape is too complex, the
+  answer is a simpler shape, not a defence.
+- The engine is being polished through this game. Report a needed engine
+  feature or an API friction to the owner clearly and at once, as its own
+  item, never folded into a workaround.

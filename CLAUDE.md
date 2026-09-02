@@ -2,11 +2,14 @@
 
 The overseer reads OVERSEER.md before anything else. Implementation agents do not.
 
-Probe Game is a four-player free-for-all space RTS: a deterministic
-lockstep simulation of ships, structures and asteroids, played through two
-verbs, on the Mirage engine (a path dependency at `../../mirage-renderer`)
-for desktop and the browser. The rules of the game are the design doc's,
-which this file names once it lands.
+Probe Game is a two-to-four-player space RTS: a deterministic lockstep
+simulation of ships, structures and asteroids, played through one verb, on
+the Mirage engine (a path dependency at `../../mirage-renderer`) for desktop
+and the browser. **Read DESIGN.md before writing sim code and DISPLAY.md
+before writing display code.** They describe the target only and are the
+authority on the rules of the game and on what the player sees. If
+implementation reveals a problem with a design, stop and propose a change to
+the document; do not silently deviate.
 
 ## Layout
 
@@ -53,7 +56,7 @@ off on without comments.
   when things run), never restating signatures. One line unless a contract
   genuinely needs more: what it is, then when you need it, plain
   subject-verb-object, one fact per sentence. Design rationale lives in the
-  design doc, never in rustdoc; no worked examples on ordinary items.
+  design docs, never in rustdoc; no worked examples on ordinary items.
 - Comments are a last resort: if you reach for one, factor instead —
   extract a named function or type until it is unnecessary. Survivors
   state only what code cannot (safety contracts, platform quirks, why not
@@ -61,7 +64,7 @@ off on without comments.
   couple of lines.
 - Literal register: docs and comments state what the code does in literal
   verbs, no figurative phrasing. The game's own vocabulary (chase, leash,
-  fire, spot, anchor) is literal here.
+  fire, spot, home, want) is literal here.
 - The fix is the structural fix: when a defect admits a type-level answer,
   that is the one to implement; a workaround is never the recommendation,
   and churn is no counterargument. Every place a failure is tolerated at
@@ -97,13 +100,17 @@ off on without comments.
   after the overseer reviews the demolition. A unit still ends green
   before commit.
 - Visuals are judged only by an agent that never saw the builder's code or
-  reasoning, against screenshots. Changed docs get a fresh-eyes register
-  review before owner review, flagging: needs-a-second-read sentences,
-  undefined coined nouns, missing units or defaults, signature restatement.
+  reasoning, against screenshots, by the questions in DISPLAY.md. Changed
+  docs get a fresh-eyes register review before owner review, flagging:
+  needs-a-second-read sentences, undefined coined nouns, missing units or
+  defaults, signature restatement.
 - If the index or files change while you work, that is the owner
   steering: leave their changes alone.
 - Create a new crate's files before naming it in any Cargo.toml; the
   owner's IDE caches a broken workspace otherwise.
+- The engine is under active development and this game exists partly to
+  polish it. A missing engine feature or friction with its API is reported
+  in the milestone report as its own item, never worked around in the game.
 - Never open a window on the owner's desktop. Verify headlessly: xvfb-run,
   or the engine's offscreen Session; the recipes are in
   `../../mirage-renderer/docs/verifying.md`.
@@ -114,3 +121,9 @@ off on without comments.
 - A torn-down system's history is owner and overseer reference only;
   agents never read superseded implementations, and never the prototype
   that preceded this repo. Briefs carry requirements, never old shapes.
+
+Project state — pending work, queues, defects, uncommitted milestones —
+lives in TODO.md. It is overseer-facing: the overseer reads it at session
+start, briefs agents with only what their task needs, and maintains it
+under its own discipline. Implementation agents work from their brief, not
+from TODO.md.
