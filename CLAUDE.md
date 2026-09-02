@@ -2,9 +2,39 @@
 
 The overseer reads OVERSEER.md before anything else. Implementation agents do not.
 
+Probe Game is a four-player free-for-all space RTS: a deterministic
+lockstep simulation of ships, structures and asteroids, played through two
+verbs, on the Mirage engine (a path dependency at `../../mirage-renderer`)
+for desktop and the browser. The rules of the game are the design doc's,
+which this file names once it lands.
+
+## Layout
+
+- `sim/` — the simulation: state, commands, the step. No engine, no
+  platform code, no floats but `f64`. Builds on both targets.
+- `game/` — the playable: the Mirage `Game`, rendering, input, UI, the
+  relay client. The only crate that draws.
+- `harness/` — balance matrices, scripted agents and determinism checks
+  over `sim`. Native only. Lands with the first sim system.
+
+Dependencies point one way: `game` and `harness` depend on `sim`; `sim`
+depends on nothing in this repo and never on the engine.
+
 ## Invariants (every change, no exceptions)
 
-- to be filled in
+- `./check.sh` passes before every commit: fmt, clippy `-D warnings`,
+  native build, tests, wasm32 build of `game`.
+- Determinism: the same initial state and command log produce the same
+  state hash on every target. In `sim`: no `f32`; transcendentals only
+  through `libm`, never `std`; no `HashMap` or `HashSet` (a `BTreeMap` or a
+  sorted `Vec` instead); no clocks, randomness, threads or platform calls.
+- Untrusted input never panics and never grows a store without bound: a
+  command from the relay is applied or rejected by name, and every count a
+  command carries has a stated cap.
+- No blocking calls (`block_on`, `std::thread::sleep`, sync file IO) in
+  `game` or `sim`; the rule exists for wasm safety.
+- Prefer compile-time enforcement; a runtime check requires a comment
+  explaining why the type system could not express it.
 
 ## Code quality bar
 
@@ -14,74 +44,73 @@ off on without comments.
 - Idiomatic Rust per the API Guidelines: precise names, newtypes over bare
   primitives where meaning exists, iterators over index loops, no `clone()`
   to dodge a borrow you could restructure.
-- Loose functions are a missing-type indicator (owner, 2026-08-29): a
-  function whose signature has a clear primary subject belongs in that
-  type's impl; one whose subject has no type yet is evidence the type is
-  missing — create it, then the function is its method. A free function
-  stays only where no argument is the subject (min/swap-shaped peers).
+- A function belongs to the type that is its primary subject; a subject
+  with no type is a missing type — create it, then the function is its
+  method. A free function stays only where no argument is the subject
+  (min/swap-shaped peers). The counterweight: a type that gains methods
+  from every module is also a missing type.
 - Concise rustdoc on every public item, stating contracts (defaults, units,
-  when things run) — never restating signatures. One line unless a contract
+  when things run), never restating signatures. One line unless a contract
   genuinely needs more: what it is, then when you need it, plain
-  subject-verb-object, one fact per sentence. Design rationale lives in
-  ARCHITECTURE.md, never in rustdoc; no worked examples on ordinary items.
-  Calibration (owner-supplied): "Definition for repaintable sections of a
-  mesh. Required if you want to change a material when drawing something."
-- Comments are a last resort: if you reach for one, factor instead — extract
-  a named function or type until it is unnecessary. Survivors state only
-  what code cannot (safety contracts, platform quirks, why not the obvious
-  way), one line preferred, two at most. Module docs are a couple of lines.
-- Literal register only: docs and comments state what the code does in
-  literal verbs — no figurative or anthropomorphic phrasing.
-- The fix is the structural fix: when a defect admits a type-level or
-  engine-level answer, that is the one to implement; mitigations and
-  game-side workarounds are stopgaps, never the recommendation, and churn
-  is no counterargument. "Parked" applies to speculative features only.
-- A soft-failure seam is presumed eliminable — unspellable, boot-fatal,
-  or an uncapped store; "justified-dynamic" must survive the challenge:
-  what shape change would delete you? (owner, 2026-09-01)
-- Never the cheap seam (owner, 2026-08-27): when a design admits a
-  fully-enforced shape, pay the churn for it — there is no rush. A
-  documented hole is still a hole.
-- No dead code, no placeholder stubs (an architecture-required item may land
-  before its driver, but with a real body and documented contract), no
-  `#[allow]` without a justifying comment, no commented-out code.
+  subject-verb-object, one fact per sentence. Design rationale lives in the
+  design doc, never in rustdoc; no worked examples on ordinary items.
+- Comments are a last resort: if you reach for one, factor instead —
+  extract a named function or type until it is unnecessary. Survivors
+  state only what code cannot (safety contracts, platform quirks, why not
+  the obvious way), one line preferred, two at most. Module docs are a
+  couple of lines.
+- Literal register: docs and comments state what the code does in literal
+  verbs, no figurative phrasing. The game's own vocabulary (chase, leash,
+  fire, spot, anchor) is literal here.
+- The fix is the structural fix: when a defect admits a type-level answer,
+  that is the one to implement; a workaround is never the recommendation,
+  and churn is no counterargument. Every place a failure is tolerated at
+  runtime — a fallback, a silently ignored input, a cap — gets one of
+  three verdicts: made unrepresentable by an API shape, moved to a
+  boot-time failure, or justified in a comment that answers "what shape
+  change would delete this?" A documented hole is still a hole.
+- No dead code, no placeholder stubs (an architecture-required item may
+  land before its driver, but with a real body and documented contract),
+  no `#[allow]` without a justifying comment, no commented-out code.
+- Small single-purpose modules; `pub(crate)` by default, `pub` only for the
+  documented surface.
+- A test is written from the guarantee, never from the fix's own geometry,
+  and a test pinning a defect is shown to fail on the unfixed code. Every
+  sim system lands with its unit tests.
 
 ## Workflow
 
 - The owner controls git. Implementation agents never run a mutating git
-  command — working-tree edits only, scoped to the assigned milestone. The
-  overseer commits ONLY on the owner's explicit word — a per-commit
-  "commit", or a standing "commit when ready" (given 2026-08-27), which
-  authorizes committing each unit once it is verified AND its fresh-eyes
-  reviews are clean: one commit at a time, a one-sentence message,
-  announced when made. The message states the change's behavior in the
-  engine's vocabulary, the repo register — never process nouns
-  (milestones, units, reviews, verification), which live in TODO and
-  reports (owner, 2026-08-29). Design docs commit alongside code,
-  never alone.
-  Read-only git is always fine.
-- Model policy: engine internals go to Opus agents;
-  Reuse an agent while its context is low; relaunch on an egregious
-  or repeated mistake, or high context.
-- Critique before building on unfinished work (owner, 2026-08-31): an
-  agent dispatched onto an in-flight tree FIRST reviews what it
-  inherits — reading the working-tree state its phase builds on and
-  reporting defects, doubts, and shapes it would not have chosen —
-  and implements only after the overseer answers that critique (fix,
-  steer, or proceed). The reading is paid for anyway, and the critique
-  sets the adversarial footing the repo expects before any code is
-  written on top.
-- Visuals are judged only by an agent that never saw the builder's code
-  or reasoning, against screenshots. It may be reused. A milestone's changed
-  docs likewise get a fresh-eyes register review before owner review,
-  flagging: needs-a-second-read sentences, undefined coined nouns, missing
-  units/defaults, signature restatement.
-- If the index or files change while you work, that is the owner steering —
-  leave their changes alone.
-- Never open a window on the owner's desktop; verify headlessly (xvfb-run,
-  or the offscreen Session — recipes in docs/verifying.md).
+  command: working-tree edits only, scoped to the assigned milestone. The
+  overseer commits only on the owner's explicit word, once per commit, one
+  commit at a time, a one-sentence message announced when made. The
+  message states the change's behavior in the game's vocabulary, never
+  process nouns (milestones, units, reviews, verification). Design docs
+  commit alongside code, never alone. Read-only git is always fine.
+- Critique before building on unfinished work: an agent dispatched onto an
+  in-flight tree first reports the defects, doubts and shapes it would not
+  have chosen in what it inherits, and implements only after the overseer
+  answers that critique (fix, steer, or proceed).
+- Red-state refactors: a replacement starts by deleting the old system,
+  core and call sites, so surviving leaves cannot steer the new code into
+  the old shape. The agent stops and reports at full red, and builds only
+  after the overseer reviews the demolition. A unit still ends green
+  before commit.
+- Visuals are judged only by an agent that never saw the builder's code or
+  reasoning, against screenshots. Changed docs get a fresh-eyes register
+  review before owner review, flagging: needs-a-second-read sentences,
+  undefined coined nouns, missing units or defaults, signature restatement.
+- If the index or files change while you work, that is the owner
+  steering: leave their changes alone.
+- Create a new crate's files before naming it in any Cargo.toml; the
+  owner's IDE caches a broken workspace otherwise.
+- Never open a window on the owner's desktop. Verify headlessly: xvfb-run,
+  or the engine's offscreen Session; the recipes are in
+  `../../mirage-renderer/docs/verifying.md`.
 - Complete the milestone, verify on both targets, then stop for owner
-  review — never start the next unprompted. Report decisions and any
-  friction with ARCHITECTURE.md.
+  review; never start the next unprompted.
 - Owner questions go through the question tool the moment they exist; a
   note records a ruling, never a pending ask.
+- A torn-down system's history is owner and overseer reference only;
+  agents never read superseded implementations, and never the prototype
+  that preceded this repo. Briefs carry requirements, never old shapes.

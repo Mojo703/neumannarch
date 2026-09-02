@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Verification gate: must pass before every commit (see CLAUDE.md).
+# Ordered cheapest-and-likeliest-to-fail first, so a failure costs seconds.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build --workspace --all-targets
+cargo test --workspace
+# The game ships in the browser, and the sim with it.
+cargo build -p probe-game --target wasm32-unknown-unknown

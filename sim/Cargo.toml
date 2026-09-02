@@ -1,0 +1,10 @@
+[package]
+name = "probe-sim"
+version.workspace = true
+edition.workspace = true
+description = "The deterministic lockstep simulation of Probe Game"
+
+[dependencies]
+
+[lints]
+workspace = true

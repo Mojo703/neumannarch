@@ -1,0 +1,12 @@
+[package]
+name = "probe-game"
+version.workspace = true
+edition.workspace = true
+description = "Probe Game on the Mirage engine, for desktop and the browser"
+
+[dependencies]
+mirage-engine = { path = "../../../mirage-renderer" }
+probe-sim = { path = "../sim" }
+
+[lints]
+workspace = true
