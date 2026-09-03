@@ -739,6 +739,38 @@ mod tests {
     }
 
     #[test]
+    fn the_opening_view_frames_the_belt_with_the_focus_at_its_centre() {
+        let mut session = play();
+        session.step();
+        let play = session.game();
+        let screen = screen(&session);
+
+        let focus = screen
+            .point_of(play.camera.focus())
+            .expect("the focus is in front of the eye");
+        assert!(
+            focus.distance(egui::pos2(TARGET.x as f32 / 2.0, TARGET.y as f32 / 2.0)) <= 1.0,
+            "the focus draws at {focus}, not the centre pixel"
+        );
+
+        let framed = play
+            .view
+            .terrain
+            .iter()
+            .filter_map(|terrain| screen.point_of(play.rock_pos(terrain.rock)?))
+            .filter(|at| {
+                (0.0..TARGET.x as f32).contains(&at.x) && (0.0..TARGET.y as f32).contains(&at.y)
+            })
+            .count();
+
+        println!("the opening view holds {framed} rocks' rings");
+        assert!(
+            framed > 1,
+            "the opening zoom shows {framed} rings, so there is nothing to choose between"
+        );
+    }
+
+    #[test]
     fn a_right_drag_moves_the_belt_under_the_pointer() {
         let mut session = play();
         session.step();

@@ -29,11 +29,10 @@ const PALETTE: [Color; 4] = [
 ];
 
 /// A glyph's fraction of the cell its frame fills by cost class, `Large`
-/// reaching the cell's own edge; proportional to
-/// [`crate::glyph::Size::scale`]'s ratios of `0.75`, `1.0`, `1.3`.
+/// reaching the cell's own edge; the size class over
+/// [`crate::glyph::WIDEST_SCALE`].
 fn cell_fraction(size: &Size) -> f32 {
-    const LARGEST: f32 = 1.3;
-    size.scale() / LARGEST
+    size.scale() / crate::glyph::WIDEST_SCALE
 }
 
 /// `seat`'s colour, wrapping past the palette's length.

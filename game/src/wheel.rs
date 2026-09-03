@@ -8,19 +8,30 @@ use probe_sim::roster::{Kind, Roster, Row};
 use probe_sim::state::Command;
 use probe_sim::{Band, Place, RowId, SeatId};
 
-use crate::glyph::{self, Glyph};
+use crate::glyph::Glyph;
 use crate::glyph_quad::seat_color32;
 use crate::scene::{Fill, WheelBand};
 use crate::stencil::Stencil;
-
-/// The wheel's own screen radius, in points: outside both rings, which are
-/// [`crate::hud::OUTER_RADIUS`] at most.
-pub const RADIUS: f32 = 104.0;
 
 /// A band's radial half-width around [`RADIUS`], in points: the span
 /// [`Wheel::slot_at`] answers, split at the radius into plus (outer) and
 /// minus (inner).
 pub const BAND_WIDTH: f32 = 16.0;
+
+/// How far the wheel's inner edge clears the outer ring, in points, so the
+/// annulus reads as its own control and not a third ring.
+pub const GAP: f32 = 40.0;
+
+/// The wheel's own screen radius, in points: its annulus's mid radius,
+/// [`GAP`] beyond the outer ring.
+pub const RADIUS: f32 = crate::hud::OUTER_RADIUS + GAP + BAND_WIDTH;
+
+/// The annulus's inner edge stands [`GAP`] clear of the outer ring.
+const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::hud::OUTER_RADIUS + GAP);
+
+/// A slot's glyph half-width, in points, before its size class steps it.
+/// Wider than a ring's, since a slot is a control and not a unit.
+const GLYPH_HALF: f32 = 9.0;
 
 /// The annulus's own stroke width, in points.
 const EDGE_WIDTH: f32 = 1.0;
@@ -28,11 +39,12 @@ const EDGE_WIDTH: f32 = 1.0;
 /// The annulus's own stroke colour.
 const EDGE_COLOUR: Color32 = Color32::from_gray(120);
 
-/// A hovered band's fill colour.
-const HOVER_COLOUR: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 60);
+/// A hovered band's colour, which brightens that band's own segment of the
+/// annulus and nothing else.
+const HOVER_COLOUR: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
 
 /// The straight segments one band of a slot is drawn with.
-const SECTOR_SEGMENTS: usize = 8;
+const SECTOR_SEGMENTS: usize = 12;
 
 /// The roster wheel open on one band: a sector per row, structures in the
 /// left half and units in the right, each half ordered by cost from the
@@ -109,9 +121,10 @@ impl Wheel {
     }
 
     /// Paints the annulus, its sector boundaries, and every slot's glyph,
-    /// filling `hover`'s band where it names one of this wheel's slots.
+    /// brightening `hover`'s own band where it names one of this wheel's
+    /// slots.
     pub fn paint(&self, painter: &egui::Painter, hover: Option<(RowId, WheelBand)>) {
-        for radius in [RADIUS - BAND_WIDTH, RADIUS, RADIUS + BAND_WIDTH] {
+        for radius in [RADIUS - BAND_WIDTH, RADIUS + BAND_WIDTH] {
             painter.circle_stroke(self.centre, radius, Stroke::new(EDGE_WIDTH, EDGE_COLOUR));
         }
 
@@ -129,17 +142,13 @@ impl Wheel {
             if let Some((row, band)) = hover
                 && row == slot.row
             {
-                painter.add(Shape::convex_polygon(
-                    self.band_points(slot, band),
-                    HOVER_COLOUR,
-                    Stroke::NONE,
-                ));
+                self.brighten(painter, slot, band);
             }
 
             Stencil {
                 glyph: &slot.glyph,
                 centre: self.at(RADIUS, slot.angle),
-                half: glyph::HALF * slot.glyph.size.scale(),
+                half: GLYPH_HALF * slot.glyph.size.scale(),
                 colour: seat_color32(self.seat),
                 fill: Fill::Solid,
                 dim: false,
@@ -155,20 +164,19 @@ impl Wheel {
         egui::pos2(self.centre.x + radius * sin, self.centre.y - radius * cos)
     }
 
-    /// One band of one slot, as the quadrilateral its arc is drawn with.
-    fn band_points(&self, slot: &Slot, band: WheelBand) -> Vec<Pos2> {
-        let (inner, outer) = match band {
-            WheelBand::Plus => (RADIUS, RADIUS + BAND_WIDTH),
-            WheelBand::Minus => (RADIUS - BAND_WIDTH, RADIUS),
+    /// Brightens one band of one slot: the half of the annulus that band
+    /// owns, over that slot's own sector, as one stroked arc.
+    fn brighten(&self, painter: &egui::Painter, slot: &Slot, band: WheelBand) {
+        let radius = match band {
+            WheelBand::Plus => RADIUS + BAND_WIDTH / 2.0,
+            WheelBand::Minus => RADIUS - BAND_WIDTH / 2.0,
         };
         let from = slot.angle - slot.half_share;
         let step = 2.0 * slot.half_share / SECTOR_SEGMENTS as f32;
-        let arc =
-            |radius: f32| (0..=SECTOR_SEGMENTS).map(move |at| (radius, from + at as f32 * step));
-        arc(inner)
-            .chain(arc(outer).collect::<Vec<_>>().into_iter().rev())
-            .map(|(radius, angle)| self.at(radius, angle))
-            .collect()
+        let arc: Vec<Pos2> = (0..=SECTOR_SEGMENTS)
+            .map(|at| self.at(radius, from + at as f32 * step))
+            .collect();
+        painter.add(Shape::line(arc, Stroke::new(BAND_WIDTH, HOVER_COLOUR)));
     }
 }
 
@@ -343,5 +351,42 @@ mod tests {
                 count: 0
             }
         );
+    }
+
+    #[test]
+    fn a_slot_glyph_sits_at_its_sectors_mid_angle_and_the_wheels_radius() {
+        let roster = Roster::shipped();
+        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+
+        for slot in &wheel.slots {
+            let centre = wheel.at(RADIUS, slot.angle);
+            assert!(
+                (centre.distance(CENTRE) - RADIUS).abs() <= 1e-3,
+                "the glyph sits off the wheel's radius"
+            );
+            let edges = [slot.angle - slot.half_share, slot.angle + slot.half_share];
+            let [low, high] = edges.map(|edge| angular_distance(edge, slot.angle));
+            assert!((low - high).abs() <= 1e-5, "the glyph sits off mid angle");
+            assert_eq!(
+                wheel.slot_at(centre).map(|(row, _)| row),
+                Some(slot.row),
+                "and inside its own sector"
+            );
+        }
+    }
+
+    #[test]
+    fn every_slot_glyph_takes_the_wheels_own_size_by_its_cost_class() {
+        let roster = Roster::shipped();
+        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+
+        for slot in &wheel.slots {
+            let half = GLYPH_HALF * slot.glyph.size.scale();
+            assert_eq!(half, GLYPH_HALF * Glyph::of(&roster[slot.row]).size.scale());
+            assert!(
+                half <= BAND_WIDTH,
+                "a slot's glyph stands within its band's width"
+            );
+        }
     }
 }

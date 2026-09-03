@@ -18,6 +18,11 @@ pub const LARGE_FROM: f64 = 150.0;
 /// for `Large`.
 const SIZE_SCALE: [f32; 3] = [0.75, 1.0, 1.3];
 
+/// The widest a glyph is drawn, as a scale over its nominal half-width:
+/// [`Size::Large`]'s step. A run is laid at this width, so a glyph of any
+/// size class stands clear of its neighbours.
+pub const WIDEST_SCALE: f32 = SIZE_SCALE[2];
+
 /// The outline: the row's kind.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Frame {

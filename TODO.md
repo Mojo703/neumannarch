@@ -7,104 +7,39 @@ target-state only. Agents see this file only through their briefs.
 
 ## In flight
 
-- A parallel wave over milestones 1 and 2 was stopped at 01:00 on
-  2026-09-03 for usage reasons; the tree is uncommitted and RED. Verified
-  by the overseer on 2026-09-03 on a scratch copy with `Slot` and
-  `Transfer` stubbed: 66 sim tests and 20 game tests pass, clippy and fmt
-  clean. Landed and read: roster/, orbit/{body,stumpff,universal},
-  state/{mod,seat,rock,entity,wants,frame,ready,command,sweep,hash},
-  step/{extraction,construction} as pure kernels without their phase
-  types, game/{scene,glyph,ring,camera}. Still one-line stubs:
-  orbit/{elements,lambert,slot,transfer}, state/{view,standings},
-  step/{fire,fulfilment,propagation}, game/{sheet,draw,wheel}; look/ and
-  harness/ were never created; main.rs is the skeleton.
-- Two reds: state/entity.rs imports `orbit::slot::Slot` and
-  `orbit::transfer::Transfer`, which are stubs; and camera.rs's tests use
-  an untyped float literal with `powi`, hidden behind the first.
-- Owner ruling 2026-09-03: the orbit seam (no `Orbit` type, `Rock` holding
-  an epoch body, `Motion::Free` storing a body while holding, `Slot`
-  undefined) is refactored from the ground up as a red-state refactor,
-  with an `Orbit` type. The shape is proposed to the owner before the
-  agent is dispatched.
-- Owner ruling 2026-09-03: the whole wave commits as one commit, docs and
-  code together, on the owner's word once green.
-- Owner ruling 2026-09-03: Opus agents take the hard sim units (orbit,
-  step, session); Sonnet agents take the rest, and the owner reviews every
-  Sonnet unit personally, so a Sonnet report leads with its key file
-  paths.
-- Owner ruling 2026-09-03: display work waits for `Camera::project` in
-  the engine (below); sim work proceeds now. The owner launched that
-  engine work in the engine's own session on 2026-09-03.
-- Stable subset landed and verified green by the overseer on 2026-09-03:
-  `Orbit` as equinoctial elements with the Kepler-versus-universal
-  cross-check, `Rock` over `Orbit`, entities as an id-keyed map, `Body`
-  and `Gravity` fixes, the empty modules undeclared. `Motion` has only
-  `Fixed` until the movement unit lands.
-- Owner ruling 2026-09-03, movement: ships are free bodies under the one
-  law at all times. Two thrusts per row: `accel` for solved transfers,
-  `maneuver` for flocking. Every place has an anchor, the rock's orbit
-  shifted ahead by the band's amplitude (inner 4 m, outer 30 m,
-  hypotheses), shared by all seats. A send is one Lambert transfer flown
-  by a virtual anchor with per-row burns; ships flock around it. The
-  manoeuvring rule is a damped spring to the attractor plus a bounded
-  pair potential split by mass, in `step/maneuver.rs`, the one module
-  the owner expects to replace after visual results, so it stores no
-  state. Right of way is emergent from the mass split and the clamp.
-  Chase is the same rule with a different attractor. Slots are gone.
-  The movement unit landed 2026-09-03, verified green on `sim` by the
-  overseer (103 tests, clippy native and wasm32). Key files:
-  sim/src/step/maneuver.rs, sim/src/state/flight.rs,
-  sim/src/orbit/lambert.rs, sim/src/state/attractor.rs, DESIGN.md
-  Movement and combat.
-- Owner ruling 2026-09-03: no further tweak to the manoeuvring rule or the
-  flight planner until the owner has judged the motion visually; too many
-  fixed edge cases would be hard to judge. Observed and held, not fixed:
-  (1) a heavy row lags its flight's anchor by hundreds of meters on a
-  kilometre send and oscillates for minutes under the proportional pull; a
-  braking pull, aiming at the closing speed the manoeuvring limit can
-  arrest, is the candidate fix. (2) The planner's earliest-fitting arrival
-  maximises that lag; requiring the flight to be a few burn spans long is
-  the candidate fix. (3) Twenty ships settle at about half the spacing and
-  larger crowds pack tighter, since attraction sums over neighbours;
-  dividing the attractive term by the neighbour count is the candidate
-  fix. (4) Unarmed rows hold at the anchor rather than chase. (5) Tidal
-  acceleration at a five-minute rock period is half a frigate's
-  manoeuvring limit; negligible at nine hours.
+- Committed 09ef8f4 on 2026-09-03: the whole first wave, green on both
+  targets. Key files for the owner's review of the Sonnet units:
+  game/src/camera.rs, glyph_quad.rs, belt.rs, hud.rs, wheel.rs,
+  game/src/bin/look.rs.
+- In flight 2026-09-03 on the playable's Opus agent: five HUD defects
+  against DISPLAY.md as written (hover wedge, preview stacked on the placed
+  glyph, wheel overlapping the outer ring, uneven wheel glyphs, an opening
+  view that frames the region). Rock size, ring radii, glyph sizes and
+  colours untouched by the owner's word.
+- Held for the owner's play, in one list: heavy-row lag after a send and
+  its braking-pull candidate; the planner's earliest-fit arrival; crowd
+  packing past half the spacing; unarmed rows never chase; tidal drift at
+  short rock periods; repair at 15 HP/s beats a frigate's 12 DPS; a send
+  that cannot be planned is retried silently; rocks are sub-pixel at region
+  zoom; seat 0's red is the arc trail colour; the ring at a fixed screen
+  radius sits inside a rock at close zoom; readings the playable took
+  where the docs were silent (every rock draws its inner ring always; the
+  belt's centre is the mean of the rocks; a drag moves whole units off the
+  source run cheapest rows first, one edit pair per row; a radar streak is
+  velocity relative to the nearest rock over twenty seconds; `Mark.dim` is
+  orthogonal to `Fill`).
 
 ## Plan, in order
 
-1. The roster in `sim`, seeded from the table below, and in `game` the two
-   pure functions of the display language with tests: row to glyph, and a
-   ring's forces per seat to glyph placements.
-2. Rendering over a `Scene` interface, and a native-only `look` tool that
-   drives the offscreen Session over the three fixed scenes in DISPLAY.md
-   and writes screenshots.
-3. A fresh-eyes judgement of the screenshots by an agent that never saw the
-   code, then the owner's review. Changes go into DISPLAY.md before any sim
-   work.
-4. The headless sim per DESIGN.md's build order, `harness` crate with it.
-5. The Linear issue list, once step 3 has made the backlog concrete.
-
-## Roster seed
-
-The prototype's tuned numbers, a hypothesis for the harness. Moves into
-`sim` in plan step 1 and is deleted here then. Cost is metals/volatiles/
-energy; radar is twice sight unless stated; rate is per second.
-
-| row | cost | HP | accel | sight | weapons | other |
-|---|---|---|---|---|---|---|
-| constructor | 30/10/10 | 50 | 4 | 6 | build 3 | |
-| extractor | 40/0/10 | 120 | 0 | 3 | extract 2 | rate is the overseer's guess |
-| storage | 30/0/10 | 150 | 0 | 2 | | capacity 500 |
-| shipyard | 100/0/40 | 300 | 0 | 6 | build 15 | capacity 500, the overseer's guess |
-| scout | 5/10/0 | 15 | 10 | 20 | | radar 50 |
-| raider | 20/20/5 | 40 | 8 | 12 | damage 3 range 3 rate 4 falloff 0.5 | |
-| frigate | 80/10/30 | 150 | 2 | 8 | damage 6 range 6 rate 2 | plating 1 |
-| lancer | 40/5/40 | 60 | 3 | 5 | damage 20 range 14 rate 1 | radar 10 |
-
-Start: a reserve of one shipyard and one constructor, stockpile
-300/100/100. Band amplitudes and the slot phase step are unset.
-Rock caps: 0 to 10 per second per material, drawn by region.
+1. The owner plays; their judgement of feel and legibility unlocks the held
+   list above, each item a ruling then a unit.
+2. The scripted agent and `harness` as a binary of `sim`: replay-hash and
+   doubled-tick-rate checks, composition matrices; the repair-versus-fire
+   question goes there first.
+3. Display language for a send that cannot be planned.
+4. Map generation from seed with regional caps; fog in the display;
+   gamepad; the twelve-slot wheel level.
+5. The relay and multiplayer lockstep.
 
 ## Operational
 

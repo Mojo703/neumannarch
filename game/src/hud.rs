@@ -108,6 +108,15 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
     }
 }
 
+/// A ring's measures at `radius` points: marks are laid a widest glyph
+/// apart, so a glyph of any size class stands clear of its neighbours.
+fn geometry(radius: f32) -> Geometry {
+    Geometry {
+        radius,
+        glyph: 2.0 * glyph::HALF * glyph::WIDEST_SCALE,
+    }
+}
+
 /// The screen radius of a ring for `band`, in points.
 pub fn ring_radius(band: Band) -> f32 {
     match band {
@@ -132,13 +141,7 @@ fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: 
     };
     painter.circle_stroke(centre, radius, Stroke::new(stroke_width, stroke_colour));
 
-    let layout = Layout::of(
-        &ring.runs,
-        Geometry {
-            radius,
-            glyph: glyph::HALF * 2.0,
-        },
-    );
+    let layout = Layout::of(&ring.runs, geometry(radius));
     for placement in layout.placements() {
         let run = &ring.runs[placement.run];
         let mark = &run.marks[placement.mark];
@@ -237,6 +240,33 @@ fn radius_of(mass: MassClass) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run of `marks` marks, whose glyphs no test reads.
+    fn run(marks: usize) -> crate::scene::Run {
+        crate::scene::Run {
+            seat: probe_sim::SeatId(0),
+            marks: (0..marks)
+                .map(|_| crate::scene::Mark {
+                    glyph: crate::glyph::Glyph::of(&probe_sim::roster::Roster::shipped()[RowId(0)]),
+                    fill: crate::scene::Fill::Solid,
+                    dim: false,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn consecutive_marks_of_a_run_stand_a_widest_glyph_apart() {
+        let laid = Layout::of(&[run(2)], geometry(INNER_RADIUS));
+        let placed = laid.placements();
+
+        let apart = (placed[1].angle - placed[0].angle) * INNER_RADIUS;
+
+        assert!(
+            apart >= 2.0 * glyph::HALF * glyph::WIDEST_SCALE - 1e-4,
+            "marks {apart} points apart overlap the widest glyph"
+        );
+    }
 
     #[test]
     fn a_ring_radius_follows_its_band() {
