@@ -1,5 +1,6 @@
-//! The glyph of a row: DISPLAY.md's rules for frame, marks and size as one
-//! pure function.
+//! The glyph of a row: DISPLAY.md's frame, marks and size rules, drawn
+//! from one table of primitives that reproduces
+//! `art/concepts/hull-gallery.html`'s `icon` table exactly.
 
 use probe_sim::roster::{Kind, Row, Weapon};
 
@@ -28,6 +29,38 @@ const SIZE_SCALE: [f32; 3] = [0.85, 1.0, 1.2];
 /// size class stands clear of its neighbours.
 pub const WIDEST_SCALE: f32 = SIZE_SCALE[2];
 
+/// The sheet's reference cell's own centre, in its units:
+/// `art/concepts/hull-gallery.html`'s `viewBox="0 0 60 60"`.
+const CENTRE: (f32, f32) = (30.0, 30.0);
+
+/// The square frame's own half-width in the sheet's cell (`8` to `52`
+/// about [`CENTRE`]): the unit [`HALF`] itself measures, so a glyph's
+/// overall size keeps reading the same as it did before the sheet.
+const REFERENCE_HALF: f32 = 22.0;
+
+/// The frame outline's stroke, in cell units: `.own`'s `stroke-width`.
+pub const OUTLINE_WIDTH: f32 = 2.0;
+
+/// A mark's stroke, in cell units: `.ownmarkline`'s `stroke-width`.
+pub const MARK_WIDTH: f32 = 4.5;
+
+/// `point`, in the sheet's cell, as a fraction of [`REFERENCE_HALF`] from
+/// [`CENTRE`]: what the screen painter multiplies by its own half-width in
+/// points, and what the texture rasterizer reads directly as its own
+/// local unit.
+pub fn unit(point: (f32, f32)) -> (f32, f32) {
+    (
+        (point.0 - CENTRE.0) / REFERENCE_HALF,
+        (point.1 - CENTRE.1) / REFERENCE_HALF,
+    )
+}
+
+/// A length in the sheet's cell, as a fraction of [`REFERENCE_HALF`]: for
+/// a stroke width or a radius, which have no position to offset first.
+pub fn unit_length(length: f32) -> f32 {
+    length / REFERENCE_HALF
+}
+
 /// The outline: the row's kind.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Frame {
@@ -41,31 +74,29 @@ pub enum Frame {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Glyph {
     pub frame: Frame,
-    /// The row's earned marks, in the order [`marks_of`] states.
+    /// The row's earned marks, in the order [`marks_of`] states. Drawn
+    /// through [`primitives_of`], never by hand.
     pub marks: Vec<GlyphMark>,
     pub size: Size,
 }
 
-/// A mark inside or on the frame; each variant's place on the frame is
-/// fixed, never chosen by the caller. See [`GlyphMark::anchor`].
+/// A mark on the frame; what it draws, and where, is
+/// [`primitives_of`]'s alone to say.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GlyphMark {
-    /// Damage with range within the row's sight: a dot at the incircle's
-    /// top.
+    /// Damage with range within the row's sight.
     Dot,
-    /// Damage with range beyond the row's sight: a bar from the incircle's
-    /// top to the base.
+    /// Damage with range beyond the row's sight.
     Bar,
-    /// Build: a plus at the incircle's centre.
+    /// Build.
     Plus,
-    /// Extract: a chevron pointing down, touching the base.
+    /// Extract.
     Chevron,
-    /// Radar above [`RADAR_ABOVE_DEFAULT`] times sight: an arc over the
-    /// apex.
+    /// Radar above [`RADAR_ABOVE_DEFAULT`] times sight.
     Arc,
-    /// Plating above zero: a belt along the base.
+    /// Plating above zero.
     Belt,
-    /// Capacity above zero: a hollow ring at the incircle's centre.
+    /// Capacity above zero.
     Ring,
 }
 
@@ -78,6 +109,19 @@ pub enum Size {
     Large,
 }
 
+/// One drawn primitive of a glyph, in the sheet's cell, before its size
+/// class scales it: a filled dot (`.ownmark`), an open line
+/// (`.ownmarkline`), a hollow ring (`.ownmarkline`), or a hollow arc
+/// (`.ownmarkline`) over the top of its own circle, from its west point to
+/// its east point.
+#[derive(Clone, Debug)]
+pub enum Primitive {
+    Dot { at: (f32, f32), radius: f32 },
+    Line(Vec<(f32, f32)>),
+    Ring { at: (f32, f32), radius: f32 },
+    Arc { at: (f32, f32), radius: f32 },
+}
+
 impl Frame {
     fn of(kind: Kind) -> Frame {
         match kind {
@@ -86,19 +130,12 @@ impl Frame {
         }
     }
 
-    /// This frame's inscribed circle, in its own frame: x right, y down,
-    /// half-width one; `(centre, radius)`, the centre on the frame's own
-    /// axis. A square's incircle is the square itself, so its bottom sits
-    /// where the square's does.
-    pub fn incircle(&self) -> (f32, f32) {
+    /// This frame's outline in the sheet's cell, apex up for a triangle:
+    /// `art/concepts/hull-gallery.html`'s `TRI` and `SQ`.
+    pub fn points(&self) -> &'static [(f32, f32)] {
         match self {
-            Frame::Square => (0.0, 1.0),
-            // The incentre and inradius of the upward triangle apex
-            // (0, -1), base corners (±1, 1): sides 2, sqrt(5), sqrt(5).
-            Frame::Triangle => {
-                let leg = 5.0_f32.sqrt();
-                ((leg - 1.0) / (leg + 1.0), (leg - 1.0) / 2.0)
-            }
+            Frame::Triangle => &[(30.0, 6.0), (56.0, 52.0), (4.0, 52.0)],
+            Frame::Square => &[(8.0, 8.0), (52.0, 8.0), (52.0, 52.0), (8.0, 52.0)],
         }
     }
 }
@@ -145,20 +182,70 @@ impl GlyphMark {
             Weapon::Extract { .. } => GlyphMark::Chevron,
         }
     }
+}
 
-    /// This mark's anchor on `frame`, in the frame's own space: x right, y
-    /// down, half-width one, origin at the frame's bounding-box centre.
-    /// Every anchor but the arc's sits on `frame`'s own incircle, where the
-    /// frame has room for it; the arc alone stays above the apex.
-    pub fn anchor(&self, frame: &Frame) -> (f32, f32) {
-        let (centre, radius) = frame.incircle();
-        match self {
-            GlyphMark::Dot | GlyphMark::Bar => (0.0, centre - radius),
-            GlyphMark::Plus | GlyphMark::Ring => (0.0, centre),
-            GlyphMark::Chevron | GlyphMark::Belt => (0.0, centre + radius),
-            GlyphMark::Arc => (0.0, -1.0),
-        }
+/// Every primitive `marks` draws in the sheet's cell:
+/// `art/concepts/hull-gallery.html`'s `icon` table. A dot sits higher and
+/// smaller where a belt is also drawn, since the belt takes the room below
+/// it; a ring drawn around a plus is wider than one alone, and that plus
+/// sits at the ring's own centre rather than lower in the frame.
+pub fn primitives_of(marks: &[GlyphMark]) -> Vec<Primitive> {
+    let paired = marks.contains(&GlyphMark::Ring) && marks.contains(&GlyphMark::Plus);
+    let belted = marks.contains(&GlyphMark::Belt);
+    marks
+        .iter()
+        .flat_map(|mark| primitives_of_mark(mark, paired, belted))
+        .collect()
+}
+
+fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primitive> {
+    match mark {
+        GlyphMark::Dot if belted => vec![Primitive::Dot {
+            at: (30.0, 29.0),
+            radius: 7.0,
+        }],
+        GlyphMark::Dot => vec![Primitive::Dot {
+            at: (30.0, 34.0),
+            radius: 8.0,
+        }],
+        GlyphMark::Bar => vec![Primitive::Line(vec![(30.0, 14.0), (30.0, 48.0)])],
+        GlyphMark::Plus if paired => plus_lines((30.0, 30.0), 6.5),
+        GlyphMark::Plus => plus_lines((30.0, 38.0), 8.5),
+        GlyphMark::Chevron => vec![chevron_line((30.0, 32.0), 15.0)],
+        GlyphMark::Arc => vec![
+            Primitive::Arc {
+                at: (30.0, 42.0),
+                radius: 11.0,
+            },
+            Primitive::Dot {
+                at: (30.0, 43.0),
+                radius: 3.5,
+            },
+        ],
+        GlyphMark::Belt => vec![Primitive::Line(vec![(17.0, 45.0), (43.0, 45.0)])],
+        GlyphMark::Ring => vec![Primitive::Ring {
+            at: (30.0, 30.0),
+            radius: if paired { 15.0 } else { 13.0 },
+        }],
     }
+}
+
+/// A plus's two strokes, arm's length `arm` from centre `at`.
+fn plus_lines(at: (f32, f32), arm: f32) -> Vec<Primitive> {
+    vec![
+        Primitive::Line(vec![(at.0 - arm, at.1), (at.0 + arm, at.1)]),
+        Primitive::Line(vec![(at.0, at.1 - arm), (at.0, at.1 + arm)]),
+    ]
+}
+
+/// A chevron pointing down, half-width `a` from centre `at`:
+/// `M(x-a, y-0.7a) L(x, y+0.7a) L(x+a, y-0.7a)`.
+fn chevron_line(at: (f32, f32), a: f32) -> Primitive {
+    Primitive::Line(vec![
+        (at.0 - a, at.1 - a * 0.7),
+        (at.0, at.1 + a * 0.7),
+        (at.0 + a, at.1 - a * 0.7),
+    ])
 }
 
 impl Size {
@@ -182,34 +269,6 @@ impl Size {
             Size::Large => 2,
         }]
     }
-}
-
-/// A mark's geometry, as fractions of the glyph's own half-width alone,
-/// never of the frame's width at the mark's anchor, shared by the screen
-/// painter and the texture rasterizer so a mark places and sizes
-/// identically in both.
-pub mod geometry {
-    pub const DOT_RADIUS: f32 = 0.22;
-    pub const BAR_HALF_WIDTH: f32 = 0.16;
-    pub const PLUS_ARM: f32 = 0.34;
-    pub const PLUS_THICKNESS: f32 = 0.14;
-    pub const CHEVRON_HALF_WIDTH: f32 = 0.32;
-    pub const CHEVRON_HEIGHT: f32 = 0.30;
-    pub const CHEVRON_THICKNESS: f32 = 0.12;
-    pub const ARC_RADIUS: f32 = 0.30;
-    pub const ARC_THICKNESS: f32 = 0.13;
-    pub const ARC_HALF_ANGLE: f32 = 0.9;
-    pub const BELT_HALF_WIDTH: f32 = 0.7;
-    pub const BELT_THICKNESS: f32 = 0.12;
-    pub const RING_RADIUS: f32 = 0.32;
-    pub const RING_THICKNESS: f32 = 0.13;
-
-    /// The least a mark's stroke or thickness is ever painted at, in
-    /// points, so it does not vanish at the small size class.
-    pub const MIN_STROKE: f32 = 2.0;
-
-    /// The least a dot's radius is ever painted at, in points.
-    pub const MIN_DOT_RADIUS: f32 = 3.0;
 }
 
 #[cfg(test)]
@@ -355,18 +414,45 @@ mod tests {
     }
 
     #[test]
-    fn every_mark_but_the_arc_sits_off_the_triangles_apex() {
-        for mark in [
-            GlyphMark::Dot,
-            GlyphMark::Bar,
-            GlyphMark::Plus,
-            GlyphMark::Chevron,
-            GlyphMark::Belt,
-            GlyphMark::Ring,
-        ] {
-            let (_, y) = mark.anchor(&Frame::Triangle);
-            assert!(y > -1.0, "{mark:?} sits at the triangle's narrowest point");
-        }
-        assert_eq!(GlyphMark::Arc.anchor(&Frame::Triangle), (0.0, -1.0));
+    fn a_dot_beside_a_belt_sits_higher_and_smaller_than_alone() {
+        let alone = primitives_of(&[GlyphMark::Dot]);
+        let beside = primitives_of(&[GlyphMark::Dot, GlyphMark::Belt]);
+        let dot_at = |primitives: &[Primitive]| {
+            primitives
+                .iter()
+                .find_map(|primitive| match primitive {
+                    Primitive::Dot { at, radius } => Some((*at, *radius)),
+                    _ => None,
+                })
+                .expect("a dot")
+        };
+        assert_eq!(dot_at(&alone), ((30.0, 34.0), 8.0));
+        assert_eq!(dot_at(&beside), ((30.0, 29.0), 7.0));
+    }
+
+    #[test]
+    fn a_ring_around_a_plus_is_wider_than_alone_and_the_plus_shares_its_centre() {
+        let alone = primitives_of(&[GlyphMark::Ring]);
+        let paired = primitives_of(&[GlyphMark::Ring, GlyphMark::Plus]);
+        let ring_radius = |primitives: &[Primitive]| {
+            primitives
+                .iter()
+                .find_map(|primitive| match primitive {
+                    Primitive::Ring { radius, .. } => Some(*radius),
+                    _ => None,
+                })
+                .expect("a ring")
+        };
+        assert_eq!(ring_radius(&alone), 13.0);
+        assert_eq!(ring_radius(&paired), 15.0);
+
+        let plus_arm = paired
+            .iter()
+            .filter_map(|primitive| match primitive {
+                Primitive::Line(points) if points.len() == 2 => Some(points[0]),
+                _ => None,
+            })
+            .any(|(x, y)| (x, y) == (30.0 - 6.5, 30.0));
+        assert!(plus_arm, "the paired plus does not share the ring's centre");
     }
 }

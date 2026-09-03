@@ -114,7 +114,7 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
     }
     for opening in &filled.openings {
         for _ in 0..opening.count {
-            next.add_frame(Frame::new(opening.post, opening.row, 0.0));
+            next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.tick()));
         }
     }
     for cancellation in &filled.cancellations {
@@ -140,7 +140,10 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
             seat.stockpile_mut().spend(spend.materials);
         }
         if let Some(open) = next.frame_mut(spend.frame) {
-            open.build(spend.materials.total());
+            match spend.materials.total() > 0.0 {
+                true => open.build(spend.materials.total(), snap.tick()),
+                false => open.short_of(spend.short),
+            }
         }
         if spend.completed {
             spawn(next, frame.post(), frame.row());
@@ -291,16 +294,18 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::TICKS_PER_SECOND;
     use crate::belt::Belt;
     use crate::ids::{RockId, RowId, TeamId};
+    use crate::materials::Material;
     use crate::place::{Band, Place, Post};
     use crate::roster::Roster;
-    use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
+    use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, SHIPYARD, STORAGE};
     use crate::setup::Setup;
+    use crate::state::view::View;
     use crate::state::{Command, Flight, MAX_WANT, Seat};
     use crate::step::fire::Hit;
     use crate::time::Tick;
+    use crate::{Materials, TICKS_PER_SECOND};
 
     /// The clock a test match ends at: fifteen minutes.
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
@@ -414,6 +419,42 @@ mod tests {
             state[SeatId(0)].stockpile().capacity(),
             state[SeatId(0)].base_capacity() + state[SHIPYARD].capacity
         );
+    }
+
+    #[test]
+    fn a_frame_that_spends_nothing_for_a_second_names_the_material_it_wants() {
+        let stocked = |stock| {
+            State::new(
+                CLOCK,
+                0,
+                Belt::GRAVITY,
+                Roster::shipped(),
+                Belt::fixed(Belt::GRAVITY),
+                vec![Seat::new(TeamId(0), stock, BTreeMap::from([(SHIPYARD, 1)]))],
+            )
+        };
+        // A lancer costs all three materials and takes several seconds to
+        // build, so its frame is still open a second in.
+        let a_second_in = |stock| {
+            let state = tick(stocked(stock), &[want(0, inner(0), SHIPYARD, 1)]);
+            let state = tick(state, &[want(0, inner(0), LANCER, 1)]);
+            let state = run(state, TICKS_PER_SECOND as u64 + 1);
+            View::of(&state, SeatId(0), &Shots::default())
+                .compositions
+                .iter()
+                .flat_map(|composition| &composition.rows)
+                .find(|wanted| wanted.row == LANCER)
+                .and_then(|wanted| wanted.frames.first().copied())
+                .expect("the lancer's frame is open")
+        };
+
+        let short = a_second_in(Materials::new(300.0, 0.0, 300.0));
+        let fed = a_second_in(Materials::new(300.0, 300.0, 300.0));
+
+        assert_eq!(short.starved_of, Some(Material::Volatiles));
+        assert_eq!(short.progress, 0.0, "a starved frame does no work");
+        assert_eq!(fed.starved_of, None, "a frame that spends names nothing");
+        assert!(fed.progress > 0.0);
     }
 
     #[test]

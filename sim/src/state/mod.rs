@@ -10,6 +10,7 @@ pub use command::{
 pub use entity::{Entity, Motion};
 pub use flight::{Burn, Flight};
 pub use frame::Frame;
+pub use radar::Radar;
 pub use ready::Ready;
 pub use rock::Rock;
 pub use seat::Seat;
@@ -26,6 +27,14 @@ use crate::place::{Place, Post};
 use crate::roster::{Roster, Row};
 use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick};
+
+/// How many of one row a post has: those at its place, and those flying
+/// in to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Held {
+    pub present: u32,
+    pub flying: u32,
+}
 
 /// Everything the match is, at one tick. Equal and hashed field by field,
 /// so the desync hash covers every field without a hand edit. Every
@@ -172,13 +181,25 @@ impl State {
     /// How many of `row` the post's seat has at the post's place, in flight
     /// or holding.
     pub fn count(&self, post: Post, row: RowId) -> u32 {
-        let mine = self
-            .entities_at(post.place)
-            .filter(|entity| entity.seat() == post.seat && entity.row() == row)
-            .count();
+        let held = self.holding(post, row);
+        held.present + held.flying
+    }
+
+    /// How many of `row` the post's seat holds at the post's place, split
+    /// into those there and those flying in. The one count of a post's
+    /// row; [`State::count`] is their sum.
+    pub fn holding(&self, post: Post, row: RowId) -> Held {
+        let mine = || {
+            self.entities_at(post.place)
+                .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
+        };
         // Ids are `u32` and never reused, so fewer than `u32::MAX` entities
         // live; only an `EntityId`-keyed collection could say so in its type.
-        u32::try_from(mine).unwrap_or(u32::MAX)
+        let counted = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
+        Held {
+            present: counted(mine().filter(|entity| !entity.is_flying()).count()),
+            flying: counted(mine().filter(|entity| entity.is_flying()).count()),
+        }
     }
 
     /// `rock`'s body at the current tick.
@@ -396,6 +417,7 @@ mod entity;
 mod flight;
 mod frame;
 pub mod hash;
+mod radar;
 mod ready;
 mod rock;
 mod seat;

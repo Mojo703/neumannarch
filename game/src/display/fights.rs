@@ -120,7 +120,8 @@ fn totals(view: &View) -> BTreeMap<(Place, SeatId), f64> {
 mod tests {
     use probe_sim::belt::Belt;
     use probe_sim::orbit::Body;
-    use probe_sim::state::view::{Exchange, Seen};
+    use probe_sim::state::view::Seen;
+    use probe_sim::step::fire::Exchange;
     use probe_sim::{Band, EntityId, Materials, RockId, RowId, Stockpile, Vec3};
 
     use super::*;
@@ -151,6 +152,7 @@ mod tests {
                 hp,
                 flying: false,
                 home: Some(PLACE),
+                from: None,
             }],
             blips: Vec::new(),
             exchanges: match shooting {

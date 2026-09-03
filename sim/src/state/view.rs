@@ -3,31 +3,18 @@
 use std::collections::BTreeMap;
 
 use super::State;
+use super::flight::Flight;
+use super::radar::Radar;
 use super::sight::Sight;
 use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
-use crate::materials::{Materials, Stockpile};
+use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
 use crate::place::{Place, Post};
+use crate::roster::MassClass;
 use crate::state::standings::Standings;
-use crate::step::fire::Shots;
+use crate::step::fire::{Exchange, Shots};
 use crate::time::Tick;
-
-/// The mass, on the roster's scale, below which radar reports a contact as
-/// light. A hypothesis the display confirms or kills.
-const LIGHT_MASS: f64 = 30.0;
-
-/// The mass below which radar reports a contact as medium, and at or above
-/// which it reports heavy. A hypothesis.
-const HEAVY_MASS: f64 = 100.0;
-
-/// How much a radar contact weighs, as much as radar can tell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MassClass {
-    Light,
-    Medium,
-    Heavy,
-}
 
 /// One entity the seat sees exactly.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +30,9 @@ pub struct Seen {
     /// `None` for a flying entity of another team, whose destination sight
     /// does not give; a holding entity's band its exact position does.
     pub home: Option<Place>,
+    /// The place a flying entity of the seat's team left. `None` for one
+    /// that is not flying and for another team's flier.
+    pub from: Option<Place>,
 }
 
 /// One radar contact: inside a sensor's radar range but not its sight.
@@ -50,18 +40,6 @@ pub struct Seen {
 pub struct Blip {
     pub body: Body,
     pub mass: MassClass,
-}
-
-/// The shots at one place, by or on one seat, in one tick. A fight arc
-/// starts and refreshes on these.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Exchange {
-    pub place: Place,
-    pub seat: SeatId,
-    /// A weapon of the seat's fired from the place.
-    pub fired: bool,
-    /// A shot landed on one of the seat's at the place.
-    pub landed: bool,
 }
 
 /// One rock, which every seat always knows.
@@ -75,6 +53,16 @@ pub struct Terrain {
     pub radius: f64,
 }
 
+/// One open frame of one wanted row.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Building {
+    /// Work done, as a fraction of the row's cost.
+    pub progress: f64,
+    /// The material the frame has spent nothing on this second for want
+    /// of, where there is one.
+    pub starved_of: Option<Material>,
+}
+
 /// One row of one of the seat's own compositions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wanted {
@@ -84,8 +72,8 @@ pub struct Wanted {
     pub present: u32,
     /// Units flying in to the place.
     pub flying: u32,
-    /// Each open frame's work done, as a fraction of its cost.
-    pub frames: Vec<f64>,
+    /// Each open frame, in the order opened.
+    pub frames: Vec<Building>,
 }
 
 /// One of the seat's own compositions.
@@ -142,8 +130,8 @@ impl View {
                 .map_or_else(BTreeMap::new, |seat| seat.reserve().clone()),
             compositions: compositions(state, seat),
             seen: seen(state, &sight, state.seat(seat).map(|seat| seat.team())),
-            blips: blips(state, seat, &sight, &sweep),
-            exchanges: exchanges(state, &sight, shots),
+            blips: blips(state, &Radar::beyond(state, seat, &sweep, &sight)),
+            exchanges: shots.exchanges(state, &sight),
             terrain: terrain(state),
             standings: Some(state.standings()).filter(Standings::over),
         }
@@ -169,19 +157,6 @@ impl View {
     }
 }
 
-impl MassClass {
-    /// The class radar reports for `mass`, on the roster's scale.
-    fn of(mass: f64) -> MassClass {
-        if mass < LIGHT_MASS {
-            MassClass::Light
-        } else if mass < HEAVY_MASS {
-            MassClass::Medium
-        } else {
-            MassClass::Heavy
-        }
-    }
-}
-
 /// The seat's own compositions, in place order: the wants, what is there,
 /// what is flying in, and the frames open.
 fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
@@ -200,26 +175,18 @@ fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
 
 /// One wanted row of one composition.
 fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
-    let mine = || {
-        state
-            .entities_at(post.place)
-            .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
-    };
+    let held = state.holding(post, row);
     Wanted {
         row,
         want,
-        present: mine().filter(|entity| !entity.is_flying()).count() as u32,
-        flying: mine().filter(|entity| entity.is_flying()).count() as u32,
+        present: held.present,
+        flying: held.flying,
         frames: state
             .frames_at(post)
             .filter(|frame| frame.row() == row)
-            .map(|frame| {
-                let cost = state[row].cost.total();
-                if cost > 0.0 {
-                    (frame.progress() / cost).clamp(0.0, 1.0)
-                } else {
-                    1.0
-                }
+            .map(|frame| Building {
+                progress: frame.fraction(state[row].cost.total()),
+                starved_of: frame.starved_material(state.tick()),
             })
             .collect(),
     }
@@ -231,78 +198,35 @@ fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
     sight
         .iter()
         .filter_map(|id| state.entity(id))
-        .map(|entity| Seen {
-            entity: entity.id(),
-            seat: entity.seat(),
-            row: entity.row(),
-            body: state.body_of(entity),
-            hp: entity.hp(),
-            flying: entity.is_flying(),
-            home: (!entity.is_flying() || team == Some(state[entity.seat()].team()))
-                .then(|| entity.home()),
+        .map(|entity| {
+            let own = team == Some(state[entity.seat()].team());
+            Seen {
+                entity: entity.id(),
+                seat: entity.seat(),
+                row: entity.row(),
+                body: state.body_of(entity),
+                hp: entity.hp(),
+                flying: entity.is_flying(),
+                home: (!entity.is_flying() || own).then(|| entity.home()),
+                from: entity
+                    .flight()
+                    .filter(|_| own)
+                    .and_then(|id| state.flight(id))
+                    .map(Flight::source),
+            }
         })
         .collect()
 }
 
-/// The tick's shots at the places the seat sees: one entry per place and
-/// seat a seen entity fired from or was hit at.
-fn exchanges(state: &State, sight: &Sight, shots: &Shots) -> Vec<Exchange> {
-    let mut found: BTreeMap<(Place, SeatId), (bool, bool)> = BTreeMap::new();
-    let mut note = |id: EntityId, landed: bool| {
-        if !sight.sees(id) {
-            return;
-        }
-        let Some(entity) = state.entity(id) else {
-            return;
-        };
-        let at = found
-            .entry((entity.home(), entity.seat()))
-            .or_insert((false, false));
-        match landed {
-            true => at.1 = true,
-            false => at.0 = true,
-        }
-    };
-    for hit in &shots.hits {
-        note(hit.shooter, false);
-        note(hit.target, true);
-    }
-    found
-        .into_iter()
-        .map(|((place, seat), (fired, landed))| Exchange {
-            place,
-            seat,
-            fired,
-            landed,
-        })
-        .collect()
-}
-
-/// Every entity inside the radar range of one of the seat's team's
-/// entities but outside its sight, in id order.
-fn blips(
-    state: &State,
-    seat: SeatId,
-    sight: &Sight,
-    sweep: &crate::state::sweep::Sweep,
-) -> Vec<Blip> {
-    let Some(team) = state.seat(seat).map(|seat| seat.team()) else {
-        return Vec::new();
-    };
-    let mut found: Vec<EntityId> = state
-        .entities()
-        .filter(|sensor| state[sensor.seat()].team() == team)
-        .flat_map(|sensor| sweep.within(state.body_of(sensor).pos, state[sensor.row()].radar.0))
-        .filter(|id| !sight.sees(*id))
-        .collect();
-    found.sort_unstable();
-    found.dedup();
-    found
-        .into_iter()
-        .filter_map(|id| state.entity(id))
+/// Every radar contact, in id order: a body and a mass class, and nothing
+/// that would say whose it is.
+fn blips(state: &State, radar: &Radar) -> Vec<Blip> {
+    radar
+        .iter()
+        .filter_map(|contact| state.entity(contact))
         .map(|entity| Blip {
             body: state.body_of(entity),
-            mass: MassClass::of(state[entity.row()].mass.0),
+            mass: state[entity.row()].mass_class(),
         })
         .collect()
 }

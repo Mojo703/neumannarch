@@ -15,6 +15,12 @@ pub use wire::{Malformed, Wire};
 /// service holds it.
 pub const DEFAULT_PORT: u16 = 4747;
 
+/// The version of this protocol. A room takes a join carrying this number
+/// and refuses every other by name, so two builds that would read each
+/// other's bytes differently never share a match. It rises with any change
+/// to a value below.
+pub const VERSION: u32 = 1;
+
 /// The largest message the wire carries, in bytes. Both ends read under
 /// this bound, so neither sends what the other will not read; the biggest
 /// message a lobby or a match sends is a lobby or a setup, both far under

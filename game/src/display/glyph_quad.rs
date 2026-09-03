@@ -1,5 +1,7 @@
 //! The ship glyph: a mesh value per `(Glyph, SeatId)`, its own texture
 //! rasterized in the seat's colour with a white outline, for the belt.
+//! Frame and marks are the sheet's own primitives (`glyph::Frame::points`,
+//! `glyph::primitives_of`), the same table the screen painter reads.
 
 use mirage_engine::egui::Color32;
 use mirage_engine::math::UVec2;
@@ -8,13 +10,10 @@ use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
 use probe_sim::roster::Roster;
 use probe_sim::{MAX_SEATS, SeatId};
 
-use crate::display::glyph::{Frame, Glyph, GlyphMark, Size, geometry};
+use crate::display::glyph::{self, Frame, Glyph, Primitive, Size};
 
 /// A glyph texture's side, in texels.
 pub const CELL_PIXELS: u32 = 48;
-
-/// The band counted as outline, as a fraction of the shape's own scale.
-const OUTLINE_FRACTION: f32 = 0.18;
 
 /// The seat palette: one colour per seat a match can hold, indexed by
 /// [`SeatId`].
@@ -87,12 +86,30 @@ enum Coverage {
 /// `glyph` rasterized at [`CELL_PIXELS`] square: the frame filled in
 /// `colour` with a white outline and white marks, nearest-sampled.
 pub fn rasterize(glyph: &Glyph, colour: Color) -> TextureData {
+    rasterize_primitives(
+        &glyph.frame,
+        &glyph::primitives_of(&glyph.marks),
+        &glyph.size,
+        colour,
+    )
+}
+
+/// `frame` and `primitives`, at `size`'s class, rasterized at
+/// [`CELL_PIXELS`] square exactly as [`rasterize`] would from the glyph
+/// they belong to; the seam a test drives with the sheet's own primitives
+/// to check they agree.
+fn rasterize_primitives(
+    frame: &Frame,
+    primitives: &[Primitive],
+    size: &Size,
+    colour: Color,
+) -> TextureData {
     let side = CELL_PIXELS;
     let mut pixels = vec![0u8; 4 * (side * side) as usize];
     for row in 0..side {
         for col in 0..side {
             let (x, y) = to_local(col, row, side);
-            let rgba = match coverage(glyph, x, y) {
+            let rgba = match coverage(frame, primitives, size, x, y) {
                 Coverage::Outside => [0, 0, 0, 0],
                 Coverage::Outline | Coverage::Mark => encode(Color::WHITE),
                 Coverage::Fill => encode(colour),
@@ -111,82 +128,85 @@ fn to_local(col: u32, row: u32, side: u32) -> (f32, f32) {
     (to(col), to(row))
 }
 
-/// What point `(x, y)` of `glyph`'s cell paints.
-fn coverage(glyph: &Glyph, x: f32, y: f32) -> Coverage {
+/// What point `(x, y)` of the cell paints, for `frame` and `primitives` at
+/// `size`'s class.
+fn coverage(frame: &Frame, primitives: &[Primitive], size: &Size, x: f32, y: f32) -> Coverage {
     // Shrinks the point toward the centre before testing the unit shape, so
     // a smaller size class draws a smaller frame within the same cell.
-    let extent = cell_fraction(&glyph.size);
+    let extent = cell_fraction(size);
     let (x, y) = (x / extent, y / extent);
     // Checked before the frame itself: the arc mark reads over the apex,
     // outside the frame's own silhouette.
-    if marks_cover(&glyph.marks, &glyph.frame, x, y) {
+    if primitives
+        .iter()
+        .any(|primitive| primitive_covers(primitive, x, y))
+    {
         return Coverage::Mark;
     }
-    let depth = frame_depth(&glyph.frame, x, y);
+    let depth = frame_depth(frame, x, y);
     if depth < 0.0 {
         Coverage::Outside
-    } else if depth < OUTLINE_FRACTION {
+    } else if depth < glyph::unit_length(glyph::OUTLINE_WIDTH) {
         Coverage::Outline
     } else {
         Coverage::Fill
     }
 }
 
-/// The distance from `(x, y)` to the nearest edge of `frame`, positive
-/// inside, negative outside.
+/// The distance from `(x, y)` to the nearest edge of `frame`'s outline,
+/// positive inside, negative outside.
 fn frame_depth(frame: &Frame, x: f32, y: f32) -> f32 {
-    match frame {
-        Frame::Square => 1.0 - x.abs().max(y.abs()),
-        // An upward triangle, apex at (0, -1), base at y = 1: the distance
-        // to whichever of its three edges is nearest.
-        Frame::Triangle => {
-            let left = x + (y + 1.0) / 2.0;
-            let right = (y + 1.0) / 2.0 - x;
-            let base = 1.0 - y;
-            left.min(right).min(base)
-        }
-    }
+    let points: Vec<(f32, f32)> = frame
+        .points()
+        .iter()
+        .map(|&point| glyph::unit(point))
+        .collect();
+    polygon_depth(&points, x, y)
 }
 
-/// Whether any of `marks`, each at its own place on `frame`, covers `(x, y)`.
-fn marks_cover(marks: &[GlyphMark], frame: &Frame, x: f32, y: f32) -> bool {
-    marks.iter().any(|mark| {
-        let (ax, ay) = mark.anchor(frame);
-        mark_covers(mark, frame, x - ax, y - ay)
-    })
+/// The distance from `(x, y)` to the nearest edge of the closed convex
+/// polygon `points`, listed apex or corner first as [`Frame::points`]
+/// does; positive inside, negative outside.
+fn polygon_depth(points: &[(f32, f32)], x: f32, y: f32) -> f32 {
+    let count = points.len();
+    (0..count)
+        .map(|index| {
+            let (ax, ay) = points[index];
+            let (bx, by) = points[(index + 1) % count];
+            let (edge_x, edge_y) = (bx - ax, by - ay);
+            let (rel_x, rel_y) = (x - ax, y - ay);
+            let cross = edge_x * rel_y - edge_y * rel_x;
+            cross / edge_x.hypot(edge_y)
+        })
+        .fold(f32::INFINITY, f32::min)
 }
 
-/// Whether `mark`, anchored at the origin, covers the point `(x, y)` offset
-/// from its anchor.
-fn mark_covers(mark: &GlyphMark, frame: &Frame, x: f32, y: f32) -> bool {
-    match mark {
-        GlyphMark::Dot => x.hypot(y) <= geometry::DOT_RADIUS,
-        // From the anchor, the incircle's top, to the base, its own
-        // diameter further down.
-        GlyphMark::Bar => {
-            let height = 2.0 * frame.incircle().1;
-            x.abs() <= geometry::BAR_HALF_WIDTH && (0.0..=height).contains(&y)
+/// Whether `primitive` covers the point `(x, y)`.
+fn primitive_covers(primitive: &Primitive, x: f32, y: f32) -> bool {
+    let half_stroke = glyph::unit_length(glyph::MARK_WIDTH) / 2.0;
+    match primitive {
+        Primitive::Dot { at, radius } => {
+            let (ax, ay) = glyph::unit(*at);
+            (x - ax).hypot(y - ay) <= glyph::unit_length(*radius)
         }
-        GlyphMark::Plus => {
-            (x.abs() <= geometry::PLUS_THICKNESS && y.abs() <= geometry::PLUS_ARM)
-                || (x.abs() <= geometry::PLUS_ARM && y.abs() <= geometry::PLUS_THICKNESS)
+        Primitive::Line(points) => {
+            let unit_points: Vec<(f32, f32)> =
+                points.iter().map(|&point| glyph::unit(point)).collect();
+            unit_points
+                .windows(2)
+                .any(|pair| distance_to_segment((x, y), pair[0], pair[1]) <= half_stroke)
         }
-        GlyphMark::Chevron => {
-            let (span, rise) = (geometry::CHEVRON_HALF_WIDTH, geometry::CHEVRON_HEIGHT);
-            let near_upper = distance_to_segment((x, y), (-span, -rise), (0.0, 0.0));
-            let near_lower = distance_to_segment((x, y), (0.0, 0.0), (span, -rise));
-            near_upper.min(near_lower) <= geometry::CHEVRON_THICKNESS
+        Primitive::Ring { at, radius } => {
+            let (ax, ay) = glyph::unit(*at);
+            ((x - ax).hypot(y - ay) - glyph::unit_length(*radius)).abs() <= half_stroke
         }
-        GlyphMark::Arc => {
-            let half_angle = geometry::ARC_HALF_ANGLE;
-            let angle = x.atan2(-y);
-            let on_ring = (x.hypot(y) - geometry::ARC_RADIUS).abs() <= geometry::ARC_THICKNESS;
-            on_ring && angle.abs() <= half_angle
+        Primitive::Arc { at, radius } => {
+            let (ax, ay) = glyph::unit(*at);
+            let (dx, dy) = (x - ax, y - ay);
+            let on_ring = (dx.hypot(dy) - glyph::unit_length(*radius)).abs() <= half_stroke;
+            // `0` is straight up, matching the screen painter's own arc.
+            on_ring && dx.atan2(-dy).abs() <= core::f32::consts::FRAC_PI_2
         }
-        GlyphMark::Belt => {
-            x.abs() <= geometry::BELT_HALF_WIDTH && y.abs() <= geometry::BELT_THICKNESS
-        }
-        GlyphMark::Ring => (x.hypot(y) - geometry::RING_RADIUS).abs() <= geometry::RING_THICKNESS,
     }
 }
 
@@ -218,15 +238,85 @@ mod tests {
 
     use super::*;
 
+    /// The most texels the rasterised cell of a shipped row may differ
+    /// from the sheet's own drawing of it, at the same size: zero, since
+    /// both read the identical, deterministic primitive table.
+    const MAX_SHEET_DIFFERENCE: usize = 0;
+
     /// The least texels a row's marks must change in its cell at the small
     /// size class, so a mark reads there and not only at medium or large.
     const MIN_MARK_TEXELS: usize = 20;
+
+    /// The least texels a bare frame (no marks) must fill in its own
+    /// colour, so the frame's own coverage — not only its marks — is
+    /// checked, independent of whatever `frame_depth` computes.
+    const MIN_FILL_TEXELS: usize = 100;
+
+    /// The least white texels a bare frame (no marks) must carry as its
+    /// outline, by the same independent check.
+    const MIN_OUTLINE_TEXELS: usize = 20;
 
     fn glyphs() -> Vec<Glyph> {
         Roster::shipped()
             .iter()
             .map(|(_, row)| Glyph::of(row))
             .collect()
+    }
+
+    /// `name`'s primitives transcribed straight from
+    /// `art/concepts/hull-gallery.html`'s `icon` table, independent of
+    /// `glyph::primitives_of`, so the sheet's-drawing test is not
+    /// circular.
+    fn sheet_primitives(name: &str) -> Vec<Primitive> {
+        let plus = |at: (f32, f32), arm: f32| {
+            vec![
+                Primitive::Line(vec![(at.0 - arm, at.1), (at.0 + arm, at.1)]),
+                Primitive::Line(vec![(at.0, at.1 - arm), (at.0, at.1 + arm)]),
+            ]
+        };
+        match name {
+            "constructor" => plus((30.0, 38.0), 8.5),
+            "extractor" => vec![Primitive::Line(vec![
+                (30.0 - 15.0, 32.0 - 15.0 * 0.7),
+                (30.0, 32.0 + 15.0 * 0.7),
+                (30.0 + 15.0, 32.0 - 15.0 * 0.7),
+            ])],
+            "storage" => vec![Primitive::Ring {
+                at: (30.0, 30.0),
+                radius: 13.0,
+            }],
+            "shipyard" => {
+                let mut primitives = vec![Primitive::Ring {
+                    at: (30.0, 30.0),
+                    radius: 15.0,
+                }];
+                primitives.extend(plus((30.0, 30.0), 6.5));
+                primitives
+            }
+            "scout" => vec![
+                Primitive::Arc {
+                    at: (30.0, 42.0),
+                    radius: 11.0,
+                },
+                Primitive::Dot {
+                    at: (30.0, 43.0),
+                    radius: 3.5,
+                },
+            ],
+            "raider" => vec![Primitive::Dot {
+                at: (30.0, 34.0),
+                radius: 8.0,
+            }],
+            "frigate" => vec![
+                Primitive::Dot {
+                    at: (30.0, 29.0),
+                    radius: 7.0,
+                },
+                Primitive::Line(vec![(17.0, 45.0), (43.0, 45.0)]),
+            ],
+            "lancer" => vec![Primitive::Line(vec![(30.0, 14.0), (30.0, 48.0)])],
+            _ => panic!("no sheet drawing for {name}"),
+        }
     }
 
     #[test]
@@ -252,6 +342,42 @@ mod tests {
                 .chunks_exact(4)
                 .any(|texel| texel == [255, 255, 255, 255]);
             assert!(has_white, "{glyph:?} has no white outline pixel");
+        }
+    }
+
+    /// A bare frame (no marks, so every white texel is the outline, not a
+    /// mark) rasterises to a filled body in its own colour and a white
+    /// outline around it — checked by counting the two colours in the
+    /// output directly, never by calling `frame_depth` or `polygon_depth`.
+    #[test]
+    fn every_shipped_rows_bare_frame_fills_and_outlines() {
+        let colour = Color::rgb(0.1, 0.2, 0.9);
+        let fill_texel = encode(colour);
+        for glyph in glyphs() {
+            let bare = Glyph {
+                marks: Vec::new(),
+                ..glyph
+            };
+            let pixels = rasterize(&bare, colour);
+            let pixels = pixels.pixels();
+            let fill = pixels
+                .chunks_exact(4)
+                .filter(|texel| *texel == fill_texel)
+                .count();
+            let outline = pixels
+                .chunks_exact(4)
+                .filter(|texel| *texel == [255, 255, 255, 255])
+                .count();
+            assert!(
+                fill >= MIN_FILL_TEXELS,
+                "{:?}'s bare frame filled only {fill} texels",
+                bare.frame
+            );
+            assert!(
+                outline >= MIN_OUTLINE_TEXELS,
+                "{:?}'s bare frame outlined only {outline} texels",
+                bare.frame
+            );
         }
     }
 
@@ -285,6 +411,35 @@ mod tests {
                 "{row}'s small cell changed only {changed} texels for its marks",
                 row = row.name,
             );
+        }
+    }
+
+    #[test]
+    fn every_shipped_rows_rasterised_cell_matches_the_sheets_drawing() {
+        for (_, row) in Roster::shipped().iter() {
+            let glyph = Glyph::of(row);
+            let sheet = sheet_primitives(row.name);
+            for size in [Size::Small, Size::Medium, Size::Large] {
+                let ours = rasterize_primitives(
+                    &glyph.frame,
+                    &glyph::primitives_of(&glyph.marks),
+                    &size,
+                    seat_colour(SeatId(0)),
+                );
+                let theirs =
+                    rasterize_primitives(&glyph.frame, &sheet, &size, seat_colour(SeatId(0)));
+                let diff = ours
+                    .pixels()
+                    .chunks_exact(4)
+                    .zip(theirs.pixels().chunks_exact(4))
+                    .filter(|(a, b)| a != b)
+                    .count();
+                assert!(
+                    diff == MAX_SHEET_DIFFERENCE,
+                    "{}'s {size:?} cell differs from the sheet's drawing by {diff} texels",
+                    row.name,
+                );
+            }
         }
     }
 }

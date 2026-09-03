@@ -216,13 +216,16 @@ impl Machine {
                 self.desynced = Some(tick);
                 false
             }
-            // The room's lobby phase is over once a match is running.
-            Message::Join
+            // The room's lobby phase is over once a match is running, and
+            // a rematch is asked for from the results.
+            Message::Join { .. }
             | Message::Welcome { .. }
             | Message::Edit(_)
             | Message::Lobby(_)
             | Message::Refused(_)
             | Message::Start(_)
+            | Message::Rematch
+            | Message::Removed
             | Message::Leave => false,
         }
     }

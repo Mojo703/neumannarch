@@ -4,6 +4,7 @@ use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
 use probe_sim::{SeatId, Tick};
 
 use crate::display::glyph_quad::seat_color32;
+use crate::screens::control::{Controls, Rule};
 use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 
@@ -55,7 +56,10 @@ impl Held {
                     middle + Vec2::new(0.0, panel::HEADING_SIZE * 3.0),
                     Vec2::new(WIDTH, panel::ROW_HEIGHT),
                 );
-                panel.action(leave, "Leave", true).then_some(Step::Title)
+                let mut controls = Controls::over(panel);
+                let left = controls.action(leave, "Leave", &Rule::Allows);
+                controls.finish();
+                left.then_some(Step::Title)
             }
         }
     }

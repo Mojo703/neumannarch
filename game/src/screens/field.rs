@@ -1,22 +1,33 @@
-//! The one element the player types into, painted and hit-tested by hand
-//! like every other control.
+//! The line a value control is typed into: the text it holds, and what one
+//! frame typed.
 
-use mirage_engine::egui::{self, Pos2, Rect};
-
-use crate::screens::panel::{self, Panel};
+use mirage_engine::egui;
 
 /// The most characters an address holds. An address is a host and a port;
 /// anything longer is not one, and the field refuses it rather than the
 /// socket.
 pub const MAX_ADDRESS: usize = 64;
 
+/// The most digits a seed holds, which is every value a `u64` takes.
+pub const MAX_SEED: usize = 20;
+
 /// The caret, drawn after the text while the field holds the focus. The
 /// screens are monospaced, so a block after the text needs no measuring.
 const CARET: char = '_';
 
+/// What a field takes, and how much of it.
+#[derive(Clone, Copy)]
+pub enum Allow {
+    /// Any printable character, up to this many.
+    Text(usize),
+    /// Decimal digits, up to this many.
+    Digits(usize),
+}
+
 /// A line of text the player types.
 pub struct Field {
     text: String,
+    allow: Allow,
     /// Whether what is typed lands here.
     focused: bool,
 }
@@ -32,54 +43,81 @@ pub struct Typed {
 }
 
 impl Field {
-    /// A field holding `text`, unfocused.
-    pub fn holding(text: &str) -> Field {
+    /// A field holding `text`, unfocused, taking what `allow` names.
+    pub fn holding(text: &str, allow: Allow) -> Field {
         Field {
             text: text.to_string(),
+            allow,
             focused: false,
         }
-    }
-
-    /// Paints the field over `rect` and takes what `typed` holds while it
-    /// has the focus. True on the frame the line was entered.
-    ///
-    /// A click takes the focus where it lands and gives it up where it does
-    /// not, so one click both aims and answers.
-    pub fn frame(&mut self, panel: &Panel<'_>, rect: Rect, typed: &Typed) -> bool {
-        if panel.clicked() {
-            self.focused = panel.picked(rect);
-        }
-        if self.focused {
-            for _ in 0..typed.deleted {
-                self.text.pop();
-            }
-            for typed in typed.text.chars().filter(|typed| !typed.is_control()) {
-                if self.text.chars().count() < MAX_ADDRESS {
-                    self.text.push(typed);
-                }
-            }
-        }
-        panel.outline(rect);
-        panel.label(
-            &match self.focused {
-                true => format!("{}{CARET}", self.text),
-                false => self.text.clone(),
-            },
-            Pos2::new(rect.left() + panel::ROW_HEIGHT / 2.0, rect.center().y),
-            panel::INK,
-        );
-        self.focused && typed.entered
     }
 
     /// What the player has typed.
     pub fn text(&self) -> &str {
         &self.text
     }
+
+    /// Shows `text` instead of what it holds, which is how a field over a
+    /// value the room owns follows that value. It does nothing while the
+    /// field has the focus, so it never overwrites what is being typed.
+    pub fn shows(&mut self, text: &str) {
+        if !self.focused {
+            self.text = text.to_string();
+        }
+    }
+
+    /// Takes the focus, or gives it up.
+    pub(crate) fn focus(&mut self, on: bool) {
+        self.focused = on;
+    }
+
+    /// Takes what `typed` holds while the field has the focus. True on the
+    /// frame the line was entered.
+    pub(crate) fn take_typing(&mut self, typed: &Typed) -> bool {
+        if !self.focused {
+            return false;
+        }
+        for _ in 0..typed.deleted {
+            self.text.pop();
+        }
+        for taken in typed.text.chars().filter(|taken| self.allow.allows(*taken)) {
+            if self.text.chars().count() < self.allow.limit() {
+                self.text.push(taken);
+            }
+        }
+        typed.entered
+    }
+
+    /// The line as it is drawn: the text, with the caret while it has the
+    /// focus.
+    pub(crate) fn line(&self) -> String {
+        match self.focused {
+            true => format!("{}{CARET}", self.text),
+            false => self.text.clone(),
+        }
+    }
+}
+
+impl Allow {
+    /// Whether the field takes `typed`.
+    fn allows(self, typed: char) -> bool {
+        match self {
+            Allow::Text(_) => !typed.is_control(),
+            Allow::Digits(_) => typed.is_ascii_digit(),
+        }
+    }
+
+    /// The most characters the field holds.
+    fn limit(self) -> usize {
+        match self {
+            Allow::Text(limit) | Allow::Digits(limit) => limit,
+        }
+    }
 }
 
 impl Typed {
     /// What was typed into `ctx` this frame.
-    pub fn of(ctx: &egui::Context) -> Typed {
+    pub fn this_frame(ctx: &egui::Context) -> Typed {
         let mut typed = Typed {
             text: String::new(),
             deleted: 0,

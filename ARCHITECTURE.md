@@ -59,7 +59,9 @@ server/    probe-server    the match server: rooms, lobby authority,
 Dependencies point one way: `protocol` depends on `sim`; `agents` depends
 on `sim` and `protocol`, since a lobby names the bot an agent plays and a
 record is a protocol value; `game` depends on `sim`, `protocol` and
-`agents`, and on `server` only under a native `host` feature; `server`
+`agents`, and on `server` under the `host` feature, which is on by
+default and carries the server only on a native target, so the playable
+hosts wherever it can and the browser build carries none of it; `server`
 depends on `protocol` and `sim`. `sim` depends on `libm` and on serde's derive,
 which adds no arithmetic. The browser build carries `sim`, `protocol`,
 `agents` and `game`. `check.sh` fails if `sim`'s dependency tree names
@@ -400,12 +402,19 @@ order; anything sorted is sorted by a total key ending in an id.
 ## Sim: what leaves the sim
 
 - `View::of(&State, seat, &Shots) -> View`: the fogged state for a display
-  or an agent, built once per tick from that tick's shots. Own
-  compositions with wants, counts present and flying, and each
-  frame's progress as a fraction of its cost; the reserve and stockpile;
-  seen entities with id, row, seat, body, HP, whether they fly, and the
-  place they belong to, which is `None` only for a flying entity of
-  another team, whose destination sight does not give; radar
+  or an agent, built once per tick from that tick's shots. It is a
+  projection and derives nothing itself: every fact it carries is asked
+  of the type that owns it — `State::holding` for a post's row, present
+  and flying; `Frame::fraction` and `Frame::starved_material` for a frame
+  under construction; `Shots::exchanges` for the tick's fire; `Sight` and
+  `Radar` for what a seat sees and what it merely detects; `Row::mass_class`
+  for what radar can tell of a contact. Own compositions with wants,
+  counts present and flying, and each frame's progress with the material
+  it has spent nothing on this second for want of; the reserve and
+  stockpile; seen entities with id, row, seat, body, HP, whether they
+  fly, the place they belong to and, for the seat's own fliers, the place
+  they left, both `None` for a flying entity of another team, whose
+  destination sight does not give; radar
   blips with body and mass class, which are the entities inside a team
   sensor's radar range and outside its sight; the tick's `Exchange`s,
   which say per place and seat whether a shot the seat saw was fired or
@@ -433,9 +442,11 @@ order; anything sorted is sorted by a total key ending in an id.
   hand in `look`. `Scene::centre` is the middle of its rocks, which a
   camera frames the map from. Rocks with
   positions, radii and caps; entities with position, glyph and seat; per ring,
-  per seat, the run as a list of `Mark { glyph, fill, dim }` where `fill`
-  is `Solid`, `Hollow`, `Filling(f32)` or `Dashed` and `dim` is what the
-  pointer says is leaving or arriving; per ring, per seat, an optional
+  per seat, the run as a list of `Mark { glyph, fill, dim, reason }` where
+  `fill` is `Solid`, `Hollow`, `Filling(f32)` or `Dashed`, `dim` is what
+  the pointer says is leaving or arriving, and `reason` is the state the
+  glyph stands in, whose `sentence` is what hovering it shows; per ring,
+  per seat, an optional
   `Arc { fraction, trailing }`; flights as lines to a rock; radar blips as
   a position, a drift past the nearest rock and a mass class; the
   selection and the `Hover`, which is a wheel band or a `Sending`. Every
@@ -461,8 +472,11 @@ order; anything sorted is sorted by a total key ending in an id.
   draw their rings through the same code; a selected ring is white and
   wider, so its brightening wins over the tint rather than mixing with it.
 - `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
-  state, its marks, and the dim a preview draws it at. The HUD and the
-  wheel paint through it, so a glyph is drawn one way.
+  state, its marks, the dim a preview draws it at, and the belt a starved
+  frame carries in its material's `hue`. The HUD and the wheel paint
+  through it, so a glyph is drawn one way.
+- `hud::glyph_at`: the run glyph under a point, off the same `Layout` the
+  paint reads, which is what the hover sentence is found through.
 - `glyph_quad::GlyphQuad`: a mesh value per `(Glyph, SeatId)`, its own
   texture rasterized in the seat's colour, for the belt. One billboarded
   quad per ship, one draw each; hollow, filling and dashed glyphs exist
@@ -505,10 +519,14 @@ order; anything sorted is sorted by a total key ending in an id.
   the pause screen and closes it again. The gamepad bindings DISPLAY.md
   states are a later unit. Its own headless drive, behind the `look`
   feature, plays a whole skirmish through the engine's offscreen
-  `Session` — title to lobby to a placement to the standings — and
-  writes `game/look/title.png`, `lobby.png` and `results.png`.
-  `check.sh` runs it under `xvfb-run`, so the drive and its screenshots
-  are verified on every change.
+  `Session` — title to lobby to a placement to the standings — picks a
+  team out of an open list, removes a guest from a room it serves, and
+  clicks a disabled Quit; it writes `game/look/title.png`,
+  `title_quit_reason.png`, `lobby.png`, `lobby_choice.png`,
+  `glyph_reason.png` and `results.png`. Every test of it holds one lock,
+  since each title serves a room on the protocol's one port. `check.sh`
+  runs it under `xvfb-run`, so the drive and its screenshots are verified
+  on every change.
 
 ## Look
 
@@ -570,17 +588,20 @@ pub struct Lobby {                              // MAX_SLOTS == MAX_SEATS slots
     slots: Vec<SeatSlot>, seed: u64, clock: Tick, host: PlayerId,
 }
 pub enum LobbyEdit {
-    SetSlot { slot, control }, SetTeam { slot, team }, SetSeed(u64),
-    SetClock(Tick), SetReady { ready },
+    SetSlot { slot, control }, Kick(PlayerId), SetTeam { slot, team },
+    SetSeed(u64), SetClock(Tick), SetReady { ready },
 }
-pub enum Refused { NotHost, NotYours, NotSeated, NoSuchSlot, BadTeam, BadClock }
+pub enum Refused {
+    NotHost, NotYours, NotSeated, NoSuchSlot, BadTeam, BadClock,
+    AlreadySeated, NotAGuest,
+}
 pub enum NotReady { NoSeats, OpenSeat { slot }, Unready { slot } }
-pub enum Refusal { Edit(Refused), NotReady(NotReady), Full }
+pub enum Refusal { Edit(Refused), NotReady(NotReady), Full, Version }
 pub enum Message {
-    Join, Welcome { player, lobby }, Edit(LobbyEdit), Lobby(Lobby),
-    Refused(Refusal), Start(Setup),
+    Join { version: u32 }, Welcome { player, lobby }, Edit(LobbyEdit),
+    Lobby(Lobby), Refused(Refusal), Start(Setup), Rematch,
     Command(Stamped), Acknowledge { seat, up_to: Tick }, Hash { tick, hash },
-    Desync { tick }, Leave,
+    Desync { tick }, Leave, Removed,
 }
 pub struct Record { setup: Setup, ticks: BTreeMap<Tick, Batch> }
 
@@ -612,12 +633,25 @@ something; a bot and a closed seat have none to hold. `Bot` names a
 shipped opponent and `agents`' `Personality::of` matches it
 exhaustively, so a bot the protocol can name always has a way of playing.
 
+Every rule a control is enabled by is a function here, evaluated on a
+copy: `Lobby::edit` for a holder, a team, a kick, the seed, the clock and
+readiness, and `Lobby::freeze` for the start. A player holds one slot at
+most (`Refused::AlreadySeated`) and only a guest's slot is kicked
+(`Refused::NotAGuest`), so the screen offering those values and the room
+applying them cannot disagree.
+
 `Message::Refused` is how a room answers what it did not do: a lobby edit
-that was not the sender's, a start of a lobby that is not a match yet, and
-a join of a room with nowhere to sit. `Message::Hash` means two things by
-direction: a machine reports its own hash at a settled tick, and the room
-sends back the hash every machine reported the same there, which is the
-one word that says a tick is agreed on every machine.
+that was not the sender's, a start of a lobby that is not a match yet, a
+join of a room with nowhere to sit, and a join carrying a version that is
+not `VERSION`, which the room checks before it seats anything.
+`Message::Removed` is what a kicked machine hears, distinct from the
+`Leave` a host's own departure broadcasts, since the two are different
+facts on the title's join field. `Message::Rematch` is the host asking a
+room to open its lobby again, which the room answers with that lobby.
+`Message::Hash` means two things by direction: a machine reports its own
+hash at a settled tick, and the room sends back the hash every machine
+reported the same there, which is the one word that says a tick is
+agreed on every machine.
 
 `Wire` is the one encoding, blanket-implemented for every serialisable
 value: CBOR, the same bytes on native and in the browser. Reading is the
@@ -700,18 +734,32 @@ is checked once, and `Record` folds its flat list of commands into one
   the unit that can.
   The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
   widest view whose rings stand apart, and lays its seats out by team:
-  one heading per team that holds a seat, its seats under it, and the
-  host's Add Bot and Open Seat under those, which take the first closed
-  slot. A closed seat is not drawn, so a team holding none is not drawn
-  either, and a seat's Move action cycles its team, which is also how a
-  team is opened.
+  one heading per team that holds a seat, and its seats under it, each a
+  holder choice, a Kick beside a guest, a team choice and a readiness
+  mark. A closed seat is not drawn, so a team holding none is not drawn
+  either, except the one closed seat's row the host is left under the
+  last team, which is how a seat and a team are opened.
+- **The title's room.** The title serves the room Host would join, from
+  the frame it opens, and hands it to the flow with `Step::Host`. Host is
+  enabled exactly where a room is served, so a click on it cannot fail,
+  and a title the player leaves for anything else releases the port.
 - **The styled register.** Every screen outside the belt is painted and
   hit-tested by hand through one `Panel`, over the engine's UI layer, and
   claims no widget: the HUD's palette, thin lines, no window chrome,
   glyphs through the same `Stencil` the HUD paints with. A screen's
-  geometry is one function per group of controls, which both the paint
-  and the hit test read, so a control cannot be drawn where it is not
-  clicked.
+  geometry is one value per screen — `Places`, with a rect per control —
+  which the paint, the hit test and the headless drive all read, so a
+  control cannot be drawn where it is not clicked or clicked where the
+  drive cannot find it.
+- **The controls.** `screens/control.rs` is the whole vocabulary, and no
+  screen paints a control of its own: `Controls::action`, `::choice` and
+  `::value` are DISPLAY.md's three kinds, each taking a `Rule` — `Allows`
+  or `Refuses(sentence)` — computed from the same function the action
+  will call. `Controls::finish` paints the open list and the one hover
+  sentence after every control, so neither is drawn over, and answers
+  whether a click landed on no control, which is how a list closes. A
+  refusal is never shown after the fact: the only outcome a control
+  cannot know before the click is a join, and the join field carries it.
 
 ## Server
 
@@ -720,9 +768,16 @@ it: the host's edits and each guest's own-seat edits are applied in
 arrival order and the result broadcast; any other edit is refused by
 name to its sender. A machine enters a room by asking to join, takes the
 first open slot, and is welcomed with the id it holds and the lobby as it
-stands; a room with nowhere to sit refuses the join by name. The shape of
-a lobby is its host's, so a host that leaves one ends it: the room reopens
-and every other machine is sent away.
+stands; a room with nowhere to sit, or a join carrying another version of
+the protocol, refuses it by name. A kick is the host's edit like any
+other: the room opens that slot, tells the machine that held it, and
+drops it. The shape of a lobby is its host's, so a host that leaves one
+ends it: the room reopens and every other machine is sent away.
+
+A room keeps the lobby the match was set up in while it forwards that
+match, so the host's `Rematch` opens it again with its shape kept, the
+slots of machines that have left standing open. Every machine at the
+results follows the lobby the room broadcasts.
 
 Once started, the room forwards every stamped command and acknowledgement
 of a seat to every machine but the one that sent it, and drops one of a
@@ -735,10 +790,10 @@ match ends; a per-machine record would need a machine to upload one,
 which no message asks for. It holds no tick clock and steps no sim.
 
 `Room` is pure and knows nothing of sockets: it answers `Post`s addressed
-to the sender, to everyone, or to everyone else, and `stream.rs` is the
-only part that touches the network. `game` embeds it under the `host`
-feature so host-by-address needs no separate process; the binary serves a
-room list later.
+to the sender, to one named machine, to everyone, or to everyone else,
+and `stream.rs` is the only part that touches the network. `game` embeds
+it under the `host` feature so host-by-address needs no separate process;
+the binary serves a room list later.
 
 ## Module layout
 
@@ -749,28 +804,32 @@ sim/src/
   setup.rs          Setup, MAX_SEATS, BadSetup
   real.rs           Real
   vec3.rs           Vec3
-  materials.rs      Materials, Stockpile
+  materials.rs      Material, Materials, Stockpile
   time.rs           Tick, Moment
   ids.rs            RockId, EntityId, RowId, SeatId, TeamId
   place.rs          Band, Place, Post
-  roster/           mod.rs Roster; row.rs Row, Weapon, Kind; shipped.rs the eight
+  roster/           mod.rs Roster; row.rs Row, Weapon, Kind, MassClass;
+                    shipped.rs the eight
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
                     entity.rs Entity, Motion; flight.rs Flight, Burn;
-                    attractor.rs; sight.rs; wants.rs Wants; frame.rs;
-                    ready.rs; command.rs Command, Issued, Stamped, Batch,
-                    Sequence, Rejected, Refused, apply;
-                    sweep.rs; view.rs View; hash.rs;
+                    attractor.rs; sight.rs Sight; radar.rs Radar;
+                    wants.rs Wants; frame.rs Frame, its fraction and what
+                    it went short of; ready.rs; command.rs Command,
+                    Issued, Stamped, Batch, Sequence, Rejected, Refused,
+                    apply; sweep.rs; view.rs View; hash.rs;
                     standings.rs Standings
   step/             mod.rs step, next; maneuver.rs; propagation.rs;
-                    fulfilment.rs; extraction.rs; construction.rs; fire.rs
+                    fulfilment.rs; extraction.rs; construction.rs;
+                    fire.rs Fire, Shots, Exchange
   history/          mod.rs; snapshots.rs Retention and the ring behind it;
                     log.rs the stamped log by tick;
                     session.rs Session: advance, insert, acknowledge,
                     settled, hash_at, outcome_at, setup, commands
 protocol/src/
-  lib.rs            the surface, and DEFAULT_PORT, the port a room is served on
+  lib.rs            the surface, DEFAULT_PORT, the port a room is served
+                    on, and VERSION, the version a room takes a join of
   ids.rs            PlayerId
   lobby.rs          Lobby, SeatSlot, Control, Bot, LobbyEdit, freeze
   message.rs        Message
@@ -786,15 +845,18 @@ game/src/
   controls.rs       Controls: the buttons and axes the playable reads
   display/          mod.rs; scene.rs glyph.rs glyph_quad.rs ring.rs
                     wheel.rs camera.rs screen.rs stencil.rs tint.rs
-                    fights.rs send.rs belt.rs hud.rs, as before
+                    fights.rs send.rs belt.rs hud.rs, as before;
+                    hue.rs the three materials' colours; label.rs titled
   net/              controller.rs Controller, Human; transport.rs
                     Transport; local.rs Local; socket.rs Socket;
                     link/ native.rs and browser.rs, one per target;
                     room.rs Room, the socket and the id in it;
-                    hosting.rs Hosting, the room this machine serves;
+                    hosting/ Hosting, the room this machine serves:
+                    served.rs with the server, nowhere.rs without it;
                     machine.rs Machine, the lockstep loop; pace.rs pacing
   screens/          mod.rs Playable; flow.rs Flow and Step; panel.rs the
-                    styled register; field.rs the one typed line;
+                    styled register; control.rs the three kinds of
+                    control; field.rs the one typed line;
                     held.rs the two states play holds in; title.rs
                     lobby.rs loading.rs play.rs pause.rs results.rs
   main.rs           the playable, and its headless drive
@@ -802,7 +864,8 @@ game/src/
 server/src/
   lib.rs            the surface game embeds
   rooms.rs          Room, its phase, and the posts it answers with
-  lobby.rs          Seating: the lobby the room is the authority on
+  lobby.rs          Seating: the lobby the room is the authority on, kept
+                    across the match a rematch opens it again after
   playing.rs        Playing: ownership, forwarding, hashes, desync
   records.rs        Ledger, the log being forwarded; Records, the kept ones
   stream.rs         the accept loop and one task per machine

@@ -4,13 +4,15 @@
 use std::collections::BTreeMap;
 
 use probe_sim::orbit::{Body, Gravity};
+use probe_sim::roster::MassClass;
 use probe_sim::roster::Roster;
 use probe_sim::state::Rock;
-use probe_sim::state::view::{MassClass, View};
-use probe_sim::{Band, Materials, Place, RockId, RowId, SeatId, Tick, Vec3};
+use probe_sim::state::view::View;
+use probe_sim::{Band, Material, Materials, Place, RockId, RowId, SeatId, Tick, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
+use crate::display::label::titled;
 use crate::display::send::Sending;
 
 /// How a glyph on a ring is drawn: the state of the unit it stands for.
@@ -101,6 +103,28 @@ pub struct Mark {
     pub fill: Fill,
     /// Drawn dim: a hover preview, or a unit the pointer says is leaving.
     pub dim: bool,
+    /// What the glyph is and why it is in this state, which hovering it
+    /// shows.
+    pub reason: Reason,
+}
+
+/// Why a glyph is in the state it is drawn in: one sentence, shown while
+/// the pointer is over it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Reason {
+    /// A unit of this row is at the place.
+    Here(RowId),
+    /// A unit of this row is wanted and absent, with no frame open for it.
+    Wanted(RowId),
+    /// A frame of this row is being built, and the material it has spent
+    /// nothing on this second for want of.
+    Building(RowId, Option<Material>),
+    /// A frame of this row waits on a builder at the rock.
+    NoBuilder(RowId),
+    /// A unit of this row is flying in from this rock.
+    Arriving(RowId, RockId),
+    /// A unit of this row is flying out to this rock.
+    Leaving(RowId, RockId),
 }
 
 /// One ring: a place's runs in seat order and the fight arcs on it.
@@ -326,33 +350,90 @@ impl Runs {
     /// absent.
     fn of(view: &View, roster: &Roster) -> Runs {
         let mut rows: BTreeMap<(Place, SeatId), Rows> = BTreeMap::new();
+        let mut push = |place: Place, seat: SeatId, row: RowId, mark: Mark| {
+            rows.entry((place, seat))
+                .or_default()
+                .entry(row)
+                .or_default()
+                .push(mark);
+        };
         for seen in view.seen.iter().filter(|seen| !seen.flying) {
             let Some(place) = seen.home else {
                 continue;
             };
-            rows.entry((place, seen.seat))
-                .or_default()
-                .entry(seen.row)
-                .or_default()
-                .push(mark(roster, seen.row, Fill::Solid));
+            let reason = Reason::Here(seen.row);
+            push(
+                place,
+                seen.seat,
+                seen.row,
+                mark(roster, seen.row, Fill::Solid, reason),
+            );
+        }
+        // A unit in flight stands on both runs: dimmed where it left, and
+        // hollow where it is arriving.
+        for seen in view
+            .seen
+            .iter()
+            .filter(|seen| seen.flying && seen.seat == view.seat)
+        {
+            if let Some(to) = seen.home
+                && let Some(from) = seen.from
+            {
+                push(
+                    from,
+                    seen.seat,
+                    seen.row,
+                    Mark {
+                        dim: true,
+                        ..mark(
+                            roster,
+                            seen.row,
+                            Fill::Solid,
+                            Reason::Leaving(seen.row, to.rock),
+                        )
+                    },
+                );
+                push(
+                    to,
+                    seen.seat,
+                    seen.row,
+                    mark(
+                        roster,
+                        seen.row,
+                        Fill::Hollow,
+                        Reason::Arriving(seen.row, from.rock),
+                    ),
+                );
+            }
         }
         let builders = builders(view, roster);
         for composition in &view.compositions {
             let place = composition.place;
-            let marks = rows.entry((place, view.seat)).or_default();
             let unbuilt = builders.binary_search(&place.rock).is_err();
             for wanted in &composition.rows {
-                let row = marks.entry(wanted.row).or_default();
-                for progress in &wanted.frames {
-                    let fill = match unbuilt {
-                        true => Fill::Dashed,
-                        false => Fill::Filling(*progress as f32),
+                for frame in &wanted.frames {
+                    let (fill, reason) = match unbuilt {
+                        true => (Fill::Dashed, Reason::NoBuilder(wanted.row)),
+                        false => (
+                            Fill::Filling(frame.progress as f32),
+                            Reason::Building(wanted.row, frame.starved_of),
+                        ),
                     };
-                    row.push(mark(roster, wanted.row, fill));
+                    push(
+                        place,
+                        view.seat,
+                        wanted.row,
+                        mark(roster, wanted.row, fill, reason),
+                    );
                 }
                 let held = wanted.present + wanted.flying + wanted.frames.len() as u32;
                 for _ in held..wanted.want {
-                    row.push(mark(roster, wanted.row, Fill::Hollow));
+                    push(
+                        place,
+                        view.seat,
+                        wanted.row,
+                        mark(roster, wanted.row, Fill::Hollow, Reason::Wanted(wanted.row)),
+                    );
                 }
             }
         }
@@ -370,7 +451,7 @@ impl Runs {
                 match band {
                     WheelBand::Plus => marks.push(Mark {
                         dim: true,
-                        ..mark(roster, *row, Fill::Hollow)
+                        ..mark(roster, *row, Fill::Hollow, Reason::Wanted(*row))
                     }),
                     WheelBand::Minus => {
                         if let Some(last) = marks.last_mut() {
@@ -404,7 +485,12 @@ impl Runs {
                     for _ in 0..count {
                         arriving.push(Mark {
                             dim: true,
-                            ..mark(roster, row, Fill::Hollow)
+                            ..mark(
+                                roster,
+                                row,
+                                Fill::Hollow,
+                                Reason::Arriving(row, sending.from.rock),
+                            )
                         });
                     }
                 }
@@ -453,6 +539,49 @@ impl Runs {
     }
 }
 
+impl Reason {
+    /// The material the frame this glyph stands for has spent nothing on
+    /// this second for want of, where it is a starved frame.
+    pub fn starved(self) -> Option<Material> {
+        match self {
+            Reason::Building(_, starved) => starved,
+            Reason::Here(_)
+            | Reason::Wanted(_)
+            | Reason::NoBuilder(_)
+            | Reason::Arriving(..)
+            | Reason::Leaving(..) => None,
+        }
+    }
+
+    /// The one plain sentence hovering the glyph shows, naming the row and
+    /// the state it is in. Rocks are numbered from one, as every number
+    /// the player reads is.
+    pub fn sentence(self, roster: &Roster) -> String {
+        let row = |row: RowId| titled(roster[row].name);
+        let rock = |rock: RockId| format!("Rock {}", rock.0 as u64 + 1);
+        match self {
+            Reason::Here(of) => format!("{}, here", row(of)),
+            Reason::Wanted(of) => format!("{}, wanted", row(of)),
+            Reason::Building(of, None) => format!("{}, building", row(of)),
+            Reason::Building(of, Some(material)) => {
+                format!("{}, building, short of {}", row(of), short_of(material))
+            }
+            Reason::NoBuilder(of) => format!("{}, no builder here", row(of)),
+            Reason::Arriving(of, from) => format!("{}, arriving from {}", row(of), rock(from)),
+            Reason::Leaving(of, to) => format!("{}, leaving for {}", row(of), rock(to)),
+        }
+    }
+}
+
+/// A material as a sentence names it.
+fn short_of(material: Material) -> &'static str {
+    match material {
+        Material::Metals => "metals",
+        Material::Volatiles => "volatiles",
+        Material::Energy => "energy",
+    }
+}
+
 /// The rocks where the seat has a builder, sorted: a shortfall at any other
 /// rock is dashed, since a build weapon reaches only its own rock.
 fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
@@ -469,11 +598,12 @@ fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
 }
 
 /// One mark of `row`, its glyph by the three rules.
-fn mark(roster: &Roster, row: RowId, fill: Fill) -> Mark {
+fn mark(roster: &Roster, row: RowId, fill: Fill, reason: Reason) -> Mark {
     Mark {
         glyph: Glyph::of(&roster[row]),
         fill,
         dim: false,
+        reason,
     }
 }
 
@@ -624,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn a_flying_unit_carries_a_flight_line_and_no_glyph_on_a_ring() {
+    fn a_unit_in_flight_stays_dimmed_on_the_ring_it_left_and_arrives_on_the_ring_it_flies_to() {
         let mut local = Local::start(2);
         local.want(&[(inner(0), CONSTRUCTOR, 1)]);
         local.want(&[(inner(0), CONSTRUCTOR, 0), (inner(1), CONSTRUCTOR, 1)]);
@@ -639,10 +769,14 @@ mod tests {
         assert_eq!(scene.flights.len(), 1);
         assert_eq!(scene.flights[0].to, RockId(1));
         assert_eq!(scene.entities.len(), 1, "the ship is drawn on the belt");
-        assert!(
-            run_at(&scene, inner(1)).is_none_or(|marks| marks.is_empty()),
-            "a flying unit's glyph rides the ship, not the ring"
-        );
+        let left = run_at(&scene, inner(0)).expect("the ring it left draws a run");
+        assert_eq!(left.len(), 1);
+        assert!(left[0].dim && left[0].fill == Fill::Solid);
+        assert_eq!(left[0].reason, Reason::Leaving(CONSTRUCTOR, RockId(1)));
+        let arriving = run_at(&scene, inner(1)).expect("the ring it flies to draws a run");
+        assert_eq!(arriving.len(), 1);
+        assert_eq!(arriving[0].fill, Fill::Hollow);
+        assert_eq!(arriving[0].reason, Reason::Arriving(CONSTRUCTOR, RockId(0)));
     }
 
     #[test]

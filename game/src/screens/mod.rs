@@ -22,12 +22,14 @@ where
 {
 }
 
+pub mod control;
 pub mod field;
 pub mod flow;
 pub mod held;
 pub mod loading;
 pub mod lobby;
 pub mod panel;
+pub mod panning;
 pub mod pause;
 pub mod play;
 pub mod results;

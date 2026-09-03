@@ -2,13 +2,13 @@
 //! wheel, painted in screen space over the belt's projection.
 
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
-use probe_sim::state::view::MassClass;
-use probe_sim::{Band, RowId};
+use probe_sim::roster::MassClass;
+use probe_sim::{Band, RowId, SeatId};
 
 use crate::display::glyph;
 use crate::display::glyph_quad::seat_color32;
 use crate::display::ring::{Geometry, Layout, Span};
-use crate::display::scene::{Arc, Blip, Hover, RingView, Scene, WheelBand};
+use crate::display::scene::{Arc, Blip, Hover, Mark, RingView, Scene, WheelBand};
 use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
 use crate::display::tint;
@@ -101,12 +101,7 @@ const STREAK_MAX: f32 = 18.0;
 /// selected ring where there is one.
 pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &egui::Painter) {
     for ring in &scene.rings {
-        let Some(centre) = scene
-            .rocks
-            .iter()
-            .find(|rock| rock.id == ring.place.rock)
-            .and_then(|rock| screen.point_of(rock.pos))
-        else {
+        let Some(centre) = centre_of(scene, screen, ring) else {
             continue;
         };
         paint_ring(painter, ring, centre, scene.selection == Some(ring.place));
@@ -190,6 +185,62 @@ fn hovered_slot(scene: &Scene, wheel: &Wheel) -> Option<(RowId, WheelBand)> {
     }
 }
 
+/// One mark of a ring laid where it draws: what it stands for, whose it
+/// is, where its centre goes and how big it stands.
+struct Placed<'a> {
+    mark: &'a Mark,
+    seat: SeatId,
+    centre: Pos2,
+    /// Half the glyph's width at its size class, in points.
+    half: f32,
+}
+
+/// Every mark of `ring`, laid around `centre`, the screen point of its
+/// rock. The paint and the hit test read the same layout, so a glyph
+/// cannot be drawn where it is not hovered.
+fn placed<'a>(ring: &'a RingView, centre: Pos2) -> Vec<Placed<'a>> {
+    let radius = ring_radius(ring.place.band);
+    let layout = Layout::of(&ring.runs, geometry(radius));
+    layout
+        .placements()
+        .iter()
+        .map(|placement| {
+            let run = &ring.runs[placement.run];
+            let mark = &run.marks[placement.mark];
+            let (sin, cos) = placement.angle.sin_cos();
+            let out = radius - f32::from(placement.depth) * STACK_STEP;
+            Placed {
+                mark,
+                seat: run.seat,
+                centre: egui::pos2(centre.x + out * sin, centre.y - out * cos),
+                half: glyph::HALF * mark.glyph.size.scale() * placement.scale,
+            }
+        })
+        .collect()
+}
+
+/// The run glyph under `at`, in points: where it is drawn and what it
+/// stands for, or `None` off every run.
+pub fn glyph_at<'a>(scene: &'a Scene, screen: &Screen, at: Pos2) -> Option<(Pos2, &'a Mark)> {
+    scene
+        .rings
+        .iter()
+        .filter_map(|ring| Some((ring, centre_of(scene, screen, ring)?)))
+        .flat_map(|(ring, centre)| placed(ring, centre))
+        .filter(|placed| placed.centre.distance(at) <= placed.half)
+        .min_by(|a, b| a.centre.distance(at).total_cmp(&b.centre.distance(at)))
+        .map(|placed| (placed.centre, placed.mark))
+}
+
+/// Where `ring`'s rock draws, in points; `None` when it is off screen.
+fn centre_of(scene: &Scene, screen: &Screen, ring: &RingView) -> Option<Pos2> {
+    scene
+        .rocks
+        .iter()
+        .find(|rock| rock.id == ring.place.rock)
+        .and_then(|rock| screen.point_of(rock.pos))
+}
+
 fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: bool) {
     let radius = ring_radius(ring.place.band);
     // A selected ring is white and wider, so the brightening wins over the
@@ -200,23 +251,20 @@ fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: 
     };
     painter.circle_stroke(centre, radius, Stroke::new(stroke_width, stroke_colour));
 
-    let layout = Layout::of(&ring.runs, geometry(radius));
-    for placement in layout.placements() {
-        let run = &ring.runs[placement.run];
-        let mark = &run.marks[placement.mark];
-        let (sin, cos) = placement.angle.sin_cos();
-        let out = radius - f32::from(placement.depth) * STACK_STEP;
+    for placed in placed(ring, centre) {
         Stencil {
-            glyph: &mark.glyph,
-            centre: egui::pos2(centre.x + out * sin, centre.y - out * cos),
-            half: glyph::HALF * mark.glyph.size.scale() * placement.scale,
-            colour: seat_color32(run.seat),
-            fill: mark.fill,
-            dim: mark.dim,
+            glyph: &placed.mark.glyph,
+            centre: placed.centre,
+            half: placed.half,
+            colour: seat_color32(placed.seat),
+            fill: placed.mark.fill,
+            dim: placed.mark.dim,
+            starved: placed.mark.reason.starved(),
         }
         .paint(painter);
     }
 
+    let layout = Layout::of(&ring.runs, geometry(radius));
     for arc in &ring.arcs {
         let Some(index) = ring.runs.iter().position(|run| run.seat == arc.seat) else {
             continue;
@@ -317,6 +365,7 @@ mod tests {
                     ),
                     fill: crate::display::scene::Fill::Solid,
                     dim: false,
+                    reason: crate::display::scene::Reason::Here(RowId(0)),
                 })
                 .collect(),
         }

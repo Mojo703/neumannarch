@@ -64,11 +64,12 @@ mod tests {
     use mirage_engine::egui;
     use mirage_engine::headless::Session as Offscreen;
     use mirage_engine::math::Vec2;
+    use probe_game::display::hud;
     use probe_game::display::scene::{Fill, Scene, WheelBand};
     use probe_game::display::screen::Screen;
     use probe_game::display::wheel::Wheel;
     use probe_game::screens::play::Play;
-    use probe_game::screens::{lobby, title};
+    use probe_game::screens::{control, lobby, title};
     use probe_sim::RockId;
     use probe_sim::roster::SHIPYARD;
 
@@ -76,6 +77,21 @@ mod tests {
 
     /// The offscreen target's size, in physical pixels.
     const TARGET: UVec2 = UVec2::new(1280, 720);
+
+    /// How many frames the drive steps waiting on a room before it gives
+    /// up.
+    const PATIENCE: usize = 600;
+
+    /// The title serves a room on one port, so one drive holds it at a
+    /// time.
+    static ONE_DRIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Holds the port every title serves its room on until the test ends.
+    fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+        ONE_DRIVE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     /// The rock the drive plays on: near the belt's centre, where the
     /// camera opens.
@@ -168,14 +184,146 @@ mod tests {
         path
     }
 
+    /// Where the lobby's controls stand, with the lobby on screen.
+    fn lobby_places(session: &Offscreen<Probe>) -> lobby::Places {
+        session.game().flow.lobby().expect("the lobby is on screen");
+        lobby::Places::over(window())
+    }
+
+    /// Steps frames until `ready`, which is how the drive waits on a
+    /// socket. Panics on a room that never answers.
+    fn stepped_until(session: &mut Offscreen<Probe>, ready: impl Fn(&Offscreen<Probe>) -> bool) {
+        for _ in 0..PATIENCE {
+            if ready(session) {
+                return;
+            }
+            session.step();
+        }
+        panic!("the room never answered");
+    }
+
+    #[test]
+    fn a_skirmish_starts_the_moment_its_lobby_opens() {
+        let _one = one_at_a_time();
+        let mut session = game();
+        session.step();
+        click_at(
+            &mut session,
+            title::Places::over(window()).skirmish.center(),
+        );
+
+        let places = lobby_places(&session);
+        assert_eq!(places.rows.len(), 4, "one row per seat the match can hold");
+        let act = places.act;
+        click_at(&mut session, act.center());
+        session.tick();
+        session.step();
+
+        assert!(
+            session.game().flow.play().is_some(),
+            "Start was not enabled on the lobby the game opens"
+        );
+    }
+
+    #[test]
+    fn a_seats_team_is_chosen_from_the_list_its_choice_opens() {
+        let _one = one_at_a_time();
+        let mut session = game();
+        session.step();
+        click_at(
+            &mut session,
+            title::Places::over(window()).skirmish.center(),
+        );
+
+        let team = lobby_places(&session).rows[1].team;
+        click_at(&mut session, team.center());
+        save(&session, "lobby_choice");
+        click_at(&mut session, control::list_row(team, 2).center());
+
+        assert_eq!(
+            session
+                .game()
+                .flow
+                .lobby()
+                .expect("still the lobby")
+                .slots()[1]
+                .team,
+            probe_sim::TeamId(2)
+        );
+    }
+
+    #[test]
+    fn quit_is_disabled_and_says_why_while_the_pointer_is_over_it() {
+        let _one = one_at_a_time();
+        let mut session = game();
+        session.step();
+
+        let quit = title::Places::over(window()).quit;
+        session.set_pointer(Vec2::new(quit.center().x, quit.center().y));
+        session.step();
+        click(&mut session);
+
+        assert!(
+            session.game().flow.lobby().is_none() && session.game().flow.play().is_none(),
+            "a disabled Quit opens nothing"
+        );
+        save(&session, "title_quit_reason");
+    }
+
+    #[test]
+    fn the_host_removes_a_guest_and_the_seat_it_held_opens() {
+        let _one = one_at_a_time();
+        let mut session = game();
+        session.step();
+        click_at(&mut session, title::Places::over(window()).host.center());
+        stepped_until(&mut session, |session| {
+            session.game().flow.lobby().is_some()
+        });
+
+        let mut guest = probe_game::net::room::Room::joining(&format!(
+            "127.0.0.1:{}",
+            probe_protocol::DEFAULT_PORT
+        ));
+        stepped_until(&mut session, |session| {
+            session
+                .game()
+                .flow
+                .lobby()
+                .is_some_and(|lobby| lobby.slot_of(probe_protocol::PlayerId(1)) == Some(1))
+        });
+
+        let kick = lobby_places(&session).rows[1].kick;
+        click_at(&mut session, kick.center());
+        stepped_until(&mut session, |session| {
+            session
+                .game()
+                .flow
+                .lobby()
+                .is_some_and(|lobby| lobby.slots()[1].control == probe_protocol::Control::Open)
+        });
+
+        let mut heard = Vec::new();
+        for _ in 0..PATIENCE {
+            heard.extend(guest.heard());
+            if heard.contains(&probe_protocol::Message::Removed) {
+                return;
+            }
+            session.step();
+        }
+        panic!("the kicked machine was never told: {heard:?}");
+    }
+
     #[test]
     fn a_skirmish_runs_from_the_title_to_the_results() {
+        let _one = one_at_a_time();
         let mut session = game();
         session.step();
         save(&session, "title");
 
-        let [skirmish, ..] = title::actions(window());
-        click_at(&mut session, skirmish.center());
+        click_at(
+            &mut session,
+            title::Places::over(window()).skirmish.center(),
+        );
         let lobby = session
             .game()
             .flow
@@ -187,23 +335,23 @@ mod tests {
             "a skirmish seats a bot in seat one"
         );
         assert_eq!(lobby.seat_of(1), Some(probe_sim::SeatId(1)));
-        save(&session, "lobby");
 
         // The shortest clock the lobby offers, so the drive reaches the
-        // standings: two clicks of the clock action, from fifteen minutes.
-        let [_, _, clock] = lobby::shape_actions(window());
+        // standings: the first value of the clock's own list.
+        let clock = lobby_places(&session).clock;
         click_at(&mut session, clock.center());
-        click_at(&mut session, clock.center());
+        save(&session, "lobby");
+        click_at(&mut session, control::list_row(clock, 0).center());
         let shortest = session
             .game()
             .flow
             .lobby()
             .expect("still the lobby")
             .clock();
-        assert_eq!(shortest, probe_protocol::CLOCK_RANGE.start().clone());
+        assert_eq!(shortest, *probe_protocol::CLOCK_RANGE.start());
 
-        let [start, _] = lobby::bottom_actions(window());
-        click_at(&mut session, start.center());
+        let act = lobby_places(&session).act;
+        click_at(&mut session, act.center());
         session.tick();
         session.step();
         let started = play(&session);
@@ -267,6 +415,19 @@ mod tests {
             has_a_solid_glyph(session, place),
             "the shipyard's glyph is on the ring"
         );
+
+        let glyph = egui::pos2(centre.x, centre.y - hud::INNER_RADIUS);
+        let scene = scene_of(session);
+        let (_, mark) = hud::glyph_at(&scene, &screen(session), glyph)
+            .expect("the glyph on the ring is under the pointer");
+        assert_eq!(
+            mark.reason
+                .sentence(play(session).session().state().roster()),
+            "Shipyard, here"
+        );
+        session.set_pointer(Vec2::new(glyph.x, glyph.y));
+        session.step();
+        save(session, "glyph_reason");
     }
 
     /// Escape opens the pause screen and closes it again.
@@ -287,10 +448,10 @@ mod tests {
         assert!(play(session).session().state().tick() > before);
     }
 
-    /// Whether the run at `place` holds a glyph of something present.
-    fn has_a_solid_glyph(session: &Offscreen<Probe>, place: probe_sim::Place) -> bool {
+    /// The scene the match's frame draws, as the drive reads it back.
+    fn scene_of(session: &Offscreen<Probe>) -> Scene {
         let play = play(session);
-        let scene = Scene::from_view(
+        Scene::from_view(
             play.view(),
             play.session().state().roster(),
             probe_game::display::scene::Client {
@@ -298,8 +459,12 @@ mod tests {
                 hover: play.hover().cloned(),
                 fights: &probe_game::display::fights::Fights::default(),
             },
-        );
-        scene
+        )
+    }
+
+    /// Whether the run at `place` holds a glyph of something present.
+    fn has_a_solid_glyph(session: &Offscreen<Probe>, place: probe_sim::Place) -> bool {
+        scene_of(session)
             .rings
             .iter()
             .find(|ring| ring.place == place)
@@ -314,12 +479,15 @@ mod tests {
 
     #[test]
     fn the_opening_view_frames_the_belt_with_the_focus_at_its_centre() {
+        let _one = one_at_a_time();
         let mut session = game();
         session.step();
-        let [skirmish, ..] = title::actions(window());
-        click_at(&mut session, skirmish.center());
-        let [start, _] = lobby::bottom_actions(window());
-        click_at(&mut session, start.center());
+        click_at(
+            &mut session,
+            title::Places::over(window()).skirmish.center(),
+        );
+        let act = lobby_places(&session).act;
+        click_at(&mut session, act.center());
         session.tick();
         session.step();
 
@@ -351,12 +519,15 @@ mod tests {
 
     #[test]
     fn a_right_drag_moves_the_belt_under_the_pointer() {
+        let _one = one_at_a_time();
         let mut session = game();
         session.step();
-        let [skirmish, ..] = title::actions(window());
-        click_at(&mut session, skirmish.center());
-        let [start, _] = lobby::bottom_actions(window());
-        click_at(&mut session, start.center());
+        click_at(
+            &mut session,
+            title::Places::over(window()).skirmish.center(),
+        );
+        let act = lobby_places(&session).act;
+        click_at(&mut session, act.center());
         session.tick();
         session.step();
 

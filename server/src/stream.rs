@@ -114,6 +114,7 @@ fn deliver(held: &[Held], from: usize, posts: Vec<Post>) {
             To::Everyone => true,
             To::EveryoneElse => held.socket != from,
             To::Sender => held.socket == from,
+            To::One(player) => held.player == Some(player),
         }) {
             // A writer whose task has ended is a socket already closing,
             // which the room hears as its own event.
@@ -130,7 +131,7 @@ fn heard(room: &mut Room, held: &mut [Held], socket: usize, message: Message) ->
     };
     match (held[at].player, message) {
         (Some(player), message) => room.hears(player, message),
-        (None, Message::Join) => match room.join() {
+        (None, Message::Join { version }) => match room.join(version) {
             Ok(joined) => {
                 held[at].player = Some(joined.player);
                 joined.posts

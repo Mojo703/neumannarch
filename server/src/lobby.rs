@@ -4,6 +4,7 @@ use probe_protocol::{Control, Lobby, LobbyEdit, PlayerId, Refusal};
 use probe_sim::Setup;
 
 /// The lobby of one room, applied to in arrival order.
+#[derive(Clone)]
 pub(crate) struct Seating {
     lobby: Lobby,
 }
@@ -29,6 +30,18 @@ impl Seating {
     /// The lobby as it stands, which every member is sent after an edit.
     pub(crate) fn lobby(&self) -> &Lobby {
         &self.lobby
+    }
+
+    /// Every player holding a slot but the host, in slot order.
+    pub(crate) fn guests(&self) -> Vec<PlayerId> {
+        self.lobby
+            .slots()
+            .iter()
+            .filter_map(|slot| match slot.control {
+                Control::Player { player, .. } if player != self.lobby.host() => Some(player),
+                Control::Player { .. } | Control::Open | Control::Closed | Control::Bot(_) => None,
+            })
+            .collect()
     }
 
     /// Opens `who`'s slot again, so another machine may take it. False

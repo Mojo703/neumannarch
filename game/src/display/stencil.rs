@@ -1,13 +1,14 @@
 //! One glyph painted on the HUD, by the three rules: the frame in its fill
-//! state, the marks inside it, and the dim a preview draws it at.
+//! state, the marks inside it, and the dim a preview draws it at. Frame and
+//! marks are the sheet's own primitives (`glyph::Frame::points`,
+//! `glyph::primitives_of`), scaled by [`Stencil::half`].
 
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
+use probe_sim::Material;
 
-use crate::display::glyph::{Frame, Glyph, GlyphMark, geometry};
+use crate::display::glyph::{self, Glyph, Primitive};
+use crate::display::hue;
 use crate::display::scene::Fill;
-
-/// A glyph's outline width, in points.
-const OUTLINE_WIDTH: f32 = 1.5;
 
 /// A dashed outline's dash length, in points.
 const DASH_LENGTH: f32 = 3.0;
@@ -20,6 +21,11 @@ const DIM_ALPHA: f32 = 0.5;
 
 /// The straight segments an arc mark is approximated by.
 const ARC_SEGMENTS: usize = 8;
+
+/// A starved frame's outside belt's half-width, in cell units: the
+/// plating belt's own half-width (`43 - 17`, halved), since it sits along
+/// the same base.
+const STARVED_HALF_WIDTH: f32 = 13.0;
 
 /// One glyph ready to paint: where it goes, how big, whose colour it takes,
 /// and what its unit's state is.
@@ -35,13 +41,19 @@ pub struct Stencil<'a> {
     /// Painted at [`DIM_ALPHA`]: a hover preview, or a glyph the pointer
     /// says is leaving.
     pub dim: bool,
+    /// The material a frame has spent nothing on this second for want of,
+    /// drawn as a belt along the frame's base in that material's hue.
+    pub starved: Option<Material>,
 }
 
 impl Stencil<'_> {
     /// Paints the frame, then the marks over it.
     pub fn paint(&self, painter: &egui::Painter) {
         let points = self.frame_points();
-        let outline = Stroke::new(OUTLINE_WIDTH, self.faded(Color32::WHITE));
+        let outline = Stroke::new(
+            self.length(glyph::OUTLINE_WIDTH),
+            self.faded(Color32::WHITE),
+        );
         let fill = self.faded(self.colour);
 
         match self.fill {
@@ -68,117 +80,96 @@ impl Stencil<'_> {
         }
 
         self.paint_marks(painter, outline.color);
+        if let Some(material) = self.starved {
+            self.paint_starved(painter, material);
+        }
+    }
+
+    /// The belt a starved frame carries: along the base, just outside it,
+    /// so the plating belt inside the frame stays its own mark.
+    fn paint_starved(&self, painter: &egui::Painter, material: Material) {
+        let width = self.length(STARVED_HALF_WIDTH);
+        let thickness = self.length(glyph::MARK_WIDTH) / 2.0;
+        let base = self.centre.y + self.half + thickness;
+        painter.add(Shape::convex_polygon(
+            vec![
+                egui::pos2(self.centre.x - width, base - thickness),
+                egui::pos2(self.centre.x + width, base - thickness),
+                egui::pos2(self.centre.x + width, base + thickness),
+                egui::pos2(self.centre.x - width, base + thickness),
+            ],
+            self.faded(hue::of(material)),
+            Stroke::NONE,
+        ));
+    }
+
+    /// `point`, in the sheet's cell, at this stencil's own centre and
+    /// half-width.
+    fn at(&self, point: (f32, f32)) -> Pos2 {
+        let (x, y) = glyph::unit(point);
+        egui::pos2(self.centre.x + x * self.half, self.centre.y + y * self.half)
+    }
+
+    /// `length`, in the sheet's cell, at this stencil's own half-width.
+    fn length(&self, length: f32) -> f32 {
+        glyph::unit_length(length) * self.half
     }
 
     /// The frame's corners, apex up for a triangle.
     fn frame_points(&self) -> Vec<Pos2> {
-        let (Pos2 { x, y }, half) = (self.centre, self.half);
-        match self.glyph.frame {
-            Frame::Square => vec![
-                egui::pos2(x - half, y - half),
-                egui::pos2(x + half, y - half),
-                egui::pos2(x + half, y + half),
-                egui::pos2(x - half, y + half),
-            ],
-            Frame::Triangle => vec![
-                egui::pos2(x, y - half),
-                egui::pos2(x + half, y + half),
-                egui::pos2(x - half, y + half),
-            ],
-        }
+        self.glyph
+            .frame
+            .points()
+            .iter()
+            .map(|&point| self.at(point))
+            .collect()
     }
 
-    /// Each mark, at its own place on the frame; see [`GlyphMark::anchor`].
+    /// Every primitive the glyph's marks draw, at its own place and size.
     fn paint_marks(&self, painter: &egui::Painter, colour: Color32) {
-        for mark in &self.glyph.marks {
-            let (ax, ay) = mark.anchor(&self.glyph.frame);
-            let at = egui::pos2(
-                self.centre.x + ax * self.half,
-                self.centre.y + ay * self.half,
-            );
-            self.paint_mark(painter, mark, at, colour);
+        for primitive in glyph::primitives_of(&self.glyph.marks) {
+            self.paint_primitive(painter, &primitive, colour);
         }
     }
 
-    fn paint_mark(&self, painter: &egui::Painter, mark: &GlyphMark, at: Pos2, colour: Color32) {
-        let half = self.half;
-        match mark {
-            GlyphMark::Dot => {
-                let radius = (geometry::DOT_RADIUS * half).max(geometry::MIN_DOT_RADIUS);
-                painter.circle_filled(at, radius, colour);
+    fn paint_primitive(&self, painter: &egui::Painter, primitive: &Primitive, colour: Color32) {
+        let stroke = Stroke::new(self.length(glyph::MARK_WIDTH), colour);
+        match primitive {
+            Primitive::Dot { at, radius } => {
+                painter.circle_filled(self.at(*at), self.length(*radius), colour);
             }
-            GlyphMark::Bar => {
-                let width = (geometry::BAR_HALF_WIDTH * half).max(geometry::MIN_STROKE / 2.0);
-                let base = self.centre.y + half;
-                painter.add(Shape::convex_polygon(
-                    vec![
-                        egui::pos2(at.x - width, at.y),
-                        egui::pos2(at.x + width, at.y),
-                        egui::pos2(at.x + width, base),
-                        egui::pos2(at.x - width, base),
-                    ],
-                    colour,
-                    Stroke::NONE,
-                ));
+            Primitive::Line(points) => {
+                self.paint_round_line(painter, points, stroke);
             }
-            GlyphMark::Plus => {
-                let arm = geometry::PLUS_ARM * half;
-                let thickness = (geometry::PLUS_THICKNESS * half).max(geometry::MIN_STROKE);
-                let stroke = Stroke::new(thickness, colour);
-                painter.line_segment(
-                    [egui::pos2(at.x, at.y - arm), egui::pos2(at.x, at.y + arm)],
-                    stroke,
-                );
-                painter.line_segment(
-                    [egui::pos2(at.x - arm, at.y), egui::pos2(at.x + arm, at.y)],
-                    stroke,
-                );
+            Primitive::Ring { at, radius } => {
+                painter.circle_stroke(self.at(*at), self.length(*radius), stroke);
             }
-            GlyphMark::Chevron => {
-                let span = geometry::CHEVRON_HALF_WIDTH * half;
-                let rise = geometry::CHEVRON_HEIGHT * half;
-                let thickness = (geometry::CHEVRON_THICKNESS * half).max(geometry::MIN_STROKE);
-                let stroke = Stroke::new(thickness, colour);
-                let tip = egui::pos2(at.x, at.y);
-                painter.line_segment([egui::pos2(at.x - span, at.y - rise), tip], stroke);
-                painter.line_segment([tip, egui::pos2(at.x + span, at.y - rise)], stroke);
-            }
-            GlyphMark::Arc => {
-                let radius = geometry::ARC_RADIUS * half;
-                let thickness = (geometry::ARC_THICKNESS * half).max(geometry::MIN_STROKE);
-                let stroke = Stroke::new(thickness, colour);
+            Primitive::Arc { at, radius } => {
+                let centre = self.at(*at);
+                let radius = self.length(*radius);
                 let points: Vec<Pos2> = (0..=ARC_SEGMENTS)
                     .map(|step| {
-                        let angle = -geometry::ARC_HALF_ANGLE
-                            + 2.0 * geometry::ARC_HALF_ANGLE * step as f32 / ARC_SEGMENTS as f32;
+                        let angle = -core::f32::consts::FRAC_PI_2
+                            + core::f32::consts::PI * step as f32 / ARC_SEGMENTS as f32;
                         let (sin, cos) = angle.sin_cos();
-                        egui::pos2(at.x + radius * sin, at.y - radius * cos)
+                        egui::pos2(centre.x + radius * sin, centre.y - radius * cos)
                     })
                     .collect();
                 painter.add(Shape::line(points, stroke));
             }
-            GlyphMark::Belt => {
-                let width = geometry::BELT_HALF_WIDTH * half;
-                let thickness = (geometry::BELT_THICKNESS * half).max(geometry::MIN_STROKE / 2.0);
-                painter.add(Shape::convex_polygon(
-                    vec![
-                        egui::pos2(at.x - width, at.y - thickness),
-                        egui::pos2(at.x + width, at.y - thickness),
-                        egui::pos2(at.x + width, at.y + thickness),
-                        egui::pos2(at.x - width, at.y + thickness),
-                    ],
-                    colour,
-                    Stroke::NONE,
-                ));
-            }
-            GlyphMark::Ring => {
-                let thickness = (geometry::RING_THICKNESS * half).max(geometry::MIN_STROKE);
-                painter.circle_stroke(
-                    at,
-                    geometry::RING_RADIUS * half,
-                    Stroke::new(thickness, colour),
-                );
-            }
+        }
+    }
+
+    /// `points`, in the sheet's cell, as connected segments with a filled
+    /// circle at each vertex, approximating `stroke`'s round caps and
+    /// joins.
+    fn paint_round_line(&self, painter: &egui::Painter, points: &[(f32, f32)], stroke: Stroke) {
+        let screen: Vec<Pos2> = points.iter().map(|&point| self.at(point)).collect();
+        for pair in screen.windows(2) {
+            painter.line_segment([pair[0], pair[1]], stroke);
+        }
+        for &vertex in &screen {
+            painter.circle_filled(vertex, stroke.width / 2.0, stroke.color);
         }
     }
 

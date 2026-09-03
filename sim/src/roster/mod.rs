@@ -2,7 +2,7 @@
 
 use core::ops::Index;
 
-pub use row::{Kind, Row, Weapon};
+pub use row::{Kind, MassClass, Row, Weapon};
 pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SCOUT, SHIPYARD, STORAGE};
 
 use crate::ids::RowId;

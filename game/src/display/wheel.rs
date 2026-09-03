@@ -152,6 +152,7 @@ impl Wheel {
                 colour: seat_color32(self.seat),
                 fill: Fill::Solid,
                 dim: false,
+                starved: None,
             }
             .paint(painter);
         }

@@ -5,7 +5,7 @@
 use core::ops::Add;
 
 use crate::ids::{EntityId, RockId, SeatId};
-use crate::materials::{Materials, Stockpile};
+use crate::materials::{Material, Materials, Stockpile};
 use crate::state::{Entity, State};
 use crate::time::Tick;
 
@@ -233,6 +233,9 @@ pub struct Spend {
     /// The materials actually taken.
     pub materials: Materials,
     pub completed: bool,
+    /// The material the spend wanted and did not have, where it took
+    /// nothing at all.
+    pub short: Option<Material>,
 }
 
 /// An effort clipped to the work its frame has left.
@@ -283,6 +286,10 @@ impl Want {
             frame: self.frame,
             materials: taken,
             completed: self.work.progress + taken.total() >= self.work.cost.total(),
+            short: match taken.total() > 0.0 {
+                true => None,
+                false => self.work.cost.binding_material(ratios),
+            },
         }
     }
 }
@@ -373,6 +380,7 @@ mod tests {
                 frame: 0,
                 materials: Materials::new(0.2, 0.0, 0.05),
                 completed: false,
+                short: None,
             }]
         );
         assert_eq!(pile.stock(), Materials::new(0.0, 0.0, 0.95));
@@ -396,6 +404,7 @@ mod tests {
                 frame: 0,
                 materials: Materials::ZERO,
                 completed: false,
+                short: Some(Material::Metals),
             }]
         );
         assert_eq!(pile.stock(), Materials::ZERO);

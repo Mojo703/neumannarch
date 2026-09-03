@@ -173,11 +173,11 @@ impl Span {
 mod tests {
     use core::f32::consts::{PI, TAU};
 
-    use probe_sim::SeatId;
+    use probe_sim::{RowId, SeatId};
 
     use super::{Geometry, Layout};
     use crate::display::glyph::{Frame, Glyph, Size};
-    use crate::display::scene::{Fill, Mark, Run};
+    use crate::display::scene::{Fill, Mark, Reason, Run};
 
     /// A 100 px ring with 16 px glyphs: a lone run holds thirty-nine.
     const RING: Geometry = Geometry {
@@ -211,6 +211,7 @@ mod tests {
                     glyph: any_glyph(),
                     fill: Fill::Solid,
                     dim: false,
+                    reason: Reason::Here(RowId(0)),
                 })
                 .collect(),
         }

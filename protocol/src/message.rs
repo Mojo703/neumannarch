@@ -15,14 +15,17 @@ pub enum Refusal {
     NotReady(NotReady),
     /// Every slot is held, so a joining machine has nowhere to sit.
     Full,
+    /// The joining machine speaks another version of the protocol.
+    Version,
 }
 
 /// One message between a member of a room and the room. Everything before
 /// [`Message::Start`] is about the lobby; everything after is the match.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Message {
-    /// A machine asking to enter the room.
-    Join,
+    /// A machine asking to enter the room, speaking this version of the
+    /// protocol.
+    Join { version: u32 },
     /// The id the room gave the joiner, and the lobby as it stands.
     Welcome { player: PlayerId, lobby: Lobby },
     /// An edit a member asks the room to apply.
@@ -41,8 +44,13 @@ pub enum Message {
     Hash { tick: Tick, hash: u64 },
     /// Two members' hashes at this tick differ, which ends the match.
     Desync { tick: Tick },
+    /// The host asking the room to set the same shape up again, which
+    /// answers with the lobby it reopens on.
+    Rematch,
     /// The sender is leaving the room.
     Leave,
+    /// The room has opened the slot the machine it is addressing held.
+    Removed,
 }
 
 #[cfg(test)]
@@ -59,7 +67,9 @@ mod tests {
     fn every_message() -> Vec<Message> {
         let lobby = crate::lobby::Lobby::skirmish(PlayerId::HOST);
         vec![
-            Message::Join,
+            Message::Join {
+                version: crate::VERSION,
+            },
             Message::Welcome {
                 player: PlayerId(3),
                 lobby: lobby.clone(),
@@ -72,6 +82,10 @@ mod tests {
             Message::Refused(Refusal::Edit(Refused::NotHost)),
             Message::Refused(Refusal::NotReady(NotReady::OpenSeat { slot: 1 })),
             Message::Refused(Refusal::Full),
+            Message::Refused(Refusal::Version),
+            Message::Edit(LobbyEdit::Kick(PlayerId(4))),
+            Message::Rematch,
+            Message::Removed,
             Message::Start(lobby.freeze().expect("a skirmish is a match")),
             Message::Command(Stamped {
                 tick: Tick(9),

@@ -40,6 +40,14 @@ target-state only. Agents see this file only through their briefs.
   from the ships it counts, and a judge read the belt's ship billboards
   near the rock as unexplained units outside the ring. Held with the
   ring-inside-the-rock gap for the owner's ruling on rings at close zoom.
+- Owner's points relayed by the icon agent 2026-09-03, pending rulings:
+  a seat's colour and number against its team's representation in the
+  lobby and on rings (DISPLAY.md numbers seats and teams independently
+  of colour); whether a control for an unbuilt feature (Surrender) should
+  exist at all rather than stand disabled with a reason, which would
+  amend the Controls section; camera locking to a selected rock, already
+  ruled and queued as the focus unit; Regenerate renamed Random Seed by
+  the owner's own edit across the screens and DISPLAY.md.
 - Held for the owner's play, in one list: heavy-row lag after a send and
   its braking-pull candidate; the planner's earliest-fit arrival; crowd
   packing past half the spacing; unarmed rows never chase; tidal drift at
@@ -103,11 +111,19 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
    lobby (the room's broadcast is the truth). Was: rooms, forwarding, hash reports, desync,
    records; host embeds it; join by address; pacing and the waiting
    screen. Multiplayer functional.
-7. Controls (owner critique 2026-09-03, DISPLAY.md Controls section):
+7. Controls: landed 2026-09-03, gate green on the overseer's run (259
+   tests; `check.sh`'s fmt step now scoped to this workspace's crates,
+   since `cargo fmt --all` reached into the engine's tree). Key files
+   for the owner: game/src/screens/control.rs, field.rs, lobby.rs,
+   protocol/src/lobby.rs (Kick, AlreadySeated), server/src/rooms.rs,
+   sim/src/state/radar.rs, step/fire.rs (Shots::exchanges). Overseer
+   ruling: `Message::Removed` for a kick, distinct from Leave, stands.
+   The engine work landed the same day: wire Quit, the points-per-pixel
+   accessor and the tick interval as a small follow-up. Was:
    three kinds of control, enabled means it will work with the reason on
    hover, no notices or errors except inside the join field; the lobby
    row as holder choice with Kick, team choice, seed field with
-   Regenerate inside, clock choice; stalled-for-material belt mark and
+   Random Seed inside, clock choice; stalled-for-material belt mark and
    hover reasons on run glyphs; wheel bands disabled at the cap and at
    zero; Quit disabled with its reason until the engine can close;
    Rematch in a room. Next unit, Opus, critique stop first.
@@ -127,9 +143,46 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
     rule (mesh above a screen size, glyph below), the stencil icon, and a
     DESIGN.md line that a faction skews the hull's dialect and never the
     glyph.
-12. A sweep over the whole codebase for the comment and test rule above:
-    cut useless tests, replace comments with types, rename tests as
-    guarantees; one agent per crate, owner reviews the diff.
+12. The structural programme (owner, 2026-09-03), in the Opus audit's
+    order: (1) small collapses: Attractor is Body, View::want and
+    rock_body, a two-method Transport, Room folded into Socket, one
+    frame preamble for belt-drawing screens, one sim test fixture module;
+    (2) a weapon's ready moment on its entity; (3) a flight on its
+    members, FlightId deleted; (4) a frame on its post; (5) one Vision
+    per step, manoeuvring folded into propagation as one function,
+    PerSeat; (6) one rock type from sim to pixel; (7) one mark state
+    replacing Fill and Reason; (8) Layout yields placed marks and one
+    Dial owns polar geometry; (9) mark geometry as primitives, painted
+    once and rasterised once, then re-judged; (10) one Log type; (11) one
+    seating authority on Lobby, freeze returning the seating; (12) the
+    agent's knowledge as one row per rock; (13) the flow as one `Stage`
+    enum with the room inside it as `Authority { Local, Guest, Host }`,
+    screens returning the next Stage and three asks (Host, Join, Leave);
+    pulled forward by the owner on 2026-09-03 with (11) as its
+    prerequisite, on the controls agent after its lobby table fix; it
+    also lists other loose-field lifecycles in game and server for the
+    owner's ruling; (14) the roster out of the hashed
+    state only if the two cost reports move on a measured prototype.
+    DESIGN ruling: Unplanned is deleted; a send that cannot be planned
+    is retried silently and the bot keeps its patience timer. Comments:
+    all in-body comments go except a required verdict line; rustdoc one
+    sentence on public items only. ARCHITECTURE.md rewritten per unit.
+    Opus for 2, 3, 4, 5, 12; Sonnet for the rest. Also lands the Sonnet
+    audits' 530 lines inside these units.
+    The size sweep as first framed (owner, 2026-09-03). Five audits found about 530
+    deletable lines: duplicated facts (~160, four already relocated out of
+    view.rs by the controls unit; the seat-index rule derived three ways
+    across protocol, game and server goes onto `Lobby`), tests (~185),
+    comments (~120), agents and display (~56: two `is_structure`s, two
+    material palettes, three clock-angle conversions, the look binary's
+    `Mark` build break), surface (~10). Owner's rulings: land all of it;
+    remove all or almost all comments, in-body comments entirely except a
+    required verdict line, rustdoc one sentence on public items only; and
+    a deeper structural audit on Opus for shapes that delete logic and
+    data storage (parallel stores in State, the View to Scene to Layout
+    chain, the lobby's five shapes, the match lifecycle types, the agents'
+    five shapes), in flight 2026-09-03. Every brief carries a line ceiling
+    from now on, and check.sh gains a duplication check.
 13. The held list from play, each a ruling then a unit; fog in the
     display; gamepad; the twelve-slot wheel; a display for an unplannable
     send.
@@ -154,6 +207,20 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
   no test per branch, field, helper or identity; a test no plausible
   wrong implementation fails is deleted. A sweep unit over the existing
   code is queued after the state system lands.
+- Naming rule for every brief (owner, 2026-09-03): a function is named
+  by what it returns or does in the game's words, never `of`, `get`,
+  `handle`, `process`, `run`, `update`, `helper`, `util` or a suffix;
+  a type is a noun the design documents use; a test is named as the
+  guarantee sentence, never mechanically and never with `test`, `works`,
+  `should`, `check`; comments that restate, narrate, or section are
+  deleted; rustdoc never begins "This function" or "Returns".
+- Placement rule for every brief (owner, 2026-09-03): a computation
+  lives on the type that is its subject and there is one computation of
+  each fact; before writing a derivation an agent searches for the type
+  that owns the fact and extends it; a second derivation anywhere is a
+  defect. The first instance: sim/src/state/view.rs re-deriving counts,
+  frame fractions, exchanges and radar; being relocated in the controls
+  unit. The codebase sweep (plan) audits for duplicates crate by crate.
 - Match setup, bots included, is the start menu's job (owner,
   2026-09-03); the playable takes no command-line arguments.
 
@@ -230,6 +297,12 @@ Reported to the owner as it is found; the game never works around a gap.
   drag's wheel count cannot be verified headlessly; the playable verifies
   zoom through a key binding instead. Found by the playable agent
   2026-09-03; for the owner's engine session.
+- Screens outside the match move to egui's own layout and widgets
+  under one game style (owner, 2026-09-03), driven headlessly through
+  `Session::offer_ui`, which the multiplayer agent overlooked when it
+  reported offscreen input never reaching the UI layer; the hand-painted
+  control vocabulary, the text field and every per-screen `Places` go.
+  Queued on the controls agent after the `Stage` unit.
 - The painter's points-per-pixel is reachable only inside a `ctx.ui`
   closure, so every screen opens a throwaway `ctx.ui` to read it before
   drawing; a `FrameCtx::points_per_pixel()` would delete that. Found
@@ -250,6 +323,8 @@ Reported to the owner as it is found; the game never works around a gap.
   `egui::Event::Text`, Backspace and Enter off the UI layer's context, and
   `Session::offer_ui` is behind the `ui` feature, so typing is driven
   headlessly only behind it. Found 2026-09-03.
+- The owner launched the engine work for the close request, the
+  points-per-pixel accessor and the runtime tick interval on 2026-09-03.
 - A game cannot quit: the engine exits only on the window's close
   request and there is no `ctx.quit()`; the pause menu has Resume only.
   Found 2026-09-03.

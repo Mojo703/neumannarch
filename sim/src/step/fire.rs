@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::ids::{EntityId, SeatId};
+use crate::place::Place;
 use crate::roster::Weapon;
 use crate::state::sweep::Sweep;
 use crate::state::{Entity, Ready, Sight, State};
@@ -19,6 +20,18 @@ pub struct Hit {
     pub target: EntityId,
     /// Hit points, after falloff and the target's plating.
     pub damage: f64,
+}
+
+/// The shots at one place, by or on one seat, in one tick. A fight arc
+/// starts and refreshes on these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exchange {
+    pub place: Place,
+    pub seat: SeatId,
+    /// A weapon of the seat's fired from the place.
+    pub fired: bool,
+    /// A shot landed on one of the seat's at the place.
+    pub landed: bool,
 }
 
 /// Every shot of one tick, in the order they resolved, and when the
@@ -172,5 +185,40 @@ impl Shots {
             *damage.entry(hit.target).or_default() += hit.damage;
         }
         damage
+    }
+
+    /// Where this tick's shots were fired and landed, as `sight` gives
+    /// them: one entry per place and seat, in place then seat order,
+    /// counting only shots by or on an entity that sight shows.
+    pub fn exchanges(&self, state: &State, sight: &Sight) -> Vec<Exchange> {
+        let mut found: BTreeMap<(Place, SeatId), (bool, bool)> = BTreeMap::new();
+        let mut note = |id: EntityId, landed: bool| {
+            if !sight.sees(id) {
+                return;
+            }
+            let Some(entity) = state.entity(id) else {
+                return;
+            };
+            let at = found
+                .entry((entity.home(), entity.seat()))
+                .or_insert((false, false));
+            match landed {
+                true => at.1 = true,
+                false => at.0 = true,
+            }
+        };
+        for hit in &self.hits {
+            note(hit.shooter, false);
+            note(hit.target, true);
+        }
+        found
+            .into_iter()
+            .map(|((place, seat), (fired, landed))| Exchange {
+                place,
+                seat,
+                fired,
+                landed,
+            })
+            .collect()
     }
 }

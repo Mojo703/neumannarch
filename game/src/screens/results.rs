@@ -15,6 +15,7 @@ use crate::display::scene::{Fill, Scene};
 use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
 use crate::display::{belt, hud};
+use crate::screens::control::{Controls, Rule};
 use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 
@@ -70,13 +71,13 @@ impl Results {
     }
 
     /// Paints the results over the still belt and answers what the player
-    /// picked. `rematch` says whether a rematch is offered, which a match
-    /// played in a room is not: the room would have to open its lobby
-    /// again, and no message asks it to.
+    /// picked. `rematch` is whether asking for one works: the host of a
+    /// room asks the room to open its lobby again, and a skirmish opens
+    /// its own.
     pub fn frame<G: crate::screens::Playable>(
         &mut self,
         ctx: &mut FrameCtx<'_, G>,
-        rematch: bool,
+        rematch: &Rule,
     ) -> Option<Step>
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
@@ -140,6 +141,7 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
             colour: seat_color32(colour),
             fill: Fill::Solid,
             dim: false,
+            starved: None,
         }
         .paint(panel.painter());
     }
@@ -157,7 +159,7 @@ fn paint(
     panel: &Panel<'_>,
     standings: &Standings,
     teams: &[TeamId],
-    rematch: bool,
+    rematch: &Rule,
 ) -> Option<Step> {
     let window = panel.window();
     let rows = standings.teams().len();
@@ -190,11 +192,14 @@ fn paint(
     );
     let again = Rect::from_min_size(actions, Vec2::new(ACTION_WIDTH, panel::ROW_HEIGHT));
     let leave = again.translate(Vec2::new(ACTION_WIDTH + panel::ROW_HEIGHT, 0.0));
-    if panel.action(again, "Rematch", rematch) {
-        return Some(Step::Rematch);
+    let mut controls = Controls::over(panel);
+    let mut picked = None;
+    if controls.action(again, "Rematch", rematch) {
+        picked = Some(Step::Rematch);
     }
-    if panel.action(leave, "Leave", true) {
-        return Some(Step::Title);
+    if controls.action(leave, "Leave", &Rule::Allows) {
+        picked = Some(Step::Title);
     }
-    None
+    controls.finish();
+    picked
 }

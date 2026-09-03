@@ -46,7 +46,9 @@ impl Socket {
             link: Link::opening(address),
             address: address.to_string(),
         };
-        socket.say(Message::Join);
+        socket.say(Message::Join {
+            version: probe_protocol::VERSION,
+        });
         socket
     }
 

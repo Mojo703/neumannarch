@@ -1,22 +1,26 @@
-//! The lobby: the belt the match will be played on, behind the seats
-//! grouped by team and the host's shape.
+//! The lobby: the belt the match will be played on, behind the table of
+//! seats and the match's settings.
 
 use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use probe_agents::Personality;
-use probe_protocol::{Bot, Control, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, SeatSlot};
+use probe_protocol::{Bot, Control, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
 use probe_sim::belt::Belt;
 use probe_sim::{TICKS_PER_SECOND, TeamId, Tick};
 
 use crate::controls::Button;
 use crate::display::camera::BeltCamera;
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
+use crate::display::label::titled;
 use crate::display::scene::Scene;
 use crate::display::screen::Screen;
 use crate::display::{belt, hud};
 use crate::screens::Playable;
+use crate::screens::control::{Chose, Controls, Rule, Value, Valued};
+use crate::screens::field::{Allow, Field, MAX_SEED, Typed};
 use crate::screens::panel::{self, Panel};
+use crate::screens::panning::Panning;
 
 /// The eye-to-focus distance the lobby and loading screens show the belt
 /// from, in meters.
@@ -26,7 +30,7 @@ use crate::screens::panel::{self, Panel};
 /// of it.
 pub const PREVIEW_ZOOM: f64 = 12_000.0;
 
-/// The clocks the lobby offers, in ticks, which its clock action cycles.
+/// The clocks the lobby's clock choice offers, in ticks.
 const CLOCKS: [Tick; 4] = [
     Tick(60 * TICKS_PER_SECOND as u64),
     Tick(5 * 60 * TICKS_PER_SECOND as u64),
@@ -34,25 +38,46 @@ const CLOCKS: [Tick; 4] = [
     Tick(30 * 60 * TICKS_PER_SECOND as u64),
 ];
 
-/// The personality Add Bot seats, which clicking the holder then cycles.
-const FIRST_BOT: Bot = Bot::Turtle;
+/// Every personality a seat's holder can be, in the order the choice
+/// offers them.
+const BOTS: [Bot; 2] = [Bot::Turtle, Bot::Expand];
 
-/// How wide a seat row stands, in points.
-const SEAT_WIDTH: f32 = 380.0;
+/// How wide the seat table's own column of numbers stands, in points:
+/// wide enough that its label clears the holder's.
+const SEAT_WIDTH: f32 = 52.0;
 
-/// How wide the shape's own rows stand, in points.
-const SHAPE_WIDTH: f32 = 200.0;
+/// How wide the match's settings stand, in points.
+const SETTINGS_WIDTH: f32 = 320.0;
 
-/// How wide a seat's colour swatch stands, in points.
-const SWATCH: f32 = 14.0;
+/// How much of a settings row its label takes, the rest being its
+/// control.
+const LABEL_SHARE: f32 = 0.3;
+
+/// How wide a seat's holder choice stands, in points.
+const HOLDER_WIDTH: f32 = 150.0;
+
+/// How wide a seat's Kick action stands, in points.
+const KICK_WIDTH: f32 = 60.0;
+
+/// How wide a seat's team choice stands, in points.
+const TEAM_WIDTH: f32 = 104.0;
 
 /// How wide a seat's readiness mark stands, in points.
-const READY_WIDTH: f32 = 76.0;
+const READY_WIDTH: f32 = 62.0;
+
+/// How far apart the cells of a seat row stand, in points.
+const CELL_GAP: f32 = 8.0;
 
 /// How wide a bottom action stands, in points.
 const ACTION_WIDTH: f32 = 150.0;
 
-/// The lobby screen: the lobby itself, and the belt its seed lays.
+/// How wide the seat table stands, in points: every cell and the gaps
+/// between them.
+const TABLE_WIDTH: f32 =
+    SEAT_WIDTH + HOLDER_WIDTH + KICK_WIDTH + TEAM_WIDTH + READY_WIDTH + 4.0 * CELL_GAP;
+
+/// The lobby screen: the lobby itself, the belt its seed lays, and which
+/// choice has its list open.
 pub struct LobbyScreen {
     lobby: Lobby,
     me: PlayerId,
@@ -61,67 +86,17 @@ pub struct LobbyScreen {
     /// The seed the belt was laid from, so the belt is rebuilt the instant
     /// the seed changes.
     laid: u64,
+    seed: Field,
+    open: Option<Open>,
+    panning: Panning,
 }
 
-impl LobbyScreen {
-    /// `lobby` as `me` sees it.
-    pub fn of(lobby: Lobby, me: PlayerId) -> LobbyScreen {
-        let laid = lobby.seed();
-        let scene = belt_of(laid);
-        let camera = BeltCamera::new(scene.centre(), PREVIEW_ZOOM);
-        LobbyScreen {
-            lobby,
-            me,
-            scene,
-            camera,
-            laid,
-        }
-    }
-
-    /// Paints the belt, the seats and the shape, and answers what the
-    /// viewer asked for and the edits it asked of the lobby.
-    ///
-    /// It applies no edit itself: the room a multiplayer lobby is in is the
-    /// authority on it, and a skirmish's own flow stands in for one.
-    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Asked
-    where
-        G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
-    {
-        if self.laid != self.lobby.seed() {
-            self.laid = self.lobby.seed();
-            self.scene = belt_of(self.laid);
-        }
-
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
-        let size = ctx.window_size();
-        let screen = Screen::of(&self.camera, size, points_per_pixel);
-        belt::draw(&self.scene, &screen, ctx);
-
-        let pointer = screen.point_at(ctx.pointer());
-        let clicked = ctx.pressed(Button::Select);
-        let window = panel::window_of(size, points_per_pixel);
-        let scene = &self.scene;
-        let lobby = &self.lobby;
-        let me = self.me;
-        let mut asked = Asked::default();
-        ctx.ui(|ui| {
-            hud::paint(scene, &screen, None, ui.painter());
-            let panel = Panel::new(ui.painter(), window, pointer, clicked);
-            asked = paint(&panel, lobby, me);
-        });
-        asked
-    }
-
-    /// The lobby as it stands, which a match is frozen from.
-    pub fn lobby(&self) -> &Lobby {
-        &self.lobby
-    }
-
-    /// Takes the lobby the room says stands now.
-    pub fn takes(&mut self, lobby: Lobby) {
-        self.lobby = lobby;
-    }
+/// The choice whose list is open, where one is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Open {
+    Holder(usize),
+    Team(usize),
+    Clock,
 }
 
 /// What the lobby's viewer asked for this frame.
@@ -142,87 +117,486 @@ pub enum Wants {
     Start,
 }
 
-/// One line of the seat column: a team's heading, one of its seats, or one
-/// of the host's actions under it.
-enum Line {
-    /// A team, by the number it is shown as.
-    Heading(TeamId),
-    /// The slot at this index.
-    Seat(usize),
-    /// Add Bot and Open Seat, on this team.
-    Actions(TeamId),
+/// Where the lobby's controls stand, which its paint, its hit test and the
+/// headless drive all read.
+pub struct Places {
+    /// The table's column labels, which no control stands in.
+    pub head: Row,
+    /// One row per slot the match can hold, in slot order.
+    pub rows: Vec<Row>,
+    /// The seed, with Random Seed inside its right edge, where
+    /// [`crate::screens::control::inside_rect`] puts it.
+    pub seed: Rect,
+    pub clock: Rect,
+    /// Start for the host, Ready for a guest.
+    pub act: Rect,
+    pub leave: Rect,
 }
 
-/// Every team that holds a seat, in team order.
-fn teams(lobby: &Lobby) -> Vec<TeamId> {
-    let mut teams: Vec<TeamId> = lobby
-        .slots()
-        .iter()
-        .filter(|slot| slot.control != Control::Closed)
-        .map(|slot| slot.team)
-        .collect();
-    teams.sort_unstable();
-    teams.dedup();
-    teams
+/// Where one row of the seat table stands, cell by cell.
+pub struct Row {
+    pub slot: usize,
+    /// The seat's number in a square of its colour.
+    pub seat: Rect,
+    pub holder: Rect,
+    /// Kick, drawn only for a seat a guest holds.
+    pub kick: Rect,
+    pub team: Rect,
+    pub ready: Rect,
 }
 
-/// The seat column top to bottom: each team that holds a seat, its seats
-/// under it, and the host's own actions under those. A closed seat is not
-/// drawn, so a team with none of its own is not either.
-fn lines(lobby: &Lobby, host: bool) -> Vec<Line> {
-    let mut lines = Vec::new();
-    for team in teams(lobby) {
-        lines.push(Line::Heading(team));
-        lines.extend(
-            lobby
-                .slots()
-                .iter()
-                .enumerate()
-                .filter(|(_, slot)| slot.team == team && slot.control != Control::Closed)
-                .map(|(at, _)| Line::Seat(at)),
-        );
-        if host {
-            lines.push(Line::Actions(team));
+impl LobbyScreen {
+    /// `lobby` as `me` sees it.
+    pub fn of(lobby: Lobby, me: PlayerId) -> LobbyScreen {
+        let laid = lobby.seed();
+        let scene = belt_from(laid);
+        let camera = BeltCamera::new(scene.centre(), PREVIEW_ZOOM);
+        LobbyScreen {
+            lobby,
+            me,
+            scene,
+            camera,
+            laid,
+            seed: Field::holding(&laid.to_string(), Allow::Digits(MAX_SEED)),
+            open: None,
+            panning: Panning::still(),
         }
     }
-    lines
-}
 
-/// The first closed slot, which is where a seat added to a team goes;
-/// `None` once every slot is held.
-fn spare(lobby: &Lobby) -> Option<usize> {
-    lobby
-        .slots()
-        .iter()
-        .position(|slot| slot.control == Control::Closed)
-}
+    /// Paints the belt, the seats and the shape, and answers what the
+    /// viewer asked for and the edits it asked of the lobby.
+    ///
+    /// It applies no edit itself: the room a multiplayer lobby is in is the
+    /// authority on it, and a skirmish's own flow stands in for one.
+    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Asked
+    where
+        G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
+    {
+        if self.laid != self.lobby.seed() {
+            self.laid = self.lobby.seed();
+            self.scene = belt_from(self.laid);
+        }
 
-/// The edits that put `control` on `team` in the first spare slot, or none
-/// where every slot is held.
-fn added(lobby: &Lobby, team: TeamId, control: Control) -> Vec<LobbyEdit> {
-    let Some(slot) = spare(lobby) else {
-        return Vec::new();
-    };
-    vec![
-        LobbyEdit::SetSlot { slot, control },
-        LobbyEdit::SetTeam { slot, team },
-    ]
-}
+        let mut points_per_pixel = 1.0;
+        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let size = ctx.window_size();
+        let window = panel::window_of(size, points_per_pixel);
+        self.panning.drag(ctx, &mut self.camera, size, true);
+        let screen = Screen::of(&self.camera, size, points_per_pixel);
+        belt::draw(&self.scene, &screen, ctx);
 
-/// The next thing a click on a bot's holder puts in its slot: the
-/// personalities in turn. A person's own holder does not cycle.
-fn cycled(control: Control) -> Control {
-    match control {
-        Control::Bot(Bot::Turtle) => Control::Bot(Bot::Expand),
-        Control::Bot(Bot::Expand) => Control::Bot(Bot::Turtle),
-        Control::Open | Control::Closed | Control::Player { .. } => control,
+        let pointer = screen.point_at(ctx.pointer());
+        let clicked = ctx.pressed(Button::Select);
+        let mut asked = Asked::default();
+        ctx.ui(|ui| {
+            hud::paint(&self.scene, &screen, None, ui.painter());
+            let panel = Panel::new(ui.painter(), window, pointer, clicked);
+            asked = self.paint(&panel, &Typed::this_frame(ui.ctx()));
+        });
+        asked
+    }
+
+    /// The lobby as it stands, which a match is frozen from.
+    pub fn lobby(&self) -> &Lobby {
+        &self.lobby
+    }
+
+    /// Takes the lobby the room says stands now.
+    pub fn takes(&mut self, lobby: Lobby) {
+        self.lobby = lobby;
+    }
+
+    /// The whole screen, and what its viewer asked for.
+    fn paint(&mut self, panel: &Panel<'_>, typed: &Typed) -> Asked {
+        let places = Places::over(panel.window());
+        let mut controls = Controls::over(panel);
+        let mut asked = Asked::default();
+
+        for (label, cell) in [
+            ("Seat", places.head.seat),
+            ("Holder", places.head.holder),
+            ("Team", places.head.team),
+            ("Ready", places.head.ready),
+        ] {
+            panel.label(
+                label,
+                Pos2::new(cell.left(), cell.center().y),
+                panel::DIM_INK,
+            );
+        }
+        for row in &places.rows {
+            self.paint_row(panel, &mut controls, row, &mut asked.edits);
+        }
+        self.paint_shape(panel, &mut controls, &places, typed, &mut asked.edits);
+        self.paint_bottom(&mut controls, &places, &mut asked);
+
+        if controls.finish() {
+            self.open = None;
+        }
+        asked
+    }
+
+    /// One row of the table: the seat's number in its colour, who holds
+    /// it, the Kick beside a guest, its team, and its readiness mark. A
+    /// closed seat's team and ready cells stand empty.
+    fn paint_row(
+        &mut self,
+        panel: &Panel<'_>,
+        controls: &mut Controls<'_>,
+        row: &Row,
+        edits: &mut Vec<LobbyEdit>,
+    ) {
+        let slot = self.lobby.slots()[row.slot];
+        let square = Rect::from_center_size(
+            Pos2::new(
+                row.seat.left() + panel::ROW_HEIGHT / 2.0,
+                row.seat.center().y,
+            ),
+            Vec2::splat(panel::ROW_HEIGHT * 0.6),
+        );
+        panel.painter().rect_filled(
+            square,
+            0.0,
+            self.lobby
+                .seat_of(row.slot)
+                .map_or(Color32::from_gray(50), seat_color32),
+        );
+        panel.text(
+            &format!("{}", row.slot + 1),
+            square.center(),
+            Align2::CENTER_CENTER,
+            panel::INK,
+            panel::BODY_SIZE,
+        );
+
+        let holds = self.rule(LobbyEdit::SetSlot {
+            slot: row.slot,
+            control: slot.control,
+        });
+        let chosen = controls.choice(
+            row.holder,
+            &self.holder_name(slot.control),
+            &self.holder_choices(row.slot),
+            &holds,
+            self.open == Some(Open::Holder(row.slot)),
+        );
+        match chosen {
+            Some(Chose::Toggled) => self.toggle(Open::Holder(row.slot)),
+            Some(Chose::Value(control)) => {
+                self.open = None;
+                edits.push(LobbyEdit::SetSlot {
+                    slot: row.slot,
+                    control,
+                });
+            }
+            None => {}
+        }
+
+        if let Control::Player { player, .. } = slot.control
+            && player != self.lobby.host()
+            && controls.action(row.kick, "Kick", &self.rule(LobbyEdit::Kick(player)))
+        {
+            edits.push(LobbyEdit::Kick(player));
+        }
+
+        if slot.control == Control::Closed {
+            return;
+        }
+
+        let sits = self.rule(LobbyEdit::SetTeam {
+            slot: row.slot,
+            team: slot.team,
+        });
+        let chosen = controls.choice(
+            row.team,
+            &team_name(slot.team),
+            &self.team_choices(row.slot),
+            &sits,
+            self.open == Some(Open::Team(row.slot)),
+        );
+        match chosen {
+            Some(Chose::Toggled) => self.toggle(Open::Team(row.slot)),
+            Some(Chose::Value(team)) => {
+                self.open = None;
+                edits.push(LobbyEdit::SetTeam {
+                    slot: row.slot,
+                    team,
+                });
+            }
+            None => {}
+        }
+
+        panel.label(
+            match slot.control {
+                Control::Player { ready: true, .. } => "Ready",
+                Control::Player { ready: false, .. } => "Waiting",
+                Control::Open | Control::Closed | Control::Bot(_) => "",
+            },
+            Pos2::new(row.ready.left(), row.ready.center().y),
+            panel::DIM_INK,
+        );
+    }
+
+    /// The host's shape down the right: the seed with Random Seed inside
+    /// it, and the clock.
+    fn paint_shape(
+        &mut self,
+        panel: &Panel<'_>,
+        controls: &mut Controls<'_>,
+        places: &Places,
+        typed: &Typed,
+        edits: &mut Vec<LobbyEdit>,
+    ) {
+        for (label, control) in [("Seed", places.seed), ("Clock", places.clock)] {
+            panel.label(
+                label,
+                Pos2::new(
+                    control.left() - SETTINGS_WIDTH * LABEL_SHARE,
+                    control.center().y,
+                ),
+                panel::DIM_INK,
+            );
+        }
+        let seeds = self.rule(LobbyEdit::SetSeed(self.lobby.seed()));
+        self.seed.shows(&self.lobby.seed().to_string());
+        let typing = controls.value(
+            Valued {
+                rect: places.seed,
+                rule: &seeds,
+                inside: Some(("Random", &seeds)),
+                state: None,
+            },
+            &mut self.seed,
+            typed,
+        );
+        if typing.acted {
+            edits.push(LobbyEdit::SetSeed(self.lobby.next_seed()));
+        } else if let Ok(seed) = self.seed.text().parse::<u64>()
+            && seed != self.lobby.seed()
+        {
+            edits.push(LobbyEdit::SetSeed(seed));
+        }
+
+        let clocks = self.rule(LobbyEdit::SetClock(self.lobby.clock()));
+        let chosen = controls.choice(
+            places.clock,
+            &clock_name(self.lobby.clock()),
+            &self.clock_choices(),
+            &clocks,
+            self.open == Some(Open::Clock),
+        );
+        match chosen {
+            Some(Chose::Toggled) => self.toggle(Open::Clock),
+            Some(Chose::Value(clock)) => {
+                self.open = None;
+                edits.push(LobbyEdit::SetClock(clock));
+            }
+            None => {}
+        }
+    }
+
+    /// Across the bottom: Start for the host, Ready for a guest, and
+    /// Leave.
+    fn paint_bottom(&self, controls: &mut Controls<'_>, places: &Places, asked: &mut Asked) {
+        match self.lobby.host() == self.me {
+            true => {
+                let starts =
+                    Rule::unless(self.lobby.freeze().err().map(|why| self.start_reason(why)));
+                if controls.main_action(places.act, "Start", &starts) {
+                    asked.picked = Some(Wants::Start);
+                }
+            }
+            false => {
+                let readies = match self.is_ready() {
+                    true => Rule::refuses("You are ready"),
+                    false => self.rule(LobbyEdit::SetReady { ready: true }),
+                };
+                if controls.main_action(places.act, "Ready", &readies) {
+                    asked.edits.push(LobbyEdit::SetReady { ready: true });
+                }
+            }
+        }
+        if controls.action(places.leave, "Leave", &Rule::Allows) {
+            asked.picked = Some(Wants::Leave);
+        }
+    }
+
+    /// Whether `edit` would be taken from this viewer, and the sentence to
+    /// show while it would not.
+    ///
+    /// It asks the lobby itself, on a copy, so a control is enabled
+    /// exactly when the room would accept what it does.
+    fn rule(&self, edit: LobbyEdit) -> Rule {
+        Rule::unless(
+            self.lobby
+                .clone()
+                .edit(self.me, edit)
+                .err()
+                .map(|why| refusal_sentence(why, edit)),
+        )
+    }
+
+    /// The sentence Start shows while the lobby is not a match yet.
+    fn start_reason(&self, why: probe_protocol::NotReady) -> String {
+        let team = |slot: usize| {
+            self.lobby
+                .slots()
+                .get(slot)
+                .map_or_else(|| "a seat".to_string(), |slot| team_name(slot.team))
+        };
+        match why {
+            probe_protocol::NotReady::NoSeats => "The lobby holds no seats".to_string(),
+            probe_protocol::NotReady::OpenSeat { slot } => {
+                format!("Waiting for a player to take a seat on {}", team(slot))
+            }
+            probe_protocol::NotReady::Unready { slot } => {
+                format!("Waiting for {} to be ready", team(slot))
+            }
+        }
+    }
+
+    /// Whether this viewer has readied, which only a person does.
+    fn is_ready(&self) -> bool {
+        self.lobby
+            .slot_of(self.me)
+            .map(|slot| self.lobby.slots()[slot].control)
+            .is_some_and(|control| matches!(control, Control::Player { ready: true, .. }))
+    }
+
+    /// Opens `choice`'s list, or closes it where it is the open one.
+    fn toggle(&mut self, choice: Open) {
+        self.open = match self.open == Some(choice) {
+            true => None,
+            false => Some(choice),
+        };
+    }
+
+    /// What a slot's holder can be set to: this viewer, open, closed, or a
+    /// bot by personality.
+    fn holder_choices(&self, slot: usize) -> Vec<Value<Control>> {
+        [
+            Control::Player {
+                player: self.me,
+                ready: false,
+            },
+            Control::Open,
+            Control::Closed,
+        ]
+        .into_iter()
+        .chain(BOTS.map(Control::Bot))
+        .map(|control| Value {
+            value: control,
+            label: self.holder_name(control),
+            rule: self.rule(LobbyEdit::SetSlot { slot, control }),
+        })
+        .collect()
+    }
+
+    /// Every team a slot can sit on.
+    fn team_choices(&self, slot: usize) -> Vec<Value<TeamId>> {
+        (0..MAX_SLOTS as u8)
+            .map(TeamId)
+            .map(|team| Value {
+                value: team,
+                label: team_name(team),
+                rule: self.rule(LobbyEdit::SetTeam { slot, team }),
+            })
+            .collect()
+    }
+
+    /// Every clock the lobby offers.
+    fn clock_choices(&self) -> Vec<Value<Tick>> {
+        CLOCKS
+            .map(|clock| Value {
+                value: clock,
+                label: clock_name(clock),
+                rule: self.rule(LobbyEdit::SetClock(clock)),
+            })
+            .into_iter()
+            .collect()
+    }
+
+    /// What `control` holds a slot as, as this viewer reads it.
+    fn holder_name(&self, control: Control) -> String {
+        match control {
+            Control::Open => "Open".to_string(),
+            Control::Closed => "Closed".to_string(),
+            Control::Bot(bot) => titled(Personality::of(bot).name),
+            Control::Player { player, .. } if player == self.me => "You".to_string(),
+            Control::Player { player, .. } => player_name(player),
+        }
     }
 }
 
-/// The team a click on a seat's Move action lands, cycling the teams a
-/// slot may sit on, so a seat both changes team and opens a new one.
-fn next_team(team: TeamId) -> TeamId {
-    TeamId((usize::from(team.0) + 1) as u8 % MAX_SLOTS as u8)
+impl Places {
+    /// Where each control stands over `window`, in points: the table's
+    /// column labels, one row per slot the match can hold, the settings
+    /// down the right, and the actions across the bottom.
+    pub fn over(window: Rect) -> Places {
+        let top = Pos2::new(
+            window.left() + panel::MARGIN,
+            window.top() + panel::MARGIN * 1.5,
+        );
+        let mut table = panel::column(top, TABLE_WIDTH, MAX_SLOTS + 1);
+        let head = Row::over(table.next().unwrap_or(Rect::ZERO), MAX_SLOTS);
+        let rows = table
+            .enumerate()
+            .map(|(slot, rect)| Row::over(rect, slot))
+            .collect();
+
+        let [seed, clock] = panel::rows(
+            Pos2::new(
+                window.right() - SETTINGS_WIDTH - panel::MARGIN,
+                window.top() + panel::MARGIN * 1.5,
+            ),
+            SETTINGS_WIDTH,
+        );
+        let act = Rect::from_min_size(
+            Pos2::new(
+                window.center().x - ACTION_WIDTH - panel::ROW_HEIGHT / 2.0,
+                window.bottom() - panel::MARGIN - panel::ROW_HEIGHT,
+            ),
+            Vec2::new(ACTION_WIDTH, panel::ROW_HEIGHT),
+        );
+        Places {
+            head,
+            rows,
+            seed: settings_control(seed),
+            clock: settings_control(clock),
+            act,
+            leave: act.translate(Vec2::new(ACTION_WIDTH + panel::ROW_HEIGHT, 0.0)),
+        }
+    }
+}
+
+impl Row {
+    /// One table row's cells, left to right, over `rect`.
+    fn over(rect: Rect, slot: usize) -> Row {
+        let cell = |left: f32, width: f32| {
+            Rect::from_min_size(Pos2::new(left, rect.top()), Vec2::new(width, rect.height()))
+        };
+        let seat = cell(rect.left(), SEAT_WIDTH);
+        let holder = cell(seat.right() + CELL_GAP, HOLDER_WIDTH);
+        let kick = cell(holder.right() + CELL_GAP, KICK_WIDTH);
+        let team = cell(kick.right() + CELL_GAP, TEAM_WIDTH);
+        Row {
+            slot,
+            seat,
+            holder,
+            kick,
+            team,
+            ready: cell(team.right() + CELL_GAP, READY_WIDTH),
+        }
+    }
+}
+
+/// Where a settings row's control stands: its right share, the label
+/// taking the left.
+fn settings_control(row: Rect) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(row.left() + row.width() * LABEL_SHARE, row.top()),
+        row.max,
+    )
 }
 
 /// `team` as the player reads it, numbered from one.
@@ -230,31 +604,42 @@ fn team_name(team: TeamId) -> String {
     format!("Team {}", team.0 as u16 + 1)
 }
 
-/// A seat's Move action, which names the team the click lands it on rather
-/// than the team it sits on, since the heading above it already says that.
-fn moved_name(team: TeamId) -> String {
-    format!("To {}", team_name(next_team(team)))
+/// Another person as this machine reads them, numbered from one.
+fn player_name(player: PlayerId) -> String {
+    format!("Player {}", player.0 as u64 + 1)
 }
 
-/// What holds a slot, as the player reads it.
-fn holder_name(slot: &SeatSlot, me: PlayerId) -> String {
-    match slot.control {
-        Control::Open => "Open".to_string(),
-        // A closed seat is not drawn, so its own name is never read.
-        Control::Closed => "Closed".to_string(),
-        Control::Bot(bot) => format!("Bot · {}", titled(Personality::of(bot).name)),
-        Control::Player { player, .. } if player == me => "You".to_string(),
-        Control::Player { player, .. } => format!("Player {}", player.0 as u64 + 1),
+/// `clock` as the player reads it, in whole minutes.
+fn clock_name(clock: Tick) -> String {
+    match clock.seconds() as u64 / 60 {
+        1 => "1 minute".to_string(),
+        minutes => format!("{minutes} minutes"),
     }
 }
 
-/// `word` with its first letter upper case, which is how a personality's
-/// own lower-case name is shown.
-fn titled(word: &str) -> String {
-    let mut letters = word.chars();
-    match letters.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
-        None => String::new(),
+/// The sentence a refused `edit` shows, naming what the control changes.
+fn refusal_sentence(why: Refused, edit: LobbyEdit) -> String {
+    match why {
+        Refused::NotHost => format!("Only the host changes {}", subject(edit)),
+        Refused::NotYours => "That seat is not yours".to_string(),
+        Refused::NotSeated => "You hold no seat".to_string(),
+        Refused::NoSuchSlot => "There is no such seat".to_string(),
+        Refused::BadTeam => "There is no such team".to_string(),
+        Refused::BadClock => "The clock does not go that far".to_string(),
+        Refused::AlreadySeated => "That player already holds a seat".to_string(),
+        Refused::NotAGuest => "That seat holds no guest".to_string(),
+    }
+}
+
+/// What an edit changes, as the host-only sentence names it.
+fn subject(edit: LobbyEdit) -> &'static str {
+    match edit {
+        LobbyEdit::SetSlot { .. } => "who holds a seat",
+        LobbyEdit::Kick(_) => "who is in the room",
+        LobbyEdit::SetTeam { .. } => "a seat's team",
+        LobbyEdit::SetSeed(_) => "the seed",
+        LobbyEdit::SetClock(_) => "the clock",
+        LobbyEdit::SetReady { .. } => "readiness",
     }
 }
 
@@ -262,248 +647,8 @@ fn titled(word: &str) -> String {
 ///
 /// Map generation is a later unit, so every seed lays the same rocks; the
 /// seed changes nothing the screen draws until it lands.
-fn belt_of(_seed: u64) -> Scene {
+fn belt_from(_seed: u64) -> Scene {
     Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO)
-}
-
-/// The whole screen, and what its viewer asked for.
-fn paint(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> Asked {
-    let window = panel.window();
-    let host = lobby.host() == me;
-    let mut edits = Vec::new();
-
-    let laid = lines(lobby, host);
-    for (rect, line) in rows(window, laid.len()).zip(&laid) {
-        edits.extend(paint_line(panel, rect, lobby, me, line));
-    }
-    edits.extend(paint_shape(panel, lobby, host));
-
-    let mut asked = bottom(panel, lobby, me);
-    asked.edits.extend(edits);
-    asked
-}
-
-/// One line of the seat column.
-fn paint_line(
-    panel: &Panel<'_>,
-    rect: Rect,
-    lobby: &Lobby,
-    me: PlayerId,
-    line: &Line,
-) -> Vec<LobbyEdit> {
-    match line {
-        Line::Heading(team) => {
-            panel.text(
-                &team_name(*team),
-                Pos2::new(rect.left(), rect.center().y),
-                Align2::LEFT_CENTER,
-                panel::INK,
-                panel::HEADING_SIZE * 0.7,
-            );
-            Vec::new()
-        }
-        Line::Seat(at) => paint_seat(panel, rect, lobby, me, *at),
-        Line::Actions(team) => paint_team_actions(panel, rect, lobby, *team),
-    }
-}
-
-/// One seat: its colour, who holds it, the team it would move to, and its
-/// readiness mark.
-fn paint_seat(
-    panel: &Panel<'_>,
-    rect: Rect,
-    lobby: &Lobby,
-    me: PlayerId,
-    at: usize,
-) -> Vec<LobbyEdit> {
-    let slot = lobby.slots()[at];
-    let host = lobby.host() == me;
-    let mine = slot.holds(me);
-    panel.painter().rect_filled(
-        Rect::from_center_size(
-            Pos2::new(rect.left() + SWATCH, rect.center().y),
-            Vec2::splat(SWATCH),
-        ),
-        0.0,
-        lobby
-            .seat_of(at)
-            .map_or(Color32::from_gray(60), seat_color32),
-    );
-
-    let cells = rect.width() - 2.0 * SWATCH - READY_WIDTH;
-    let holder = Rect::from_min_size(
-        Pos2::new(rect.left() + 2.0 * SWATCH, rect.top()),
-        Vec2::new(cells * 0.54, rect.height()),
-    );
-    let moved = Rect::from_min_size(
-        Pos2::new(holder.right() + 8.0, rect.top()),
-        Vec2::new(cells * 0.42, rect.height()),
-    );
-
-    let mut asked = Vec::new();
-    // Only a bot's holder has anything to cycle to; every other holder is
-    // stated rather than offered.
-    let name = holder_name(&slot, me);
-    match host && matches!(slot.control, Control::Bot(_)) {
-        true if panel.action(holder, &name, true) => {
-            asked.push(LobbyEdit::SetSlot {
-                slot: at,
-                control: cycled(slot.control),
-            });
-        }
-        true => {}
-        false => panel.label(
-            &name,
-            Pos2::new(holder.left(), holder.center().y),
-            panel::INK,
-        ),
-    }
-    if panel.action(moved, &moved_name(slot.team), host || mine) {
-        asked.push(LobbyEdit::SetTeam {
-            slot: at,
-            team: next_team(slot.team),
-        });
-    }
-    panel.text(
-        match slot.control {
-            Control::Player { ready: true, .. } => "Ready",
-            Control::Player { ready: false, .. } => "Waiting",
-            Control::Open | Control::Closed | Control::Bot(_) => "",
-        },
-        Pos2::new(rect.right(), rect.center().y),
-        Align2::RIGHT_CENTER,
-        panel::DIM_INK,
-        panel::BODY_SIZE,
-    );
-    asked
-}
-
-/// Add Bot and Open Seat under one team, which only the host is shown.
-fn paint_team_actions(
-    panel: &Panel<'_>,
-    rect: Rect,
-    lobby: &Lobby,
-    team: TeamId,
-) -> Vec<LobbyEdit> {
-    let room = spare(lobby).is_some();
-    let width = (rect.width() - 2.0 * SWATCH) / 2.0 - 6.0;
-    let add = Rect::from_min_size(
-        Pos2::new(rect.left() + 2.0 * SWATCH, rect.top()),
-        Vec2::new(width, rect.height()),
-    );
-    let open = add.translate(Vec2::new(width + 6.0, 0.0));
-    if panel.action(add, "Add Bot", room) {
-        return added(lobby, team, Control::Bot(FIRST_BOT));
-    }
-    if panel.action(open, "Open Seat", room) {
-        return added(lobby, team, Control::Open);
-    }
-    Vec::new()
-}
-
-/// The host's shape down the right: the seed with its regenerate action,
-/// and the clock.
-fn paint_shape(panel: &Panel<'_>, lobby: &Lobby, host: bool) -> Vec<LobbyEdit> {
-    let [seed, regenerate, clock] = shape_actions(panel.window());
-    panel.text(
-        &format!("Seed {}", lobby.seed()),
-        Pos2::new(seed.right(), seed.center().y),
-        Align2::RIGHT_CENTER,
-        panel::INK,
-        panel::BODY_SIZE,
-    );
-    if panel.action(regenerate, "Regenerate", host) {
-        return vec![LobbyEdit::SetSeed(lobby.next_seed())];
-    }
-    if panel.action(
-        clock,
-        &format!("Clock · {} min", lobby.clock().seconds() as u64 / 60),
-        host,
-    ) {
-        return vec![LobbyEdit::SetClock(next_clock(lobby.clock()))];
-    }
-    Vec::new()
-}
-
-/// The actions across the bottom: Start for the host, Ready for a guest,
-/// and Leave.
-fn bottom(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> Asked {
-    let window = panel.window();
-    let host = lobby.host() == me;
-    let [start, leave] = bottom_actions(window);
-    let leaving = panel.action(leave, "Leave", true).then_some(Wants::Leave);
-
-    if !host {
-        let readied = panel.action(start, "Ready", true);
-        return Asked {
-            edits: match readied {
-                true => vec![LobbyEdit::SetReady { ready: true }],
-                false => Vec::new(),
-            },
-            picked: leaving,
-        };
-    }
-    let ready = lobby.freeze().is_ok();
-    let picked = panel.action(start, "Start", ready);
-    if !ready {
-        panel.text(
-            "Every seat held, every guest ready",
-            Pos2::new(window.center().x, start.top() - panel::ROW_HEIGHT / 2.0),
-            Align2::CENTER_CENTER,
-            panel::DIM_INK,
-            panel::BODY_SIZE,
-        );
-    }
-    Asked {
-        edits: Vec::new(),
-        // The action answers true only where it was drawn enabled, which is
-        // where the lobby froze.
-        picked: picked.then_some(Wants::Start).or(leaving),
-    }
-}
-
-/// `count` lines down the left of `window`, in points.
-pub fn rows(window: Rect, count: usize) -> impl Iterator<Item = Rect> {
-    let top = Pos2::new(
-        window.left() + panel::MARGIN,
-        window.top() + panel::MARGIN * 1.5,
-    );
-    panel::column(top, SEAT_WIDTH, count)
-}
-
-/// The seed's own row, Regenerate and the clock, down the right of
-/// `window`.
-pub fn shape_actions(window: Rect) -> [Rect; 3] {
-    let top = Pos2::new(
-        window.right() - SHAPE_WIDTH - panel::MARGIN,
-        window.top() + panel::MARGIN * 1.5,
-    );
-    let mut rects = [Rect::ZERO; 3];
-    for (rect, laid) in rects.iter_mut().zip(panel::column(top, SHAPE_WIDTH, 3)) {
-        *rect = laid;
-    }
-    rects
-}
-
-/// Start, or Ready for a guest, and Leave, across the bottom of `window`.
-pub fn bottom_actions(window: Rect) -> [Rect; 2] {
-    let start = Rect::from_min_size(
-        Pos2::new(
-            window.center().x - ACTION_WIDTH - panel::ROW_HEIGHT / 2.0,
-            window.bottom() - panel::MARGIN - panel::ROW_HEIGHT,
-        ),
-        Vec2::new(ACTION_WIDTH, panel::ROW_HEIGHT),
-    );
-    [
-        start,
-        start.translate(Vec2::new(ACTION_WIDTH + panel::ROW_HEIGHT, 0.0)),
-    ]
-}
-
-/// The clock a click on the clock action lands, cycling [`CLOCKS`].
-fn next_clock(clock: Tick) -> Tick {
-    let at = CLOCKS.iter().position(|held| *held == clock);
-    CLOCKS[at.map_or(0, |at| (at + 1) % CLOCKS.len())]
 }
 
 #[cfg(test)]
@@ -515,148 +660,155 @@ mod tests {
         Lobby::skirmish(PlayerId::HOST)
     }
 
+    /// A window the size the game opens at, in points.
+    fn window() -> Rect {
+        Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0))
+    }
+
     #[test]
-    fn the_seat_column_heads_every_team_that_holds_a_seat_and_draws_no_closed_seat() {
-        let lobby = skirmish();
+    fn the_table_holds_one_row_per_seat_the_match_can_hold_whatever_holds_them() {
+        let places = Places::over(window());
 
-        let laid = lines(&lobby, true);
-
-        let headings: Vec<TeamId> = laid
-            .iter()
-            .filter_map(|line| match line {
-                Line::Heading(team) => Some(*team),
-                Line::Seat(_) | Line::Actions(_) => None,
-            })
-            .collect();
-        let seats: Vec<usize> = laid
-            .iter()
-            .filter_map(|line| match line {
-                Line::Seat(at) => Some(*at),
-                Line::Heading(_) | Line::Actions(_) => None,
-            })
-            .collect();
-
-        assert_eq!(headings, [TeamId(0), TeamId(1)]);
-        assert_eq!(seats, [0, 1], "the two closed slots are not drawn");
         assert_eq!(
-            laid.iter()
-                .filter(|line| matches!(line, Line::Actions(_)))
-                .count(),
-            2,
-            "the host is shown its actions under each team"
+            places.rows.iter().map(|row| row.slot).collect::<Vec<_>>(),
+            (0..MAX_SLOTS).collect::<Vec<_>>()
         );
-        assert_eq!(
-            lines(&lobby, false)
-                .iter()
-                .filter(|line| matches!(line, Line::Actions(_)))
-                .count(),
-            0,
-            "and a guest is shown none"
-        );
-    }
-
-    #[test]
-    fn adding_a_bot_to_a_team_seats_the_first_personality_in_the_first_spare_slot() {
-        let mut lobby = skirmish();
-
-        for edit in added(&lobby, TeamId(0), Control::Bot(FIRST_BOT)) {
-            lobby
-                .edit(PlayerId::HOST, edit)
-                .expect("the host adds a bot");
-        }
-
-        assert_eq!(lobby.slots()[2].control, Control::Bot(FIRST_BOT));
-        assert_eq!(lobby.slots()[2].team, TeamId(0));
-        assert_eq!(
-            lines(&lobby, false)
-                .iter()
-                .filter(|line| matches!(line, Line::Seat(_)))
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn a_full_lobby_has_nowhere_to_add_a_seat() {
-        let mut lobby = skirmish();
-        for slot in 2..MAX_SLOTS {
-            lobby
-                .edit(
-                    PlayerId::HOST,
-                    LobbyEdit::SetSlot {
-                        slot,
-                        control: Control::Open,
-                    },
-                )
-                .expect("the host opens a seat");
-        }
-
-        assert_eq!(spare(&lobby), None);
-        assert!(added(&lobby, TeamId(0), Control::Open).is_empty());
-    }
-
-    #[test]
-    fn a_bots_holder_cycles_the_personalities_and_nothing_else_cycles() {
-        assert_eq!(cycled(Control::Bot(Bot::Turtle)), Control::Bot(Bot::Expand));
-        assert_eq!(cycled(Control::Bot(Bot::Expand)), Control::Bot(Bot::Turtle));
-
-        let person = Control::Player {
-            player: PlayerId::HOST,
-            ready: true,
-        };
-        assert_eq!(cycled(person), person);
-        assert_eq!(cycled(Control::Open), Control::Open);
-    }
-
-    #[test]
-    fn every_team_a_move_lands_is_one_a_slot_may_sit_on() {
-        let mut team = TeamId(0);
-        let mut walked = Vec::new();
-        for _ in 0..MAX_SLOTS {
-            team = next_team(team);
-            assert!(usize::from(team.0) < MAX_SLOTS);
-            walked.push(team);
-        }
-
-        walked.sort_unstable();
-        walked.dedup();
-        assert_eq!(walked.len(), MAX_SLOTS, "a seat can reach every team");
-    }
-
-    #[test]
-    fn the_clock_action_walks_every_clock_the_lobby_offers_and_comes_back() {
-        let mut clock = CLOCKS[0];
-        let mut walked = vec![clock];
-        for _ in 1..CLOCKS.len() {
-            clock = next_clock(clock);
-            walked.push(clock);
-        }
-
-        assert_eq!(walked, CLOCKS);
-        assert_eq!(next_clock(clock), CLOCKS[0]);
         assert!(
-            CLOCKS
+            places
+                .rows
+                .windows(2)
+                .all(|pair| pair[0].seat.top() < pair[1].seat.top()),
+            "the rows stand in slot order down the table"
+        );
+        for row in &places.rows {
+            assert!(row.seat.right() <= row.holder.left());
+            assert!(row.holder.right() <= row.kick.left());
+            assert!(row.kick.right() <= row.team.left());
+            assert!(row.team.right() <= row.ready.left());
+            assert!(
+                row.ready.right() < places.seed.left(),
+                "no cell reaches the settings"
+            );
+        }
+        assert!(places.head.seat.bottom() <= places.rows[0].seat.top());
+    }
+
+    #[test]
+    fn a_closed_seat_keeps_its_row_and_offers_only_its_holder() {
+        let lobby = skirmish();
+        let closed = lobby
+            .slots()
+            .iter()
+            .position(|slot| slot.control == Control::Closed)
+            .expect("a skirmish closes the seats it does not use");
+        let screen = LobbyScreen::of(lobby, PlayerId::HOST);
+
+        assert_eq!(
+            screen.holder_name(screen.lobby.slots()[closed].control),
+            "Closed"
+        );
+        assert!(
+            screen
+                .holder_choices(closed)
                 .iter()
-                .all(|clock| probe_protocol::CLOCK_RANGE.contains(clock)),
-            "a clock the lobby offers is one it takes"
+                .any(|holder| holder.rule.allows()),
+            "the host can put something in a closed seat"
+        );
+    }
+
+    #[test]
+    fn a_skirmish_can_be_started_the_moment_its_lobby_opens() {
+        let screen = LobbyScreen::of(skirmish(), PlayerId::HOST);
+
+        let starts = Rule::unless(
+            screen
+                .lobby
+                .freeze()
+                .err()
+                .map(|why| screen.start_reason(why)),
+        );
+
+        assert!(
+            starts.allows(),
+            "a skirmish opens on a match: {:?}",
+            starts.why()
         );
     }
 
     #[test]
     fn every_label_the_lobby_shows_is_words_and_numbers_from_one() {
-        let lobby = skirmish();
+        let screen = LobbyScreen::of(skirmish(), PlayerId::HOST);
 
         assert_eq!(team_name(TeamId(0)), "Team 1");
         assert_eq!(team_name(TeamId(3)), "Team 4");
-        assert_eq!(holder_name(&lobby.slots()[0], PlayerId::HOST), "You");
+        assert_eq!(clock_name(CLOCKS[0]), "1 minute");
+        assert_eq!(clock_name(CLOCKS[2]), "15 minutes");
+        assert_eq!(player_name(PlayerId(1)), "Player 2");
+        assert_eq!(screen.holder_name(screen.lobby.slots()[0].control), "You");
         assert_eq!(
-            holder_name(&lobby.slots()[1], PlayerId::HOST),
-            "Bot · Expand"
+            screen.holder_name(screen.lobby.slots()[1].control),
+            "Expand"
         );
         assert_eq!(
-            holder_name(&lobby.slots()[0], PlayerId(9)),
-            "Player 1",
-            "another person is numbered from one too"
+            screen.holder_name(screen.lobby.slots()[2].control),
+            "Closed"
+        );
+    }
+
+    #[test]
+    fn every_clock_the_choice_offers_is_one_the_lobby_takes() {
+        let screen = LobbyScreen::of(skirmish(), PlayerId::HOST);
+
+        assert!(
+            screen
+                .clock_choices()
+                .iter()
+                .all(|clock| clock.rule.allows()),
+            "the host is offered every clock"
+        );
+        assert!(
+            CLOCKS
+                .iter()
+                .all(|clock| probe_protocol::CLOCK_RANGE.contains(clock))
+        );
+    }
+
+    #[test]
+    fn a_guests_controls_are_disabled_by_the_rule_that_would_refuse_them() {
+        let mut lobby = Lobby::room(PlayerId::HOST);
+        let guest = PlayerId(1);
+        lobby
+            .edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 1,
+                    control: Control::Player {
+                        player: guest,
+                        ready: false,
+                    },
+                },
+            )
+            .expect("the host seats the guest");
+        let screen = LobbyScreen::of(lobby, guest);
+
+        let seed = screen.rule(LobbyEdit::SetSeed(7));
+        let own_team = screen.rule(LobbyEdit::SetTeam {
+            slot: 1,
+            team: TeamId(2),
+        });
+        let other_team = screen.rule(LobbyEdit::SetTeam {
+            slot: 0,
+            team: TeamId(2),
+        });
+        let kick = screen.rule(LobbyEdit::Kick(PlayerId::HOST));
+
+        assert!(!seed.allows());
+        assert!(own_team.allows(), "a guest owns its own seat's team");
+        assert!(!other_team.allows());
+        assert!(!kick.allows());
+        assert_eq!(
+            refusal_sentence(Refused::NotHost, LobbyEdit::SetSeed(7)),
+            "Only the host changes the seed"
         );
     }
 }

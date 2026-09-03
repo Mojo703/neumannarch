@@ -4,8 +4,9 @@
 
 use std::collections::BTreeMap;
 
+use probe_sim::roster::MassClass;
 use probe_sim::roster::{Kind, Roster};
-use probe_sim::state::view::{MassClass, View};
+use probe_sim::state::view::View;
 use probe_sim::{RockId, Tick, Vec3};
 
 /// How long a claimed rock may go without one of the agent's own entities

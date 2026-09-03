@@ -3,11 +3,27 @@
 use crate::materials::Materials;
 use crate::real::Real;
 
+/// The mass, on the roster's scale, below which radar reports a contact
+/// as light. A hypothesis the display confirms or kills.
+const LIGHT_MASS: f64 = 30.0;
+
+/// The mass, on the roster's scale, below which radar reports a contact as
+/// medium and at or above which it reports heavy. A hypothesis.
+const HEAVY_MASS: f64 = 100.0;
+
 /// Whether a row's copies can move; a structure holds its rock's body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Structure,
     Unit,
+}
+
+/// How much a radar contact weighs, as much as radar can tell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MassClass {
+    Light,
+    Medium,
+    Heavy,
 }
 
 /// One row of the roster. An entity is a copy of its row plus position,
@@ -74,6 +90,17 @@ impl Row {
             Kind::Structure
         } else {
             Kind::Unit
+        }
+    }
+
+    /// The class radar reports a copy of this row as.
+    pub fn mass_class(&self) -> MassClass {
+        if self.mass.0 < LIGHT_MASS {
+            MassClass::Light
+        } else if self.mass.0 < HEAVY_MASS {
+            MassClass::Medium
+        } else {
+            MassClass::Heavy
         }
     }
 

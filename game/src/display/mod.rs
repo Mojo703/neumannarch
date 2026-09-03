@@ -7,6 +7,8 @@ pub mod fights;
 pub mod glyph;
 pub mod glyph_quad;
 pub mod hud;
+pub mod hue;
+pub mod label;
 #[cfg(test)]
 mod local;
 pub mod ring;

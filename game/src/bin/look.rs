@@ -20,7 +20,7 @@ use probe_game::display::camera::BeltCamera;
 use probe_game::display::glyph::Glyph;
 use probe_game::display::glyph_quad::GlyphQuad;
 use probe_game::display::scene::{
-    Arc, EntityView, Fill, FlightLine, Mark, RingView, RockView, Run, Scene,
+    Arc, EntityView, Fill, FlightLine, Mark, Reason, RingView, RockView, Run, Scene,
 };
 use probe_game::display::screen::Screen;
 use probe_game::display::{belt, hud};
@@ -157,6 +157,7 @@ fn present(seat: u8, rows: &[RowId]) -> Run {
                 glyph: glyph_of(row),
                 fill: Fill::Solid,
                 dim: false,
+                reason: Reason::Here(row),
             })
             .collect(),
     }

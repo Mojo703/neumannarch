@@ -2,7 +2,6 @@
 //! gestures over the belt.
 
 use mirage_engine::egui;
-use mirage_engine::math::Vec2;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
 use probe_protocol::Lobby;
@@ -10,7 +9,7 @@ use probe_sim::state::Command;
 use probe_sim::state::view::View;
 use probe_sim::{Band, Place, RowId, SeatId, Session, Vec3};
 
-use crate::controls::{Axis, Axis2, Button, Controls};
+use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
 use crate::display::fights::Fights;
 use crate::display::glyph_quad::GlyphQuad;
@@ -22,9 +21,11 @@ use crate::display::{belt, hud};
 use crate::net::machine::Machine;
 use crate::net::pace::Allowed;
 use crate::net::transport::Transport;
+use crate::screens::control::{self, Rule};
 use crate::screens::flow::Step;
 use crate::screens::held::Held;
 use crate::screens::panel::{self, Panel};
+use crate::screens::panning::Panning;
 use crate::screens::pause::Pause;
 use crate::screens::{Playable, results};
 
@@ -37,12 +38,6 @@ const REPEAT_DELAY: f32 = 1.0 / 3.0;
 
 /// How often a held wheel band repeats after that, in seconds.
 const REPEAT_INTERVAL: f32 = 0.1;
-
-/// How fast the pan keys move the belt, in points a second.
-const KEY_PAN: f32 = 900.0;
-
-/// What one notch of the zoom axis multiplies the eye-to-focus distance by.
-const ZOOM_STEP: f64 = 1.25;
 
 /// A left drag from a ring: what it would send, until it is released.
 struct Drag {
@@ -78,10 +73,11 @@ pub struct Play {
     paused: bool,
     /// Why the match is holding, where it is.
     held: Option<Held>,
+    /// Why the wheel band under the pointer is disabled, where one is.
+    refused: Option<String>,
     /// Whether the focus has followed the player's first placement yet.
     followed: bool,
-    /// Where the pointer was last frame, in physical pixels.
-    pointer: Vec2,
+    panning: Panning,
 }
 
 impl Play {
@@ -113,8 +109,9 @@ impl Play {
             holding: None,
             paused: false,
             held: None,
+            refused: None,
             followed: false,
-            pointer: Vec2::ZERO,
+            panning: Panning::still(),
         }
     }
 
@@ -237,10 +234,16 @@ impl Play {
         let over = panel::window_of(window, points_per_pixel);
         let paused = self.paused;
         let held = self.held.as_ref();
+        let sentence = self.sentence(&scene, &screen, pointer);
         let mut picked = None;
         ctx.ui(|ui| {
             hud::paint(&scene, &screen, wheel.as_ref(), ui.painter());
             let panel = Panel::new(ui.painter(), over, pointer, clicked);
+            if let Some((beside, sentence)) = sentence {
+                let mut controls = control::Controls::over(&panel);
+                controls.note(beside, sentence);
+                controls.finish();
+            }
             if let Some(held) = held {
                 picked = held.frame(&panel);
             }
@@ -262,6 +265,26 @@ impl Play {
             )))),
             None => None,
         }
+    }
+
+    /// The one sentence the pointer is over, and what to stand it beside:
+    /// a disabled wheel band's reason, else the state of the run glyph
+    /// under the pointer.
+    fn sentence(
+        &self,
+        scene: &Scene,
+        screen: &Screen,
+        pointer: egui::Pos2,
+    ) -> Option<(egui::Rect, String)> {
+        let beside = |at: egui::Pos2| {
+            egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * crate::display::glyph::HALF))
+        };
+        if let Some(refused) = &self.refused {
+            return Some((beside(pointer), refused.clone()));
+        }
+        let (at, mark) = hud::glyph_at(scene, screen, pointer)?;
+        let roster = self.machine.session().state().roster();
+        Some((beside(at), mark.reason.sentence(roster)))
     }
 
     /// True once the clock has run out, which is the one end a client can
@@ -360,31 +383,18 @@ impl Play {
         if ctx.pressed(Button::Pause) {
             self.paused = !self.paused;
         }
-        let pointer = ctx.pointer();
-        let moved = pointer - self.pointer;
-        self.pointer = pointer;
         if self.paused {
             return;
         }
+        let pointer = ctx.pointer();
         let dt = ctx.dt().as_secs_f32();
-        let window = seen.window();
-
-        if ctx.down(Button::Pan) {
-            self.camera.pan_by_pixels(moved, window);
-        }
-        let keys = ctx.axis2(Axis2::Pan);
-        if keys != Vec2::ZERO {
-            self.camera
-                .pan_by_pixels(Vec2::new(-keys.x, keys.y) * KEY_PAN * dt, window);
-        }
-
-        let notches = ctx.axis(Axis::Zoom);
-        match &mut self.drag {
-            // The wheel adjusts how many units a send moves while one is in
-            // progress, so it is not zooming then.
-            Some(drag) => drag.adjust(notches),
-            None if notches != 0.0 => self.camera.zoom(ZOOM_STEP.powf(f64::from(-notches))),
-            None => {}
+        // The wheel adjusts how many units a send moves while one is in
+        // progress, so it is not zooming then.
+        let notches = self
+            .panning
+            .drag(ctx, &mut self.camera, seen.window(), self.drag.is_none());
+        if let Some(drag) = &mut self.drag {
+            drag.adjust(notches);
         }
 
         self.point(ctx, seen, aimed, seen.point_at(pointer), dt);
@@ -400,11 +410,16 @@ impl Play {
         at: egui::Pos2,
         dt: f32,
     ) {
-        let slot = aimed.and_then(|wheel| {
+        let aimed_at = aimed.and_then(|wheel| {
             wheel
                 .slot_at(at)
                 .map(|(row, band)| (wheel.place(), row, band))
         });
+        // A band that would change nothing neither edits nor previews.
+        self.refused = aimed_at
+            .map(|(place, row, band)| self.band_rule(place, row, band))
+            .and_then(|rule| rule.why().map(str::to_string));
+        let slot = aimed_at.filter(|_| self.refused.is_none());
         let ring = self.ring_at(seen, at);
 
         if ctx.pressed(Button::Select) {
@@ -469,6 +484,20 @@ impl Play {
     fn edit(&mut self, place: Place, row: RowId, band: WheelBand) {
         let command = band.edit(place, row, self.wanted(place, row));
         self.issue(command);
+    }
+
+    /// Whether a click on `band` changes what `place` wants of `row`, and
+    /// the sentence it shows while it does not: the wheel's plus stops at
+    /// the cap a want command carries and its minus at none.
+    fn band_rule(&self, place: Place, row: RowId, band: WheelBand) -> Rule {
+        let wanted = self.wanted(place, row);
+        match band {
+            WheelBand::Plus => Rule::only_if(
+                wanted < probe_sim::state::MAX_WANT,
+                "This is the most you can want here",
+            ),
+            WheelBand::Minus => Rule::only_if(wanted > 0, "You want none here"),
+        }
     }
 
     /// Ends a drag: a release over another ring is the send, and one over

@@ -30,6 +30,7 @@ pub struct Flight {
     impulses: [Vec3; 2],
     depart: Tick,
     arrive: Tick,
+    source: Place,
     destination: Place,
     burns: BTreeMap<RowId, [Burn; 2]>,
 }
@@ -78,6 +79,7 @@ impl Flight {
                 impulses,
                 depart,
                 arrive,
+                source: from,
                 destination: to,
                 burns,
             });
@@ -93,6 +95,11 @@ impl Flight {
     /// The tick every ship of the send is due at its destination anchor.
     pub fn arrive(&self) -> Tick {
         self.arrive
+    }
+
+    /// The place the send left.
+    pub fn source(&self) -> Place {
+        self.source
     }
 
     /// The place the send is bound for.

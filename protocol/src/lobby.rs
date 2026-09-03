@@ -21,7 +21,7 @@ pub const DEFAULT_SEED: u64 = 1;
 /// Slots a lobby holds, one per seat a match can have.
 pub const MAX_SLOTS: usize = MAX_SEATS;
 
-/// What [`Lobby::regenerate_seed`] steps the seed by: odd, so the seeds it
+/// What [`Lobby::random_seed_seed`] steps the seed by: odd, so the seeds it
 /// walks never repeat.
 const SEED_STEP: u64 = 0x9E37_79B9_7F4A_7C15;
 
@@ -67,6 +67,10 @@ pub enum Refused {
     BadTeam,
     /// A clock outside [`CLOCK_RANGE`].
     BadClock,
+    /// That player already holds another slot, and holds one at most.
+    AlreadySeated,
+    /// The player named holds no guest's slot, so there is none to open.
+    NotAGuest,
 }
 
 /// Why a lobby is not yet a match.
@@ -86,6 +90,8 @@ pub enum NotReady {
 pub enum LobbyEdit {
     /// What holds a slot.
     SetSlot { slot: usize, control: Control },
+    /// Opens the slot a guest holds, which sends that guest away.
+    Kick(PlayerId),
     /// A slot's team.
     SetTeam { slot: usize, team: TeamId },
     /// The map's seed.
@@ -185,7 +191,23 @@ impl Lobby {
         match edit {
             LobbyEdit::SetSlot { slot, control } => {
                 self.as_host(by)?;
-                self.slots.get_mut(slot).ok_or(Refused::NoSuchSlot)?.control = control;
+                if self.slots.get(slot).is_none() {
+                    return Err(Refused::NoSuchSlot);
+                }
+                if let Control::Player { player, .. } = control
+                    && self.slot_of(player).is_some_and(|held| held != slot)
+                {
+                    return Err(Refused::AlreadySeated);
+                }
+                self.slots[slot].control = control;
+            }
+            LobbyEdit::Kick(who) => {
+                self.as_host(by)?;
+                let slot = self
+                    .slot_of(who)
+                    .filter(|_| who != self.host)
+                    .ok_or(Refused::NotAGuest)?;
+                self.slots[slot].control = Control::Open;
             }
             LobbyEdit::SetTeam { slot, team } => {
                 if usize::from(team.0) >= MAX_SLOTS {
@@ -212,7 +234,7 @@ impl Lobby {
         Ok(())
     }
 
-    /// The seed the regenerate action asks for: this one stepped by
+    /// The seed the random_seed action asks for: this one stepped by
     /// [`SEED_STEP`]. The sim has no clock and no randomness to draw a
     /// fresh seed from, and a step needs neither.
     pub fn next_seed(&self) -> u64 {
@@ -416,6 +438,64 @@ mod tests {
         );
 
         assert_eq!(lobby, joined(), "a refused edit changes nothing");
+    }
+
+    #[test]
+    fn the_host_opens_a_guests_slot_and_nobody_else_opens_anyones() {
+        let mut lobby = joined();
+
+        assert_eq!(lobby.edit(PlayerId::HOST, LobbyEdit::Kick(GUEST)), Ok(()));
+
+        assert_eq!(lobby.slots()[2].control, Control::Open);
+        assert_eq!(lobby.slot_of(GUEST), None, "the guest holds no slot now");
+        assert_eq!(
+            joined().edit(GUEST, LobbyEdit::Kick(PlayerId::HOST)),
+            Err(Refused::NotHost)
+        );
+        assert_eq!(
+            joined().edit(PlayerId::HOST, LobbyEdit::Kick(PlayerId::HOST)),
+            Err(Refused::NotAGuest),
+            "the host does not remove itself"
+        );
+        assert_eq!(
+            joined().edit(PlayerId::HOST, LobbyEdit::Kick(PlayerId(99))),
+            Err(Refused::NotAGuest)
+        );
+    }
+
+    #[test]
+    fn a_player_holds_one_slot_at_most() {
+        let mut lobby = joined();
+
+        assert_eq!(
+            lobby.edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 3,
+                    control: Control::Player {
+                        player: GUEST,
+                        ready: false
+                    }
+                }
+            ),
+            Err(Refused::AlreadySeated)
+        );
+
+        assert_eq!(lobby, joined(), "a refused edit changes nothing");
+        assert_eq!(
+            lobby.edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 2,
+                    control: Control::Player {
+                        player: GUEST,
+                        ready: true
+                    }
+                }
+            ),
+            Ok(()),
+            "the slot a player already holds is still its own"
+        );
     }
 
     #[test]

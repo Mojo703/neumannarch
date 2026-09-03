@@ -17,9 +17,9 @@ probe-sim = { path = "../sim" }
 image = { version = "0.25.10", optional = true, default-features = false, features = [
     "png",
 ] }
-probe-server = { path = "../server", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+probe-server = { path = "../server", optional = true }
 futures-util = { version = "0.3", default-features = false, features = [
     "sink",
     "std",
@@ -39,6 +39,11 @@ web-sys = { version = "0.3.104", features = [
 ] }
 
 [features]
+# Hosting is on by default, so the playable's Host is offered wherever the
+# server builds; the browser build carries no server, and the title's Host
+# is disabled by that.
+default = ["host"]
+
 # The `look` binary: synthetic scenes to screenshots, over the engine's
 # offscreen Session. Kept out of the default build and the wasm build,
 # which must not pull `image` or `offscreen`.

@@ -13,6 +13,15 @@ pub struct Materials {
     pub energy: f64,
 }
 
+/// One of the three materials, for naming the one a spend wanted and did
+/// not have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Material {
+    Metals,
+    Volatiles,
+    Energy,
+}
+
 /// A seat's materials. Income clamps to capacity, spending stops at zero,
 /// refunds clamp; nothing else reads or writes a stock.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -71,15 +80,26 @@ impl Materials {
     /// The smallest of `ratios` among the materials this uses, one if it
     /// uses none.
     pub fn bottleneck(self, ratios: Materials) -> f64 {
-        [
-            (self.metals, ratios.metals),
-            (self.volatiles, ratios.volatiles),
-            (self.energy, ratios.energy),
-        ]
-        .into_iter()
-        .filter(|(used, _)| *used > 0.0)
-        .map(|(_, ratio)| ratio)
-        .fold(1.0, f64::min)
+        self.amounts()
+            .filter(|(_, amount)| *amount > 0.0)
+            .map(|(material, _)| ratios[material])
+            .fold(1.0, f64::min)
+    }
+
+    /// The material this uses whose `ratios` entry is smallest, ties in
+    /// field order; `None` where this uses none.
+    pub fn binding_material(self, ratios: Materials) -> Option<Material> {
+        self.amounts()
+            .filter(|(_, amount)| *amount > 0.0)
+            .min_by(|(a, _), (b, _)| ratios[*a].total_cmp(&ratios[*b]))
+            .map(|(material, _)| material)
+    }
+
+    /// Each material and how much of it this holds, in field order.
+    fn amounts(self) -> impl Iterator<Item = (Material, f64)> {
+        [Material::Metals, Material::Volatiles, Material::Energy]
+            .into_iter()
+            .map(move |material| (material, self[material]))
     }
 }
 
@@ -97,6 +117,17 @@ impl AddAssign for Materials {
 }
 
 impl Eq for Materials {}
+
+impl core::ops::Index<Material> for Materials {
+    type Output = f64;
+    fn index(&self, material: Material) -> &f64 {
+        match material {
+            Material::Metals => &self.metals,
+            Material::Volatiles => &self.volatiles,
+            Material::Energy => &self.energy,
+        }
+    }
+}
 
 impl Hash for Materials {
     fn hash<H: Hasher>(&self, state: &mut H) {

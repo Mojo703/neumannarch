@@ -6,7 +6,7 @@ use core::time::Duration;
 
 pub use history::{Retention, Rewound, Session, Unseated, WINDOW_SECONDS};
 pub use ids::{EntityId, FlightId, RockId, RowId, SeatId, TeamId};
-pub use materials::{Materials, Stockpile};
+pub use materials::{Material, Materials, Stockpile};
 pub use place::{Band, Place, Post};
 pub use real::Real;
 pub use setup::{BadSetup, MAX_SEATS, Setup};

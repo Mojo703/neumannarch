@@ -48,6 +48,8 @@ like cards; magnitude stays arc length.
 - A frame in progress is a hollow glyph filling from the bottom to its
   progress fraction.
 - A shortfall with no builder in range shows a dashed hollow glyph.
+- A unit that has left this ring and is still in flight stays on the run,
+  dimmed, until it arrives.
 - A frame that spent nothing this second for want of a material carries a
   belt mark along its base in that material's hue: metals, volatiles or
   energy, three fixed hues named in the game crate.
@@ -60,18 +62,21 @@ like cards; magnitude stays arc length.
 Three rules produce every glyph from its row; no glyph is drawn by hand.
 
 - **Frame:** a triangle for a unit, a square for a structure.
-- **Marks,** placed on the frame by what earns them:
-  - Damage within sight: a dot at the frame's apex.
-  - Damage beyond sight: a bar running the full height of the frame, apex
-    to base.
-  - Build: a plus at the centroid.
-  - Extract: a chevron pointing down, touching the frame's bottom edge.
-  - Radar above default (radar greater than twice sight): a short arc
-    over the apex.
-  - Plating above zero: a belt, a horizontal bar along the base of the
-    frame.
-  - Capacity above zero: a ring, a hollow circle at the centroid; a row
-    with both build and capacity shows the ring with the plus inside it.
+- **Marks,** placed on the frame by what earns them, in a sixty-unit
+  cell whose frame is the triangle (30,6) (56,52) (4,52) or the square
+  from 8 to 52. The mark's outline is white; a hollow mark is stroked, a
+  dot is filled. These are the owner's drawings and the game reproduces
+  them exactly, scaled to the glyph's size:
+  - Build: a plus at (30,38) with arms of 8.5 on a triangle; at the
+    centre with arms of 6.5 inside the ring on a square that also stores.
+  - Extract: a chevron at (30,32) with a half-width of 15, pointing down.
+  - Capacity: a ring at the centre, radius 13; radius 15 beside a plus.
+  - Radar above default: an arc at (30,42), radius 11, over a dot of
+    radius 3.5 at its centre.
+  - Damage within sight: a dot at (30,34) of radius 8; at (30,29) of
+    radius 7 when a belt sits below it.
+  - Plating above zero: a belt, a line at y 45 from x 17 to 43.
+  - Damage beyond sight: a bar at x 30 from y 14 to 48.
 - **Size,** three steps by cost class; the thresholds are constants in the
   game crate.
 
@@ -153,7 +158,7 @@ Every control on every screen, the wheel included, is one of three kinds,
 and each kind looks and behaves one way everywhere.
 
 - **An action** is a button that does one thing on click: Start, Ready,
-  Leave, Kick, Rematch, Regenerate, Quit, a wheel band.
+  Leave, Kick, Rematch, Random Seed, Quit, a wheel band.
 - **A choice** is a dropdown showing its current value; a click opens the
   list and a click picks. A team, a seat's holder, the clock. Nothing
   cycles on click.
@@ -162,7 +167,12 @@ and each kind looks and behaves one way everywhere.
 
 A control and its label are one thing: the value is inside the control,
 never beside it, and an action that belongs to a value sits inside that
-value's field at its right edge, as Regenerate does inside the seed.
+value's field at its right edge, as Random Seed does inside the seed.
+
+A screen's main action, Start or Ready on the lobby, Join on the
+title, shows its reason beside it always when disabled, not only on
+hover, so the way forward is never hidden. Every row of a settings
+column carries its label at the left and its control at the right.
 
 Enabled means it will work. A control is enabled only when the rule
 behind it, evaluated on this machine against the state shown, says the
@@ -179,7 +189,10 @@ that did not take, since the state on screen is the truth.
 The one place a fact cannot be known before the click is joining an
 address. The join field shows the outcome inside itself: "Connecting",
 "No room at this address", "The room is full", "That version differs",
-and stays editable. No other screen has an error, a notice or a log.
+and stays editable. It is also the one home for a fact about a room this
+machine was in and is no longer: "The room closed", "The host left",
+"Removed by the host", shown with the address kept when the title
+returns. No other screen has an error, a notice or a log.
 
 ## Screens
 
@@ -191,28 +204,29 @@ follows Controls, above.
 
 - **Title.** Skirmish, Host, Join, Settings, Quit, in a column, each an
   action; Join is a value field for the address with Join as the action
-  inside it. A version that cannot host, or cannot close, shows those
-  actions disabled with their reason.
+  inside it. Host is enabled only while the title holds a listener it
+  bound on opening, so a port in use disables it. A version that cannot
+  host, or cannot close, shows those actions disabled with their reason.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
   zoom whose rings stand apart, each ring's stroke tinted by its rock's
-  caps; it redraws the instant the seed changes. Over it, down the left,
-  the seats grouped by team: a heading per team, and under it one row per
-  seat in that team. A row is: its colour; its holder, a choice whose
-  values are You, Open, Closed, each bot personality by name, and, for a
-  seat a guest holds, that guest's name, which is not chosen but is
-  shown with Kick as an action beside it; its team, a choice; and its
-  readiness mark. Closed seats are not drawn; the host opens one by
-  choosing Open on the last row, which a closed seat always leaves
-  drawn under the last team. Down the right, the host's shape: the seed,
-  a value with Regenerate inside it, and the clock, a choice of one,
-  five, fifteen or thirty minutes. Across the bottom: Ready for a guest,
-  Start for the host, and Leave. A guest sees the host's controls
-  disabled with their reason, and the host's edits as they land. Kick
-  returns the guest to the title. Teams and seats are numbered from one
-  wherever a number is shown; every label is a word in title case, never
-  an identifier.
+  caps; it redraws the instant the seed changes, and it pans and zooms
+  under the same controls as the match. Over it, at the left, the seats
+  as a table of four rows, one per seat the match can hold, under column
+  labels Seat, Holder, Team, Ready. Seat is the seat's number from one
+  in a square of its colour. Holder is a choice: You, Open, Closed, each
+  bot personality by name, or, for a seat a guest holds, that guest's
+  name, not chosen but shown with Kick as an action beside it. Team is a
+  choice of the four teams. Ready is a mark. A closed seat's row stays
+  in the table with its holder reading Closed and its team and ready
+  cells empty. Down the right, the match's settings as labelled rows:
+  Seed, a value with Random Seed inside it; Clock, a choice of one, five,
+  fifteen or thirty minutes. Across the bottom: Ready for a guest, Start
+  for the host, and Leave, with a disabled Start's reason beside it. A
+  guest sees the host's controls disabled with their reason, and the
+  host's edits as they land. Kick returns the guest to the title. Every
+  label is a word in title case, never an identifier.
 - **Loading.** The belt from the lobby, still, until every machine has
   built the match and agreed the first hash.
 - **Play.** The match, as every section above describes. Escape opens the

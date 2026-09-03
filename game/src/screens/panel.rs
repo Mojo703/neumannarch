@@ -25,6 +25,10 @@ pub const HEADING_SIZE: f32 = 26.0;
 /// Body text's size, in points.
 pub const BODY_SIZE: f32 = 15.0;
 
+/// How wide one character of body text stands, in points: the screens are
+/// monospaced, so a sentence measures without the font.
+pub const CHARACTER_WIDTH: f32 = BODY_SIZE * 0.6;
+
 /// How tall one action or one row stands, in points.
 pub const ROW_HEIGHT: f32 = 30.0;
 
@@ -33,10 +37,6 @@ pub const MARGIN: f32 = 40.0;
 
 /// A thin line's width, in points.
 const LINE_WIDTH: f32 = 1.0;
-
-/// What an action's own rectangle brightens by while the pointer is over
-/// it, over [`BACKDROP`].
-const HOVER_FILL: Color32 = Color32::from_rgba_premultiplied(30, 34, 42, 255);
 
 /// One frame of one screen: what it paints on, and where the pointer is.
 pub struct Panel<'a> {
@@ -86,6 +86,11 @@ impl<'a> Panel<'a> {
         self.clicked && rect.contains(self.pointer)
     }
 
+    /// Whether the pointer stands over `rect`.
+    pub fn pointing_at(&self, rect: Rect) -> bool {
+        rect.contains(self.pointer)
+    }
+
     /// Fills the window, hiding whatever was drawn under it.
     pub fn backdrop(&self) {
         self.painter.rect_filled(self.window, 0.0, BACKDROP);
@@ -121,28 +126,6 @@ impl<'a> Panel<'a> {
     pub fn label(&self, text: &str, at: Pos2, colour: Color32) {
         self.text(text, at, Align2::LEFT_CENTER, colour, BODY_SIZE);
     }
-
-    /// Paints one action and answers whether the player picked it. An
-    /// action the screen states as unavailable is drawn dim and answers
-    /// false however it is clicked.
-    pub fn action(&self, rect: Rect, label: &str, enabled: bool) -> bool {
-        let over = enabled && rect.contains(self.pointer);
-        if over {
-            self.painter.rect_filled(rect, 0.0, HOVER_FILL);
-        }
-        self.outline(rect);
-        self.text(
-            label,
-            rect.center(),
-            Align2::CENTER_CENTER,
-            match enabled {
-                true => INK,
-                false => DIM_INK,
-            },
-            BODY_SIZE,
-        );
-        over && self.clicked
-    }
 }
 
 /// The whole window in the painter's own measure, from `size` in physical
@@ -160,6 +143,16 @@ pub fn window_of(size: UVec2, points_per_pixel: f32) -> Rect {
             size.y as f32 * points_per_pixel,
         ),
     )
+}
+
+/// `N` rows of a column `width` points wide, the first at `top`, as
+/// [`column`] lays them.
+pub fn rows<const N: usize>(top: Pos2, width: f32) -> [Rect; N] {
+    let mut rects = [Rect::ZERO; N];
+    for (rect, laid) in rects.iter_mut().zip(column(top, width, N)) {
+        *rect = laid;
+    }
+    rects
 }
 
 /// A column of `count` rows `width` points wide, the first at `top`,
