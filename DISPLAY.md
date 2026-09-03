@@ -10,24 +10,37 @@ by the same rules as everything else, never predicted by the client.
 ## Ships are the truth
 
 Every ship is drawn where the sim has it, always. A held force is readable
-because the sim holds it on slot orbits that circle the rock once per rock
-orbit (DESIGN.md, Movement and combat); the display never rearranges
-anything.
+because the sim settles it around its place's anchor (DESIGN.md, Movement
+and combat); the display never rearranges anything.
+
+## The two layers
+
+The belt is drawn in 3D, through the engine: rocks as meshes at their
+bodies, and ships as billboarded textured quads showing the row's glyph,
+one draw per ship. It changes only as the sim moves a body, every tick.
+
+The HUD is painted in screen space over the belt camera's projection of
+world points: everything the sections below describe, except rocks and
+ships. Nothing on it is a widget or a panel; the painter is only a way to
+put pixels on screen. It draws after the belt and is never covered by it,
+and it changes with the sim and with the player's pointer, every frame.
 
 ## The rings
 
-Every rock carries a billboarded inner ring at a fixed screen radius, so it
-reads the same at every zoom, for its inner band. A second, outer ring at a
-larger fixed radius stands for the outer band and is drawn only when that
-band holds something or the rock is selected. On a ring, runs start at
-twelve o'clock and are laid clockwise; when more than one seat is present,
-in seat order. Ownership is colour; position tells seats apart only where
-several share a ring, which is uncommon. An empty ring draws nothing.
+Every rock carries, on the HUD, a billboarded inner ring at a fixed screen
+radius, so it reads the same at every zoom, for its inner band. A second,
+outer ring at a larger fixed radius stands for the outer band and is drawn
+only when that band holds something or the rock is selected. On a ring,
+runs start at twelve o'clock and are laid clockwise; when more than one
+seat is present, in seat order. Ownership is colour; position tells seats
+apart only where several share a ring, which is uncommon. An empty ring
+draws nothing.
 
 ## Glyph runs
 
-One glyph per unit present, grouped by row, rows ordered by cost descending
-from the run's start. Glyphs of a row are laid consecutively along the arc.
+One glyph per unit present, on the HUD, grouped by row, rows ordered by
+cost descending from the run's start. Glyphs of a row are laid consecutively
+along the ring.
 When a run would exceed its share of the ring, its glyphs overlap and stack
 like cards; magnitude stays arc length.
 
@@ -52,7 +65,7 @@ Fill is the owner's colour; the outline is white.
 ## Fights
 
 While shots are exchanged in a band, each engaged seat's run on that ring
-gains an arc just inside it. The arc is full at the fight's start and
+gains an arc just inside it, on the HUD. The arc is full at the fight's start and
 drains clockwise as that player's total HP at the rock falls. Damage from
 the last second and a half trails the drain as a red segment that catches
 up. Arcs disappear ten seconds after the last shot. Ships carry no health
@@ -61,15 +74,16 @@ force.
 
 ## Flights
 
-A ship between rocks carries its glyph as a billboard, with a line ahead to
-its destination rock. Arrival moves the glyph from the ship onto the ring.
+A ship between rocks carries its glyph as a billboard, on the belt, with a
+line ahead, on the HUD, to its destination rock. Arrival moves the glyph
+from the ship onto the ring.
 
 ## Editing: the roster wheel
 
 Build is flow, so there is no queue; the player edits wants. Selecting a
-ring, inner or outer, opens a wheel outside both rings at a fixed screen
-radius, editing that band: one slot per roster row, drawn as the row's
-glyph by the same three rules. Structures fill the left half and units the
+ring, inner or outer, opens a wheel, on the HUD, outside both rings at a
+fixed screen radius, editing that band: one slot per roster row, drawn as
+the row's glyph by the same three rules. Structures fill the left half and units the
 right, each half ordered by cost from the top down; the outer band's wheel
 has no structures. The selected ring brightens.
 
@@ -112,8 +126,9 @@ clicking a rock's ring makes it the focus.
 
 ## Fog
 
-Enemy ships and their glyphs are drawn only inside sight. A radar contact is
-a dot with a short velocity streak and no glyph. Rocks are always drawn.
+Enemy ships and their glyphs are drawn on the belt only inside sight. A
+radar contact is a dot with a short velocity streak and no glyph, on the
+HUD. Rocks are always drawn, on the belt.
 
 ## Judging
 

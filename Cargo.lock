@@ -2438,6 +2438,7 @@ checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 name = "probe-game"
 version = "0.1.0"
 dependencies = [
+ "image",
  "mirage-engine",
  "probe-sim",
 ]
@@ -2445,6 +2446,9 @@ dependencies = [
 [[package]]
 name = "probe-sim"
 version = "0.1.0"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "proc-macro-crate"

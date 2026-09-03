@@ -7,6 +7,8 @@ cd "$(dirname "$0")"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --all-targets
+# The look feature is off by default; build it so the tool always compiles.
+cargo build -p probe-game --features look --all-targets
 cargo test --workspace
 # The game ships in the browser, and the sim with it.
 cargo build -p probe-game --target wasm32-unknown-unknown

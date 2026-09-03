@@ -4,9 +4,23 @@ version.workspace = true
 edition.workspace = true
 description = "Probe Game on the Mirage engine, for desktop and the browser"
 
+[[bin]]
+name = "look"
+path = "src/bin/look.rs"
+required-features = ["look"]
+
 [dependencies]
 mirage-engine = { path = "../../../mirage-renderer" }
 probe-sim = { path = "../sim" }
+image = { version = "0.25.10", optional = true, default-features = false, features = [
+    "png",
+] }
+
+[features]
+# The `look` binary: synthetic scenes to screenshots, over the engine's
+# offscreen Session. Kept out of the default build and the wasm build,
+# which must not pull `image` or `offscreen`.
+look = ["mirage-engine/offscreen", "dep:image"]
 
 [lints]
 workspace = true
