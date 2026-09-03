@@ -5,8 +5,8 @@ use mirage_engine::egui::Color32;
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::{Mesh, MeshData, Quad};
 use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
-use probe_sim::SeatId;
 use probe_sim::roster::Roster;
+use probe_sim::{MAX_SEATS, SeatId};
 
 use crate::display::glyph::{Frame, Glyph, GlyphMark, Size};
 
@@ -19,9 +19,9 @@ const OUTLINE_FRACTION: f32 = 0.18;
 /// A mark's half-size, as a fraction of the cell's half-width.
 const MARK_HALF: f32 = 0.2;
 
-/// The seat palette: a small fixed set of colours, indexed by [`SeatId`]
-/// and wrapping past its length.
-const PALETTE: [Color; 4] = [
+/// The seat palette: one colour per seat a match can hold, indexed by
+/// [`SeatId`].
+const PALETTE: [Color; MAX_SEATS] = [
     Color::rgb(0.90, 0.25, 0.25),
     Color::rgb(0.25, 0.55, 0.95),
     Color::rgb(0.30, 0.80, 0.35),
@@ -35,9 +35,10 @@ fn cell_fraction(size: &Size) -> f32 {
     size.scale() / crate::display::glyph::WIDEST_SCALE
 }
 
-/// `seat`'s colour, wrapping past the palette's length.
+/// `seat`'s colour. Every seat of a match has one, since the palette is
+/// [`MAX_SEATS`] long.
 pub fn seat_colour(seat: SeatId) -> Color {
-    PALETTE[usize::from(seat.0) % PALETTE.len()]
+    PALETTE[usize::from(seat.0)]
 }
 
 /// `seat`'s colour as the HUD's painter takes it, fully opaque.
@@ -59,7 +60,7 @@ pub struct GlyphQuad {
 impl Catalog for GlyphQuad {
     fn catalog() -> Vec<Self> {
         let roster = Roster::shipped();
-        (0..PALETTE.len() as u8)
+        (0..MAX_SEATS as u8)
             .flat_map(|seat| {
                 roster.iter().map(move |(_, row)| GlyphQuad {
                     glyph: Glyph::of(row),

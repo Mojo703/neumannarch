@@ -3,10 +3,11 @@
 
 use std::collections::BTreeMap;
 
-use probe_sim::orbit::Body;
+use probe_sim::orbit::{Body, Gravity};
 use probe_sim::roster::Roster;
+use probe_sim::state::Rock;
 use probe_sim::state::view::{MassClass, View};
-use probe_sim::{Band, Place, RockId, RowId, SeatId, Vec3};
+use probe_sim::{Band, Materials, Place, RockId, RowId, SeatId, Tick, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
@@ -106,6 +107,8 @@ pub struct Mark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RingView {
     pub place: Place,
+    /// Its rock's caps, which its stroke is tinted by.
+    pub caps: Materials,
     pub runs: Vec<Run>,
     pub arcs: Vec<Arc>,
 }
@@ -118,6 +121,9 @@ pub struct RockView {
     pub pos: Vec3,
     /// In meters.
     pub radius: f64,
+    /// The most of each material extractable per second, which is what the
+    /// rock is tinted by.
+    pub caps: Materials,
 }
 
 /// One seat's glyphs on a ring, in run order: rows by cost descending, a
@@ -151,6 +157,58 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// The belt alone at `tick`: every rock where its orbit puts it, tinted
+    /// by its caps, with its inner ring and nothing on it.
+    ///
+    /// What the lobby and the loading screen draw, before a match exists to
+    /// have a view of.
+    pub fn of_belt(rocks: &[Rock], gravity: Gravity, tick: Tick) -> Scene {
+        Scene {
+            rocks: rocks
+                .iter()
+                .enumerate()
+                .map(|(at, rock)| RockView {
+                    id: RockId(at as u32),
+                    pos: rock.orbit().at(tick, gravity).pos,
+                    radius: rock.radius(),
+                    caps: rock.caps(),
+                })
+                .collect(),
+            entities: Vec::new(),
+            rings: rocks
+                .iter()
+                .enumerate()
+                .map(|(at, rock)| RingView {
+                    place: Place {
+                        rock: RockId(at as u32),
+                        band: Band::Inner,
+                    },
+                    caps: rock.caps(),
+                    runs: Vec::new(),
+                    arcs: Vec::new(),
+                })
+                .collect(),
+            flights: Vec::new(),
+            blips: Vec::new(),
+            selection: None,
+            hover: None,
+        }
+    }
+
+    /// The middle of the rocks this scene draws, in meters: where a camera
+    /// looks to frame the whole belt.
+    ///
+    /// A belt with no rock has no middle, and this answers the origin,
+    /// where the central mass is. A non-empty belt type in `sim` would
+    /// delete the case; `Belt::fixed` returns a plain `Vec<Rock>` today.
+    pub fn centre(&self) -> Vec3 {
+        let rocks = self.rocks.len().max(1) as f64;
+        self.rocks
+            .iter()
+            .fold(Vec3::ZERO, |sum, rock| sum + rock.pos)
+            * (1.0 / rocks)
+    }
+
     /// What `view`'s tick draws, over `roster`, the match's own, with what
     /// `client` says the pointer is doing.
     ///
@@ -163,6 +221,11 @@ impl Scene {
             .terrain
             .iter()
             .map(|rock| (rock.rock, rock.orbit.at(view.tick, view.gravity)))
+            .collect();
+        let caps: Caps = view
+            .terrain
+            .iter()
+            .map(|rock| (rock.rock, rock.caps))
             .collect();
         let mut runs = Runs::of(view, roster);
         runs.preview(view, roster, client.hover.as_ref());
@@ -185,6 +248,7 @@ impl Scene {
                     id: rock.rock,
                     pos: body.pos,
                     radius: rock.radius,
+                    caps: rock.caps,
                 })
                 .collect(),
             entities: view
@@ -196,7 +260,7 @@ impl Scene {
                     pos: seen.body.pos,
                 })
                 .collect(),
-            rings: runs.rings(roster, client.fights, drawn),
+            rings: runs.rings(roster, client.fights, &caps, drawn),
             flights: view
                 .seen
                 .iter()
@@ -224,6 +288,27 @@ impl Scene {
         }
     }
 }
+
+impl RingView {
+    /// `place`'s ring in `rings`, empty until something is put on it, its
+    /// stroke tinted by what `caps` holds for its rock.
+    fn at<'a>(
+        rings: &'a mut BTreeMap<Place, RingView>,
+        caps: &Caps,
+        place: Place,
+    ) -> &'a mut RingView {
+        rings.entry(place).or_insert_with(|| RingView {
+            place,
+            // No caps is no material leading, which is a plain stroke.
+            caps: caps.get(&place.rock).copied().unwrap_or(Materials::ZERO),
+            runs: Vec::new(),
+            arcs: Vec::new(),
+        })
+    }
+}
+
+/// Every rock's caps, by rock: what a ring's stroke is tinted by.
+type Caps = BTreeMap<RockId, Materials>;
 
 /// The rows of one seat's run at one place, before the run is laid in cost
 /// order.
@@ -335,39 +420,24 @@ impl Runs {
         self,
         roster: &Roster,
         fights: &Fights,
+        caps: &Caps,
         drawn: impl Iterator<Item = Place>,
     ) -> Vec<RingView> {
         let cost = |row: RowId| roster[row].cost.total();
         let mut rings: BTreeMap<Place, RingView> = BTreeMap::new();
         for place in drawn {
-            rings.entry(place).or_insert_with(|| RingView {
-                place,
-                runs: Vec::new(),
-                arcs: Vec::new(),
-            });
+            RingView::at(&mut rings, caps, place);
         }
         for ((place, seat), rows) in self.rows {
             let mut rows: Vec<(RowId, Vec<Mark>)> = rows.into_iter().collect();
             rows.sort_by(|(a, _), (b, _)| cost(*b).total_cmp(&cost(*a)));
-            rings
-                .entry(place)
-                .or_insert_with(|| RingView {
-                    place,
-                    runs: Vec::new(),
-                    arcs: Vec::new(),
-                })
-                .runs
-                .push(Run {
-                    seat,
-                    marks: rows.into_iter().flat_map(|(_, marks)| marks).collect(),
-                });
+            RingView::at(&mut rings, caps, place).runs.push(Run {
+                seat,
+                marks: rows.into_iter().flat_map(|(_, marks)| marks).collect(),
+            });
         }
         for (place, arc) in fights.arcs() {
-            let ring = rings.entry(place).or_insert_with(|| RingView {
-                place,
-                runs: Vec::new(),
-                arcs: Vec::new(),
-            });
+            let ring = RingView::at(&mut rings, caps, place);
             if !ring.runs.iter().any(|run| run.seat == arc.seat) {
                 ring.runs.push(Run {
                     seat: arc.seat,

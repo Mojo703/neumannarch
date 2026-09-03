@@ -45,7 +45,8 @@ protocol/  probe-protocol  every value two machines exchange, defined in
                            Protocol below; serialisable; no io; both
                            targets
 agents/    probe-agents    the agent frontend: the Agent trait, the
-                           scripted opponent; bin: `harness`, native only
+                           scripted opponent, the personality a lobby's
+                           bot plays by; bin: `harness`, native only
 game/      probe-game      the player frontend: display/, net/, screens/;
                            bin: the playable on Mirage; `look`, behind a
                            `look` feature, synthetic scenes through the
@@ -55,13 +56,15 @@ server/    probe-server    the match server: rooms, lobby authority,
                            on native to host, and a binary; native only
 ```
 
-Dependencies point one way: `protocol` and `agents` depend on `sim`;
-`game` depends on `sim`, `protocol` and `agents`, and on `server` only
-under a native `host` feature; `server` depends on `protocol`. `sim`
-depends on `libm` and nothing else. The browser build carries `sim`,
-`protocol`, `agents` and `game`. `check.sh` fails if `sim`'s dependency
-tree names the engine. `protocol` and `server` are created by the units
-that need them, never as empty crates.
+Dependencies point one way: `protocol` depends on `sim`; `agents` depends
+on `sim` and `protocol`, since a lobby names the bot an agent plays and a
+record is a protocol value; `game` depends on `sim`, `protocol` and
+`agents`, and on `server` only under a native `host` feature; `server`
+depends on `protocol`. `sim` depends on `libm` and on serde's derive,
+which adds no arithmetic. The browser build carries `sim`, `protocol`,
+`agents` and `game`. `check.sh` fails if `sim`'s dependency tree names
+the engine. `server` is created by the unit that needs it, never as an
+empty crate.
 
 The two frontends have one role each and share everything below them: a
 human and a scripted agent both read a `View` and speak a `Command`, and
@@ -216,10 +219,11 @@ pub struct Session {
 }
 pub enum Retention { Window { ticks: u32, every: NonZeroU32 } }
 pub enum Rewound { Nothing, From(Tick) }
-pub struct Record { setup: Setup, log: Log }
+pub struct Unseated { pub seat: SeatId }
 
 impl Session {
-    pub fn new(setup: Setup, retention: Retention, local: &[SeatId]) -> Session;
+    pub fn new(setup: Setup, retention: Retention, local: &[SeatId])
+        -> Result<Session, Unseated>;
     pub fn advance(&mut self) -> &Outcome;                 // one tick on
     pub fn insert(&mut self, stamped: Stamped) -> Result<Rewound, Refused>;
     pub fn acknowledge(&mut self, seat: SeatId, up_to: Tick);
@@ -228,9 +232,9 @@ impl Session {
     pub fn outcome_at(&self, tick: Tick) -> Option<&Outcome>;
     pub fn outcome(&self) -> Option<&Outcome>;             // of the tick shown
     pub fn state(&self) -> &State;
-    pub fn record(&self) -> Record;
+    pub fn setup(&self) -> &Setup;
+    pub fn commands(&self) -> Vec<Stamped>;                // before `settled`
 }
-impl Record { pub fn replay(&self, until: Tick) -> State; }
 ```
 
 - **Insert.** A stamped command at or after the tick the session shows is
@@ -266,10 +270,10 @@ impl Record { pub fn replay(&self, until: Tick) -> State; }
   is built with that tick's shots; no field of the state records a shot.
   `outcome()` is the one that produced the tick shown. A rewind replaces
   the outcomes it re-steps.
-- **The record** is the setup and the log to the settled tick;
-  `Record::replay` builds the initial state from the setup and steps it
-  over the log, which is what a replay file and a desync report hold. It
-  moves to `protocol` when that crate lands.
+- **The record** is a `protocol` value over `setup` and `commands`, which
+  are the setup and the log to the settled tick. `Session::new` refuses a
+  local seat the setup does not seat as `Unseated`, since a match would
+  answer it by never settling.
 - The harness checks: a record reproduces the live hash; the same match
   played twice hashes the same; a match with every command inserted late,
   in scrambled order inside the window, hashes the same at every settled
@@ -422,8 +426,12 @@ order; anything sorted is sorted by a total key ending in an id.
 ## Game: the display library
 
 - `Scene`: everything one frame draws, built from a `View` by
-  `Scene::from_view(view, roster, client)` or by hand in `look`. Rocks with
-  positions and radii; entities with position, glyph and seat; per ring,
+  `Scene::from_view(view, roster, client)`, from the belt alone by
+  `Scene::of_belt(rocks, gravity, tick)`, which is what the lobby and
+  loading screens draw before a match exists to have a view of, or by
+  hand in `look`. `Scene::centre` is the middle of its rocks, which a
+  camera frames the map from. Rocks with
+  positions, radii and caps; entities with position, glyph and seat; per ring,
   per seat, the run as a list of `Mark { glyph, fill, dim }` where `fill`
   is `Solid`, `Hollow`, `Filling(f32)` or `Dashed` and `dim` is what the
   pointer says is leaving or arriving; per ring, per seat, an optional
@@ -446,6 +454,11 @@ order; anything sorted is sorted by a total key ending in an id.
 - `glyph::Glyph { frame, marks, size }`: `Glyph::of(&Row)` by DISPLAY.md's
   three rules, a pure function with a test per rule. `glyph::HALF` is a
   glyph's nominal half-width, which both layers size by.
+- `tint::toward(base, caps, strength)`: a rock's colour from its caps, so
+  a region reads as one hue. `belt` paints a rock's mesh with it and `hud`
+  strokes that rock's rings with it, faintly, since a lobby and a match
+  draw their rings through the same code; a selected ring is white and
+  wider, so its brightening wins over the tint rather than mixing with it.
 - `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
   state, its marks, and the dim a preview draws it at. The HUD and the
   wheel paint through it, so a glyph is drawn one way.
@@ -475,21 +488,26 @@ order; anything sorted is sorted by a total key ending in an id.
   wheel and an `egui::Painter` to painted shapes — rings, runs, arcs, the
   wheel, flight lines, radar contacts, the selection and the hover
   preview; it calls `ring::Layout` and paints glyphs through `Stencil`.
-- The binary is the playable: a `Game` whose `tick` runs the live screen
-  of the `Flow` (Game: net and screens, below); in `Play`, that inserts
-  the local controllers' stamped commands into the `Session`, advances it
-  within the pacing rule, reads the tick's `View` and feeds the `Fights`.
-  Its `frame` builds a `Scene` and draws it — `belt` then `hud`, so the
-  HUD is never occluded — over one full-window transparent egui layer
-  that claims no widgets, and the screens outside `Play` are drawn on
-  that same layer. Input is keyboard and mouse through the engine's
-  action vocabularies: a ring click selects and focuses, a wheel band
-  click edits one want and repeats while held, a left drag from ring to
-  ring is the send, the right or middle button and the pan keys drag the
-  belt, and the zoom axis zooms or, during a send, sets how many go. The
-  gamepad bindings DISPLAY.md states are a later unit. Its own headless
-  drive, behind the `look` feature, plays it through the engine's
-  offscreen `Session` and writes `game/look/play_*.png`.
+- The binary is the playable: a `Game` whose `tick` and `frame` are the
+  live screen's of the `Flow` (Game: net and screens, below) and nothing
+  else; in `Play`, the tick inserts the local controllers' stamped
+  commands into the `Session`, advances it within the pacing rule, reads
+  the tick's `View` and feeds the `Fights`. `Play`'s frame builds a
+  `Scene` and draws it — `belt` then `hud`, so the HUD is never occluded
+  — over one full-window transparent egui layer that claims no widgets,
+  and every other screen is drawn on that same layer. Input is keyboard
+  and mouse through the engine's action vocabularies, which `controls.rs`
+  declares: a ring click selects and focuses, a wheel band click edits
+  one want and repeats while held, a left drag from ring to ring is the
+  send, the right or middle button and the pan keys drag the belt, the
+  zoom axis zooms or, during a send, sets how many go, and Escape opens
+  the pause screen and closes it again. The gamepad bindings DISPLAY.md
+  states are a later unit. Its own headless drive, behind the `look`
+  feature, plays a whole skirmish through the engine's offscreen
+  `Session` — title to lobby to a placement to the standings — and
+  writes `game/look/title.png`, `lobby.png` and `results.png`.
+  `check.sh` runs it under `xvfb-run`, so the drive and its screenshots
+  are verified on every change.
 
 ## Look
 
@@ -499,10 +517,11 @@ lands in the pixels. It holds the three fixed scenes from DISPLAY.md as
 code, renders each through a `Session`, reads pixels back, and writes
 PNGs under `game/look/`, which is `.gitignore`d: screenshots are the
 judgement's input, never committed. `cargo run -p probe-game --features
-look --bin look` runs it; `check.sh` only builds it, with `cargo build -p
-probe-game --features look --all-targets`, so the default binary and the
-wasm build never pull `image` or `offscreen`. It is the only way a
-display change is verified.
+look --bin look` runs it; `check.sh` builds it, with `cargo build -p
+probe-game --features look --all-targets`, and runs the playable's own
+drive under `xvfb-run`, so the default binary and the wasm build never
+pull `image` or `offscreen`. It is the only way a display change is
+verified.
 
 ## Agents
 
@@ -517,8 +536,11 @@ place, diffed against the view into `Want`s), stepping a `Memory` (what
 the view carries no history of) and a `Dice` (the one seeded,
 deterministic source of variation an agent has). `Roles` reads the roster
 once into the row an agent prefers per job, so no agent names a row by
-id. A bot in a lobby is a `Seated` agent run by the machine that owns its
-seat, through `game`'s bot controller; the sim never knows.
+id. `Personality::of(protocol::Bot)` is the one place a lobby's bot
+becomes constants, and it is exhaustive, so a bot the protocol can name
+always has a way of playing. A bot in a lobby is a `Seated` agent run by
+the machine that owns its seat, through `game`'s bot controller; the sim
+never knows.
 
 `harness`, native only, no feature gate: `match` seats agents and plays
 one to the clock, tracing standings as it goes; `replay` checks the
@@ -537,32 +559,73 @@ io and no engine, so `game`, `server` and the harness's record files all
 speak it.
 
 ```rust
-pub struct Lobby {
-    seats: Vec<SeatSlot>,      // SeatSlot { team, control: Open | Closed | Player(PlayerId) | Bot(Personality), ready }
-    seed: u64, clock: Tick, host: PlayerId,
+pub struct PlayerId(pub u32);                   // PlayerId::HOST opens a lobby
+pub enum Bot { Turtle, Expand }                 // agents turns it into a Personality
+pub enum Control {
+    Open, Closed, Player { player: PlayerId, ready: bool }, Bot(Bot),
 }
-pub enum LobbyEdit { SetSlot, SetTeam, SetSeed, SetClock, SetReady, .. }
+pub struct SeatSlot { pub team: TeamId, pub control: Control }
+pub struct Lobby {                              // MAX_SLOTS == MAX_SEATS slots
+    slots: Vec<SeatSlot>, seed: u64, clock: Tick, host: PlayerId,
+}
+pub enum LobbyEdit {
+    SetSlot { slot, control }, SetTeam { slot, team }, SetSeed(u64),
+    SetClock(Tick), SetReady { ready },
+}
+pub enum Refused { NotHost, NotYours, NotSeated, NoSuchSlot, BadTeam, BadClock }
+pub enum NotReady { NoSeats, OpenSeat { slot }, Unready { slot } }
 pub enum Message {
     Join, Welcome { player, lobby }, Edit(LobbyEdit), Lobby(Lobby), Start(Setup),
     Command(Stamped), Acknowledge { seat, up_to: Tick }, Hash { tick, hash },
     Desync { tick }, Leave,
 }
-pub struct Record { setup: Setup, log: Vec<Stamped> }
+pub struct Record { setup: Setup, ticks: BTreeMap<Tick, Batch> }
+
+impl Lobby {
+    pub fn skirmish(host: PlayerId) -> Lobby;
+    pub fn edit(&mut self, by: PlayerId, edit: LobbyEdit) -> Result<(), Refused>;
+    pub fn freeze(&self) -> Result<Setup, NotReady>;
+    pub fn seat_of(&self, slot: usize) -> Option<SeatId>;
+    pub fn slot_of(&self, player: PlayerId) -> Option<usize>;
+    pub fn regenerate_seed(&mut self);
+}
+impl Record {
+    pub fn of(session: &Session) -> Record;
+    pub fn replay(&self, until: Tick) -> State;
+}
+pub trait Wire { fn encoded(&self) -> Vec<u8>; fn decode(&[u8]) -> Result<Self, Malformed>; }
 ```
 
-`Lobby::freeze(&self) -> Setup` is the one way a match starts, on every
-machine, from the same value; `sim`'s `Setup` holds only what the state
-needs (teams per seat, seed, clock), and `Lobby` holds who controls each
-seat, which the sim never learns.
+`Lobby::freeze` is the one way a match starts, on every machine, from the
+same value; `sim`'s `Setup` holds only what the state needs (teams per
+seat, seed, clock), and `Lobby` holds who controls each seat, which the
+sim never learns. A closed slot is not in the match, so a seat is a
+slot's place among the slots that are not closed: `seat_of` is that one
+mapping, and every controller and colour reads it rather than the slot
+index. Readiness lives inside `Control::Player`, where it means
+something; a bot and a closed seat have none to hold. `Bot` names a
+shipped opponent and `agents`' `Personality::of` matches it
+exhaustively, so a bot the protocol can name always has a way of playing.
+
+`Wire` is the one encoding, blanket-implemented for every serialisable
+value: CBOR, the same bytes on native and in the browser. Reading is the
+only place a wire value is checked, and it goes through the constructor:
+`Setup` deserialises through `Setup::new`, so a seat count off the wire
+is checked once, and `Record` folds its flat list of commands into one
+`Batch` per tick, so a record that replays is the only one that exists.
 
 ## Game: net and screens
 
-- **Controllers.** Each machine owns the seats its lobby slots name as
-  its player or its bots. `Controller::Human` turns input into commands,
-  `Controller::Bot` runs a `Seated` agent on its cadence, and a seat no
-  local controller owns is `Remote`. Every controller yields `Stamped`
-  commands at the session's latest tick, which the machine inserts into
-  its own session at once and hands to the transport. Nothing waits.
+- **Controllers.** `Controller::of(&Lobby, me, roster)` is one controller
+  per seat, in seat order: `Human` for the slot `me` holds, `Bot` for
+  each slot this machine runs a `Seated` agent for, and `Remote` for a
+  seat another machine owns, which issues nothing here. Every controller
+  yields `Stamped` commands at the session's latest tick, which the
+  machine inserts into its own session at once and hands to the
+  transport. Nothing waits. A `Human` holds what the frame's gestures
+  asked for until the next tick stamps it, and never more than
+  `MAX_COMMANDS_PER_TICK`, so the tick's batch takes every command a
+  controller yields and the insert cannot be refused.
 - **Transport.** `Transport` carries stamped commands, acknowledgements
   and hash reports both ways. `Local` returns nothing and exists so the
   loop has one shape. `Socket` speaks `protocol::Message` over a
@@ -574,14 +637,39 @@ seat, which the sim never learns.
   state past that; a machine ahead of the others' settled ticks by a
   threshold slows its tick rate by a stated fraction until level. Both
   numbers are constants with units.
+- **Transport, as built.** `Transport` is a trait of four calls — `send`,
+  `acknowledge`, `report`, `received` — and `Local` is its one
+  implementation. `Play` calls all four every tick, so the loop has one
+  shape whether or not the match has peers, and its match over the
+  messages it hears names every variant rather than catching a rest.
 - **Screens.** One `Flow` value owns which screen is live: `Title`,
-  `Lobby`, `Loading`, `Play`, `Results`, with `Pause` over `Play`. Skirmish
-  opens a lobby whose slots are all local; Host embeds the server and
-  opens the same lobby; Join connects to an address and receives it.
-  Start freezes the lobby into a `Setup` on the host, every machine
-  builds the initial state from it, and the tick-zero hash is the first
-  report. Results holds the standings and the record, and returns to the
-  lobby for a rematch or to the title.
+  `Lobby`, `Loading`, `Play`, `Results`, with `Pause` the match's own,
+  since play holds whether it is open. A screen's frame answers a `Step`
+  and the flow shows it; no screen reaches into another. Skirmish opens a
+  lobby whose slots are all local; Host embeds the server and opens the
+  same lobby; Join connects to an address and receives it. Start freezes
+  the lobby into a `Setup` on the host, every machine builds the initial
+  state from it, and the tick-zero hash is the first report. Results
+  holds the score, the belt the match ended on and the lobby it came
+  from, and returns to that lobby for a rematch or to the title.
+  Results is reached when the view's `Standings` arrive, which is the
+  clock: DESIGN.md's fog reveals them then and never before, so a client
+  cannot see another side's elimination, and the end at elimination is
+  the unit that can.
+  The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
+  widest view whose rings stand apart, and lays its seats out by team:
+  one heading per team that holds a seat, its seats under it, and the
+  host's Add Bot and Open Seat under those, which take the first closed
+  slot. A closed seat is not drawn, so a team holding none is not drawn
+  either, and a seat's Move action cycles its team, which is also how a
+  team is opened.
+- **The styled register.** Every screen outside the belt is painted and
+  hit-tested by hand through one `Panel`, over the engine's UI layer, and
+  claims no widget: the HUD's palette, thin lines, no window chrome,
+  glyphs through the same `Stencil` the HUD paints with. A screen's
+  geometry is one function per group of controls, which both the paint
+  and the hit test read, so a control cannot be drawn where it is not
+  clicked.
 
 ## Server
 
@@ -622,14 +710,16 @@ sim/src/
   step/             mod.rs step, next; maneuver.rs; propagation.rs;
                     fulfilment.rs; extraction.rs; construction.rs; fire.rs
   history/          mod.rs; snapshots.rs Retention and the ring behind it;
-                    log.rs the stamped log by tick; record.rs Record;
+                    log.rs the stamped log by tick;
                     session.rs Session: advance, insert, acknowledge,
-                    settled, hash_at, outcome_at, record
+                    settled, hash_at, outcome_at, setup, commands
 protocol/src/
   lib.rs            the surface
-  lobby.rs          Lobby, SeatSlot, LobbyEdit, freeze
+  ids.rs            PlayerId
+  lobby.rs          Lobby, SeatSlot, Control, Bot, LobbyEdit, freeze
   message.rs        Message
   record.rs         Record
+  wire.rs           Wire, the one encoding
 agents/src/
   lib.rs            Agent, Seated, DECISION_INTERVAL; the surface
   dice.rs  memory.rs  roles.rs  survey.rs  plan.rs  personality.rs
@@ -637,13 +727,16 @@ agents/src/
   bin/harness.rs    native only: match, replay, rollback, matrix
 game/src/
   lib.rs            the surface
+  controls.rs       Controls: the buttons and axes the playable reads
   display/          mod.rs; scene.rs glyph.rs glyph_quad.rs ring.rs
-                    wheel.rs camera.rs screen.rs stencil.rs fights.rs
-                    send.rs belt.rs hud.rs, as before
-  net/              controller.rs Controller; transport.rs Transport;
-                    local.rs Local; socket.rs Socket; pace.rs pacing
-  screens/          flow.rs Flow; title.rs lobby.rs loading.rs play.rs
-                    pause.rs results.rs
+                    wheel.rs camera.rs screen.rs stencil.rs tint.rs
+                    fights.rs send.rs belt.rs hud.rs, as before
+  net/              controller.rs Controller, Human; transport.rs
+                    Transport; local.rs Local; socket.rs Socket;
+                    pace.rs pacing
+  screens/          mod.rs Playable; flow.rs Flow and Step; panel.rs the
+                    styled register; title.rs lobby.rs loading.rs
+                    play.rs pause.rs results.rs
   main.rs           the playable, and its headless drive
   bin/look.rs       behind the `look` feature
 server/src/
@@ -673,7 +766,8 @@ One concern per file; a file that needs a section comment is two files.
 | `libm` | `sim`, `agents` | transcendentals identical on every target; `std`'s are the platform's; an agent's arithmetic must replay identically too |
 | `mirage-engine` | `game` | the engine, by path; `look`'s bin additionally needs its `offscreen` feature |
 | `image` | `game`, behind the `look` feature | writing PNGs; already in the engine's tree |
-| a serialiser, to be named by the protocol unit | `protocol` | one wire encoding for native and the browser |
+| `serde` (derive) | `sim`, `protocol`, `agents` by way of them | the derives every wire value takes; adds no arithmetic, so determinism is untouched |
+| `ciborium` | `protocol` | one wire encoding for native and the browser: CBOR, `no_std`-capable, self-describing so a record file survives a field addition, and it needs no io in the crate. It beat `postcard`, whose wire is smaller, on reachability — `postcard` is not fetchable in this environment — and on self-description; revisit `postcard` if wire size ever matters |
 | a WebSocket client running on native and in the browser, to be named by the net unit | `game` | the transport |
 | an async runtime and a WebSocket server, to be named by the server unit | `server` | rooms and forwarding; native only |
 

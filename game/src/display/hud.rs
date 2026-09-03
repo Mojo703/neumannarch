@@ -11,6 +11,7 @@ use crate::display::ring::{Geometry, Layout, Span};
 use crate::display::scene::{Arc, Blip, Hover, RingView, Scene, WheelBand};
 use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
+use crate::display::tint;
 use crate::display::wheel::Wheel;
 
 /// The inner ring's screen radius, in points.
@@ -35,8 +36,14 @@ const RING_WIDTH: f32 = 1.5;
 /// A selected ring's stroke width, in points.
 const SELECTED_RING_WIDTH: f32 = 3.0;
 
-/// A ring's own stroke colour, unselected.
+/// A ring's own stroke colour where no material leads at its rock.
 const RING_COLOUR: Color32 = Color32::from_gray(140);
+
+/// How far a ring of one material alone is pulled from [`RING_COLOUR`]
+/// toward that material's own, in `0..=1`. The lobby and the match paint
+/// rings through this same code, so the pull is faint enough to sit under
+/// a match's runs and clear enough to group a region.
+const RING_TINT: f32 = 0.5;
 
 /// A selected ring's stroke colour.
 const SELECTED_RING_COLOUR: Color32 = Color32::WHITE;
@@ -136,9 +143,11 @@ fn hovered_slot(scene: &Scene, wheel: &Wheel) -> Option<(RowId, WheelBand)> {
 
 fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: bool) {
     let radius = ring_radius(ring.place.band);
+    // A selected ring is white and wider, so the brightening wins over the
+    // tint rather than mixing with it.
     let (stroke_colour, stroke_width) = match selected {
         true => (SELECTED_RING_COLOUR, SELECTED_RING_WIDTH),
-        false => (RING_COLOUR, RING_WIDTH),
+        false => (tint::painted(RING_COLOUR, ring.caps, RING_TINT), RING_WIDTH),
     };
     painter.circle_stroke(centre, radius, Stroke::new(stroke_width, stroke_colour));
 

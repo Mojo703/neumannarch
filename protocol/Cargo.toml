@@ -1,11 +1,12 @@
 [package]
-name = "probe-sim"
+name = "probe-protocol"
 version.workspace = true
 edition.workspace = true
-description = "The deterministic lockstep simulation of Probe Game"
+description = "Every value two machines of Probe Game exchange"
 
 [dependencies]
-libm = "0.2"
+ciborium = "0.2.2"
+probe-sim = { path = "../sim" }
 serde = { version = "1.0.229", features = ["derive"] }
 
 [lints]

@@ -6,6 +6,7 @@ description = "The agent frontend of Probe Game: scripted opponents and the harn
 
 [dependencies]
 libm = "0.2"
+probe-protocol = { path = "../protocol" }
 probe-sim = { path = "../sim" }
 
 [lints]

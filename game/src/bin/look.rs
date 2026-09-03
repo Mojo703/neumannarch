@@ -25,7 +25,7 @@ use probe_game::display::scene::{
 use probe_game::display::screen::Screen;
 use probe_game::display::{belt, hud};
 use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD};
-use probe_sim::{Band, Place, RockId, RowId, SeatId, Vec3};
+use probe_sim::{Band, Materials, Place, RockId, RowId, SeatId, Vec3};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
@@ -112,6 +112,29 @@ fn rock(id: u32, pos: Vec3, radius: f64) -> RockView {
         id: RockId(id),
         pos,
         radius,
+        caps: caps_of(id),
+    }
+}
+
+/// The caps of the rock at `id`: the region its id falls in, so the scenes
+/// carry the belt's three tints on their rocks and their rings alike.
+fn caps_of(id: u32) -> Materials {
+    let rich = 8.0;
+    let poor = 1.0;
+    match id % 3 {
+        0 => Materials::new(rich, poor, poor),
+        1 => Materials::new(poor, rich, poor),
+        _ => Materials::new(poor, poor, rich),
+    }
+}
+
+/// `seat`'s ring at `place`, over the runs and arcs it carries.
+fn ring(place: Place, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
+    RingView {
+        place,
+        caps: caps_of(place.rock.0),
+        runs,
+        arcs,
     }
 }
 
@@ -167,13 +190,13 @@ fn region_scene() -> Scene {
     ];
 
     let rings = vec![
-        RingView {
-            place: inner_a,
-            runs: vec![
+        ring(
+            inner_a,
+            vec![
                 present(0, &[FRIGATE, RAIDER]),
                 present(1, &[LANCER, RAIDER]),
             ],
-            arcs: vec![
+            vec![
                 Arc {
                     seat: SeatId(0),
                     fraction: 0.7,
@@ -185,12 +208,8 @@ fn region_scene() -> Scene {
                     trailing: 0.4,
                 },
             ],
-        },
-        RingView {
-            place: inner_b,
-            runs: vec![present(0, &[SHIPYARD, FRIGATE])],
-            arcs: vec![],
-        },
+        ),
+        ring(inner_b, vec![present(0, &[SHIPYARD, FRIGATE])], vec![]),
     ];
 
     let flights = vec![FlightLine {
@@ -230,13 +249,13 @@ fn fight_scene() -> Scene {
         ship(1, RAIDER, Vec3::new(-6.0, 0.0, -2.0)),
     ];
 
-    let rings = vec![RingView {
-        place: inner,
-        runs: vec![
+    let rings = vec![ring(
+        inner,
+        vec![
             present(0, &[FRIGATE, LANCER, RAIDER]),
             present(1, &[FRIGATE, RAIDER]),
         ],
-        arcs: vec![
+        vec![
             Arc {
                 seat: SeatId(0),
                 fraction: 0.85,
@@ -248,7 +267,7 @@ fn fight_scene() -> Scene {
                 trailing: 0.55,
             },
         ],
-    }];
+    )];
 
     Scene {
         rocks,
@@ -294,13 +313,15 @@ fn belt_scene() -> Scene {
         .iter()
         .zip(seats)
         .enumerate()
-        .map(|(index, (_, seat))| RingView {
-            place: Place {
-                rock: RockId(index as u32),
-                band: Band::Inner,
-            },
-            runs: vec![present(seat, &[FRIGATE])],
-            arcs: vec![],
+        .map(|(index, (_, seat))| {
+            ring(
+                Place {
+                    rock: RockId(index as u32),
+                    band: Band::Inner,
+                },
+                vec![present(seat, &[FRIGATE])],
+                vec![],
+            )
         })
         .collect();
 

@@ -4,7 +4,7 @@
 
 use core::time::Duration;
 
-pub use history::{Record, Retention, Rewound, Session, WINDOW_SECONDS};
+pub use history::{Retention, Rewound, Session, Unseated, WINDOW_SECONDS};
 pub use ids::{EntityId, FlightId, RockId, RowId, SeatId, TeamId};
 pub use materials::{Materials, Stockpile};
 pub use place::{Band, Place, Post};

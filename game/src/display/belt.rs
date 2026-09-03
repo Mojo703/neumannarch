@@ -5,12 +5,18 @@ use mirage_engine::prelude::*;
 use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::{EntityView, RockView, Scene};
 use crate::display::screen::Screen;
+use crate::display::tint;
 
 /// A rock mesh's density; see [`Sphere::subdivisions`].
 const ROCK_SUBDIVISIONS: u32 = 2;
 
-/// A rock's colour: plain, unlit by ownership.
+/// A rock's colour where its three caps are equal: no material leads.
 const ROCK_COLOUR: Color = Color::rgb(0.55, 0.5, 0.45);
+
+/// How far a rock of one material alone is pulled from [`ROCK_COLOUR`]
+/// toward that material's own, in `0..=1`. Below one, so a rock still
+/// reads as rock.
+const TINT_STRENGTH: f32 = 0.7;
 
 /// Where the light comes from, so a rock reads as a sphere: down the belt
 /// plane's `+X`, tilted above it.
@@ -49,7 +55,11 @@ fn rock_instance<G: Game>(rock: &RockView, screen: &Screen) -> Instance<Sphere, 
         Quat::IDENTITY,
         screen.local(rock.pos),
     ))
-    .material(Material::lit(ROCK_COLOUR))
+    .material(Material::lit(tint::toward(
+        ROCK_COLOUR,
+        rock.caps,
+        TINT_STRENGTH,
+    )))
 }
 
 /// `entity`'s glyph at a fixed screen size: [`crate::display::glyph::HALF`] points

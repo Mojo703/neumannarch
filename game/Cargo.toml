@@ -11,6 +11,8 @@ required-features = ["look"]
 
 [dependencies]
 mirage-engine = { path = "../../../mirage-renderer" }
+probe-agents = { path = "../agents" }
+probe-protocol = { path = "../protocol" }
 probe-sim = { path = "../sim" }
 image = { version = "0.25.10", optional = true, default-features = false, features = [
     "png",

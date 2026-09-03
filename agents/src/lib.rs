@@ -95,6 +95,7 @@ mod tests {
     fn session() -> Session {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(1_000)).expect("two seats");
         Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)])
+            .expect("both seats are seated")
     }
 
     /// An agent that counts its decisions and always asks for one scout.

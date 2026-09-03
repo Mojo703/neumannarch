@@ -1,5 +1,7 @@
 //! Where things are wanted: a rock's band, and a seat's composition there.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ids::{RockId, SeatId};
 
 /// How far ahead of a rock the inner band's anchor sits, in meters. A
@@ -14,7 +16,7 @@ const OUTER_AMPLITUDE: f64 = 30.0;
 
 /// The two anchors around a rock a force can hold: the inner band fights at
 /// the rock, the outer band stages out of its range.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum Band {
     Inner,
     Outer,
@@ -32,7 +34,7 @@ impl Band {
 }
 
 /// A rock's band. A unit's home, and the only thing a want names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct Place {
     pub rock: RockId,
     pub band: Band,

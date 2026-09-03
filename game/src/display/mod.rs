@@ -14,4 +14,5 @@ pub mod scene;
 pub mod screen;
 pub mod send;
 pub mod stencil;
+pub mod tint;
 pub mod wheel;

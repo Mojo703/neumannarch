@@ -30,6 +30,12 @@ target-state only. Agents see this file only through their briefs.
 - Landed 2026-09-03, uncommitted: rendering relative to the focus through
   `Screen::local`, killing the f32 jitter at belt distance; tests state
   the guarantee and were shown failing on the old conversion.
+- Deferred from the skirmish unit 2026-09-03: a match ending by
+  elimination before the clock is unreachable from a fogged view, since
+  standings are revealed only at the clock; Results is reached at the
+  clock only, and an eliminated seat's end needs a DESIGN.md ruling. The
+  fight arc refills when a seat reinforces, which DISPLAY.md's "full at
+  the fight's start and drains" does not say; held for play.
 - Held for the owner's play, in one list: heavy-row lag after a send and
   its braking-pull candidate; the planner's earliest-fit arrival; crowd
   packing past half the spacing; unarmed rows never chase; tidal drift at
@@ -71,11 +77,15 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
    as ARCHITECTURE.md states it, `Record`; the harness gains `rollback`.
    Red-state refactor over today's `Session`; the owner asked for great
    care here.
-4. `protocol`: `Lobby`, `LobbyEdit`, `Message`, `Record`, freeze; the
-   serialiser row filled in.
-5. `game` net and screens, Opus: controllers, `Local`, `Flow` and the
-   six screens in the styled register; skirmish with bots playable end to
-   end with no network.
+4. and 5. Landed 2026-09-03: `protocol` (serde plus ciborium; `Lobby`,
+   `LobbyEdit`, `Message`, `Record` with `Record::of(&Session)`,
+   `Bot`), `game` controllers and `Local`, `Flow` and the six screens in
+   the styled register, the lobby grouped by team over the full-screen
+   belt with ring strokes tinted by caps, Results wording, the headless
+   drive in `check.sh`. Drawn disabled with rustdoc naming their unit:
+   Host, Join, Settings, Quit (engine gap), Surrender (no DESIGN rule).
+   Key files for the owner: protocol/src/, game/src/net/,
+   game/src/screens/, game/src/display/tint.rs.
 6. `server` and `Socket`, Opus: rooms, forwarding, hash reports, desync,
    records; host embeds it; join by address; pacing and the waiting
    screen. Multiplayer functional.
@@ -85,10 +95,20 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
    regional caps; the star as a distant light and disc.
 9. From the harness: seat 0's edge isolated and removed; territory that
    varies with composition; combat before the last third of a match.
-10. A sweep over the whole codebase for the comment and test rule above:
+10. Icons by placement (owner's concept sheet, art/concepts/, kept out of
+    git, 2026-09-03): marks placed by role plus an arc for radar above
+    default, a belt for plating, a ring for capacity; DISPLAY.md's three
+    glyph rules become six placement rules; `Glyph::of` and both painters
+    follow; judging scenes re-shot and re-judged. Whenever a display slot
+    is free; not before the skirmish lands, since it owns the glyph files.
+    Later, with the owner's models: hulls as meshes with a level-of-detail
+    rule (mesh above a screen size, glyph below), the stencil icon, and a
+    DESIGN.md line that a faction skews the hull's dialect and never the
+    glyph.
+11. A sweep over the whole codebase for the comment and test rule above:
     cut useless tests, replace comments with types, rename tests as
     guarantees; one agent per crate, owner reviews the diff.
-11. The held list from play, each a ruling then a unit; fog in the
+12. The held list from play, each a ruling then a unit; fog in the
     display; gamepad; the twelve-slot wheel; a display for an unplannable
     send.
 
@@ -188,6 +208,19 @@ Reported to the owner as it is found; the game never works around a gap.
   drag's wheel count cannot be verified headlessly; the playable verifies
   zoom through a key binding instead. Found by the playable agent
   2026-09-03; for the owner's engine session.
+- The painter's points-per-pixel is reachable only inside a `ctx.ui`
+  closure, so every screen opens a throwaway `ctx.ui` to read it before
+  drawing; a `FrameCtx::points_per_pixel()` would delete that. Found
+  2026-09-03.
+- Offscreen input never reaches the UI layer: `press` and `set_pointer`
+  are read by the game and `offer_ui` by egui, never both, so a screen
+  built from egui widgets could not be verified headlessly; the game's
+  screens hit-test themselves through `ctx.pointer()` for that reason.
+  Found 2026-09-03.
+- Crate downloads are blocked in the agents' environment (crates.io's
+  static host answers 403 while the index answers 200), so a new
+  dependency must already be in the cargo cache; `serde` and `ciborium`
+  were, `postcard` was not. Owner's environment, 2026-09-03.
 - A game cannot quit: the engine exits only on the window's close
   request and there is no `ctx.quit()`; the pause menu has Resume only.
   Found 2026-09-03.

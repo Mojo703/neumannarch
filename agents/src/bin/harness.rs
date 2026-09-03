@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use probe_agents::{Mix, Personality, Scripted, Seated};
+use probe_protocol::Record;
 use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster};
 use probe_sim::state::State;
 use probe_sim::state::standings::Standings;
@@ -97,7 +98,7 @@ fn replayed() -> bool {
     }
     let live = run.session.state();
     let settled = run.session.settled();
-    let record = run.session.record();
+    let record = Record::of(&run.session);
     let replay = record.replay(settled);
     println!(
         "ticks {}, settled {}, {} commands",
@@ -149,7 +150,8 @@ fn rolled_back() -> bool {
         hashes[end.0 as usize]
     );
 
-    let mut late = Session::new(setup(CHECK_CLOCK), Retention::shipped(), &[]);
+    let mut late = Session::new(setup(CHECK_CLOCK), Retention::shipped(), &[])
+        .expect("a session owning no seat seats nothing to refuse");
     let mut deliveries = scrambled(&issued);
     let mut pending = issued.clone();
     let mut refused = 0;
@@ -293,7 +295,8 @@ impl Match {
     /// seat, all of them this machine's.
     fn new(clock: Tick, seated: Vec<Seated>) -> Match {
         Match {
-            session: Session::new(setup(clock), Retention::shipped(), &SEATS),
+            session: Session::new(setup(clock), Retention::shipped(), &SEATS)
+                .expect("one seat per team seats both checks"),
             seated,
         }
     }

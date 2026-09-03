@@ -1,6 +1,8 @@
 //! The one verb: how it is stamped, how a tick's commands are ordered,
 //! and how one applies to the state.
 
+use serde::{Deserialize, Serialize};
+
 use super::State;
 use crate::ids::{RowId, SeatId};
 use crate::place::{Band, Place, Post};
@@ -15,7 +17,7 @@ pub const MAX_WANT: u32 = 200;
 pub const MAX_COMMANDS_PER_TICK: usize = 32;
 
 /// What a seat can ask for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Command {
     /// Set the count of `row` wanted at `place`.
     Want {
@@ -27,7 +29,7 @@ pub enum Command {
 
 /// A command with the seat that issued it and that seat's own count of
 /// its commands, which counts from zero for the match.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub struct Issued {
     pub seat: SeatId,
     pub seq: u32,
@@ -36,7 +38,7 @@ pub struct Issued {
 
 /// An issued command with the tick it takes effect at, wherever it is
 /// applied.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub struct Stamped {
     pub tick: Tick,
     pub issued: Issued,

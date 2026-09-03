@@ -140,18 +140,23 @@ floats over another; each replaces the last.
 
 - **Title.** Skirmish, Host, Join, Settings, Quit, in a column. Join
   takes an address.
-- **Lobby.** One screen for skirmish and multiplayer. Its centre is the
-  belt the match will be played on, rendered from the seed by the same
-  belt and HUD code as the match, every rock's ring drawn, regions tinted
-  by their caps; it redraws the instant the seed changes. Down the left,
-  one row per seat: its colour, who holds it (the player's name, a bot's
-  personality, open, or closed, as DESIGN.md's lobby rule names them),
-  its team, and its readiness. A row the
-  viewer owns is editable where DESIGN.md's lobby rule allows; the rest
-  is not. Down the right, the host's shape: seed with a regenerate action,
-  clock, team layout. Across the bottom: Ready for a guest, Start for the
-  host, enabled by the same rule, and Leave. A guest sees the host's edits
-  as they land.
+- **Lobby.** One screen for skirmish and multiplayer. The belt the match
+  will be played on fills the screen behind everything else, rendered
+  from the seed by the same belt and HUD code as the match, at the widest
+  zoom whose rings stand apart, each ring's stroke tinted by its rock's
+  caps; it redraws the instant the seed changes. Over it, down the left,
+  the seats grouped by team: a heading per team, and under it one row per
+  seat in that team holding its colour, who holds it (the player's name
+  or the bot's personality, as DESIGN.md's lobby rule names them), and a
+  readiness mark. Under each team's rows the host has Add bot and Open
+  seat; an open seat is a row saying so; closed seats are not drawn. A
+  row's holder and team are edited by clicking them where DESIGN.md's
+  lobby rule allows the viewer to; the rest is not editable. Down the
+  right, the host's shape: the seed with a regenerate action and the
+  clock. Across the bottom: Ready for a guest, Start for the host,
+  enabled by the same rule, and Leave. A guest sees the host's edits as
+  they land. Teams and seats are numbered from one wherever a number is
+  shown; every label is a word in title case, never an identifier.
 - **Loading.** The belt from the lobby, still, until every machine has
   built the match and agreed the first hash.
 - **Play.** The match, as every section above describes. Escape opens the
@@ -160,10 +165,11 @@ floats over another; each replaces the last.
   state: in multiplayer, when a peer has fallen behind by the stated
   span, the match holds, the HUD dims, and the waiting seats' colours are
   shown; it resumes by itself.
-- **Results.** At the clock or elimination: the final belt under the
-  standings, rocks held and army value per team in the match's own
-  glyphs and colours with the winner named, and Rematch, which returns to
-  the lobby with its shape kept, or Leave to the title.
+- **Results.** At the clock: the final belt, held still, under a panel
+  titled Results: one row per team in the match's colours, its rocks held
+  as a count of ring glyphs and its army value, the winning row marked;
+  then Rematch, which returns to the lobby with its shape kept, and Leave
+  to the title. The word standings appears nowhere on screen.
 
 ## Judging
 

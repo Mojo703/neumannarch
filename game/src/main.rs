@@ -1,598 +1,55 @@
-//! Probe Game on the Mirage engine: one local match, seat zero the
-//! player's, over the sim's fogged view.
+//! Probe Game on the Mirage engine: every tick and frame is the live
+//! screen's.
 
-use mirage_engine::egui;
-use mirage_engine::math::{UVec2, Vec2};
+use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
-use probe_game::display::camera::BeltCamera;
-use probe_game::display::fights::Fights;
+use probe_game::controls::Controls;
 use probe_game::display::glyph_quad::GlyphQuad;
-use probe_game::display::scene::{Client, Hover, Scene, WheelBand};
-use probe_game::display::screen::Screen;
-use probe_game::display::send::Sending;
-use probe_game::display::wheel::Wheel;
-use probe_game::display::{belt, hud};
-use probe_sim::state::Command;
-use probe_sim::state::view::View;
-use probe_sim::step::fire::Shots;
-use probe_sim::{
-    Band, Place, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId,
-    Tick, Vec3,
-};
+use probe_game::screens::flow::Flow;
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
 /// The window's size, in logical pixels.
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
-/// The clock a match ends at: fifteen minutes.
-const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
-
-/// The seat the player holds. Seat one is an opponent that issues nothing.
-const PLAYER: SeatId = SeatId(0);
-
-/// The map's seed this match plays.
-const SEED: u64 = 1;
-
-/// The eye-to-focus distance a match opens at, in meters: a region of the
-/// belt, so the player can pick a rock to start on.
-const OPENING_ZOOM: f64 = 6_000.0;
-
-/// How long a held wheel band waits before it repeats, in seconds.
-const REPEAT_DELAY: f32 = 1.0 / 3.0;
-
-/// How often a held wheel band repeats after that, in seconds.
-const REPEAT_INTERVAL: f32 = 0.1;
-
-/// How fast the pan keys move the belt, in points a second.
-const KEY_PAN: f32 = 900.0;
-
-/// What one notch of the zoom axis multiplies the eye-to-focus distance by.
-const ZOOM_STEP: f64 = 1.25;
-
-/// How far one turn of the mouse wheel counts as, in notches.
-const WHEEL_NOTCH: f32 = 1.0;
-
-/// How far the zoom keys count as per frame, in notches, so a held key
-/// zooms smoothly where a wheel jumps.
-const ZOOM_KEY_NOTCH: f32 = 0.06;
-
 fn main() {
     run(
         Config::new("Probe Game")
             .with_size(WINDOW.x, WINDOW.y)
             .with_tick_interval(probe_sim::TICK),
-        |_| Ok(Play::new()),
+        |_| Ok(Probe::new()),
     );
 }
 
-/// What the player can do. The gamepad bindings DISPLAY.md states are a
-/// later unit; every action here is keyboard and mouse.
-#[derive(Buttons, Clone, Copy)]
-enum Button {
-    /// Select a ring, edit a wheel band, or start a send.
-    Select,
-    /// Drag the belt under the pointer.
-    Pan,
-    Pause,
+/// The playable: one flow of screens, over the sim's own tick.
+struct Probe {
+    flow: Flow,
 }
 
-#[derive(Axes, Clone, Copy)]
-enum Axis {
-    /// Zoom, or, during a send, how many units go.
-    Zoom,
-}
-
-#[derive(Axes2, Clone, Copy)]
-enum Axis2 {
-    Pan,
-}
-
-struct Controls;
-
-/// A left drag from a ring: what it would send, until it is released.
-struct Drag {
-    from: Place,
-    /// Units it moves, off the end of the source run.
-    count: u32,
-    /// Zoom-axis motion not yet worth a whole unit, in notches.
-    adjusted: f32,
-}
-
-/// A held wheel band, repeating its edit.
-struct Holding {
-    row: RowId,
-    band: WheelBand,
-    /// Seconds the button has been down.
-    held: f32,
-    /// Edits issued so far, the first on the press itself.
-    edits: u32,
-}
-
-/// One local match: the session, the tick's view of it, and what the
-/// pointer is doing to it.
-struct Play {
-    session: Session,
-    /// The player's own count of its commands, which stamps every one.
-    sequence: Sequence,
-    view: View,
-    fights: Fights,
-    camera: BeltCamera,
-    selection: Option<Place>,
-    hover: Option<Hover>,
-    drag: Option<Drag>,
-    holding: Option<Holding>,
-    paused: bool,
-    /// Whether the focus has followed the player's first placement yet.
-    followed: bool,
-    /// Where the pointer was last frame, in physical pixels.
-    pointer: Vec2,
-}
-
-impl ActionSet for Controls {
-    type Axis = Axis;
-    type Axis2 = Axis2;
-    type Button = Button;
-}
-
-impl BindAxis for Axis {
-    fn bindings(&self) -> Vec<AxisBinding> {
-        match self {
-            Axis::Zoom => vec![
-                AxisBinding::motion(Motion::Wheel).scale(WHEEL_NOTCH),
-                AxisBinding::from(ButtonAxis {
-                    negative: Key::Q,
-                    positive: Key::E,
-                })
-                .scale(ZOOM_KEY_NOTCH),
-            ],
-        }
-    }
-}
-
-impl BindAxis2 for Axis2 {
-    fn bindings(&self) -> Vec<Axis2Binding> {
-        match self {
-            Axis2::Pan => vec![
-                ButtonAxis2 {
-                    left: Key::A,
-                    right: Key::D,
-                    down: Key::S,
-                    up: Key::W,
-                }
-                .into(),
-                ButtonAxis2 {
-                    left: Key::Left,
-                    right: Key::Right,
-                    down: Key::Down,
-                    up: Key::Up,
-                }
-                .into(),
-            ],
-        }
-    }
-}
-
-impl BindButton for Button {
-    fn bindings(&self) -> Vec<ButtonBinding> {
-        match self {
-            Button::Select => vec![MouseButton::Left.into()],
-            Button::Pan => vec![MouseButton::Right.into(), MouseButton::Middle.into()],
-            Button::Pause => vec![Key::Escape.into()],
-        }
-    }
-}
-
-impl Game for Play {
+impl Game for Probe {
     type Actions = Controls;
     type Meshes = Shape;
     type Sound = NoSound;
     type Sources = NoSources;
     type Styles = ();
 
-    /// Advances the match, whose tick already holds the commands the input
-    /// issued, then reads the tick's view. A paused match, and one past its
-    /// clock, advances nothing.
     fn tick(&mut self, _ctx: &mut TickCtx<'_, Self>) {
-        if self.paused || self.over() {
-            return;
-        }
-        self.session.advance();
-        self.view = self.viewed();
-        self.fights.observe(&self.view);
-        self.camera
-            .advance(probe_sim::TICK.as_secs_f64(), self.view.gravity);
-        self.follow_the_first_placement();
+        self.flow.tick();
     }
 
     fn frame(&mut self, ctx: &mut FrameCtx<'_, Self>) {
-        let window = ctx.window_size();
-        // The painter's own measure is only reachable through the UI layer,
-        // and both layers size their glyphs by it.
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
-
-        // Picking reads the projection the player last saw; the camera this
-        // frame's input moves is what the frame then draws through.
-        let seen = Screen::of(&self.camera, window, points_per_pixel);
-        let aimed = self.wheel(&seen);
-        self.read_input(ctx, &seen, aimed.as_ref());
-
-        let screen = Screen::of(&self.camera, window, points_per_pixel);
-        let wheel = self.wheel(&screen);
-        let scene = Scene::from_view(
-            &self.view,
-            self.session.state().roster(),
-            Client {
-                selection: self.selection,
-                hover: self.hover.clone(),
-                fights: &self.fights,
-            },
-        );
-
-        belt::draw(&scene, &screen, ctx);
-        let menu = self.menu();
-        let mut resumed = false;
-        ctx.ui(|ui| {
-            hud::paint(&scene, &screen, wheel.as_ref(), ui.painter());
-            if let Some(menu) = &menu {
-                resumed = menu.show(ui);
-            }
-        });
-        if resumed {
-            self.paused = false;
-        }
+        self.flow.frame(ctx);
     }
 }
 
-impl Play {
-    fn new() -> Play {
-        let setup =
-            Setup::new(vec![TeamId(0), TeamId(1)], SEED, CLOCK).expect("two seats are a match");
-        let session = Session::new(setup, Retention::shipped(), &[PLAYER]);
-        let view = View::of(session.state(), PLAYER, &Shots::default());
-        let camera = BeltCamera::new(belt_centre(&view), OPENING_ZOOM);
-        Play {
-            session,
-            sequence: Sequence::new(PLAYER),
-            view,
-            fights: Fights::default(),
-            camera,
-            selection: None,
-            hover: None,
-            drag: None,
-            holding: None,
-            paused: false,
-            followed: false,
-            pointer: Vec2::ZERO,
+impl Probe {
+    /// The game as it opens, at the title.
+    fn new() -> Probe {
+        Probe {
+            flow: Flow::opening(),
         }
     }
-
-    /// The player's fogged view of the tick the session shows.
-    fn viewed(&self) -> View {
-        let quiet = Shots::default();
-        let shots = self
-            .session
-            .outcome()
-            .map_or(&quiet, |outcome| &outcome.shots);
-        View::of(self.session.state(), PLAYER, shots)
-    }
-
-    /// True once the clock has run out, when the standings are the one
-    /// panel DISPLAY.md allows. The view carries them only then.
-    fn over(&self) -> bool {
-        self.view.standings.is_some()
-    }
-
-    /// The panel the match shows, if any: the pause menu, or the standings
-    /// once the clock has run out.
-    fn menu(&self) -> Option<Menu> {
-        match (&self.view.standings, self.paused) {
-            (Some(standings), _) => Some(Menu::Standings(
-                standings
-                    .teams()
-                    .iter()
-                    .map(|team| format!("team {} — {} rocks", team.team.0, team.rocks))
-                    .collect(),
-            )),
-            (None, true) => Some(Menu::Paused),
-            (None, false) => None,
-        }
-    }
-
-    /// The wheel open on the selected ring, where its rock is on screen.
-    fn wheel(&self, screen: &Screen) -> Option<Wheel> {
-        let place = self.selection?;
-        let centre = screen.point_of(self.rock_pos(place.rock)?)?;
-        Some(Wheel::open(
-            place,
-            PLAYER,
-            self.session.state().roster(),
-            centre,
-        ))
-    }
-
-    /// Where the player's own first entity stands, once it exists: the
-    /// focus follows it, as DISPLAY.md's camera states.
-    fn follow_the_first_placement(&mut self) {
-        if self.followed {
-            return;
-        }
-        let Some(place) = self
-            .view
-            .seen
-            .iter()
-            .filter(|seen| seen.seat == PLAYER)
-            .find_map(|seen| seen.home)
-        else {
-            return;
-        };
-        if let Some(pos) = self.rock_pos(place.rock) {
-            self.camera.set_focus(pos);
-            self.followed = true;
-        }
-    }
-
-    /// Where `rock` is this tick, in meters.
-    fn rock_pos(&self, rock: probe_sim::RockId) -> Option<Vec3> {
-        self.view
-            .terrain
-            .iter()
-            .find(|terrain| terrain.rock == rock)
-            .map(|terrain| terrain.orbit.at(self.view.tick, self.view.gravity).pos)
-    }
-
-    /// The ring under `at`, in points: within the inner ring's radius of a
-    /// rock's centre is its inner band, within the outer ring's is its
-    /// outer band, and the nearest rock wins.
-    fn ring_at(&self, screen: &Screen, at: egui::Pos2) -> Option<Place> {
-        self.view
-            .terrain
-            .iter()
-            .filter_map(|terrain| {
-                let centre = screen.point_of(self.rock_pos(terrain.rock)?)?;
-                let away = centre.distance(at);
-                let band = if away <= hud::ring_radius(Band::Inner) {
-                    Band::Inner
-                } else if away <= hud::ring_radius(Band::Outer) {
-                    Band::Outer
-                } else {
-                    return None;
-                };
-                Some((
-                    away,
-                    Place {
-                        rock: terrain.rock,
-                        band,
-                    },
-                ))
-            })
-            .min_by(|(a, _), (b, _)| a.total_cmp(b))
-            .map(|(_, place)| place)
-    }
-
-    /// What the seat wants of `row` at `place` now.
-    fn wanted(&self, place: Place, row: RowId) -> u32 {
-        self.view
-            .compositions
-            .iter()
-            .filter(|composition| composition.place == place)
-            .flat_map(|composition| &composition.rows)
-            .find(|wanted| wanted.row == row)
-            .map_or(0, |wanted| wanted.want)
-    }
-
-    /// Issues `command` as the player's at the tick the session shows,
-    /// which is the tick it will be applied at here and on every other
-    /// machine.
-    fn issue(&mut self, command: Command) {
-        let stamped = self.sequence.stamp(self.session.state().tick(), command);
-        // A frame issues far fewer commands than the tick's cap, and the
-        // tick shown is not stepped yet, so this is never refused.
-        let _ = self.session.insert(stamped);
-    }
-
-    /// Reads one frame of input: the pause key, the camera, and the
-    /// pointer's gestures over `aimed`, the wheel as the player saw it.
-    fn read_input(&mut self, ctx: &mut FrameCtx<'_, Self>, seen: &Screen, aimed: Option<&Wheel>) {
-        if ctx.pressed(Button::Pause) {
-            self.paused = !self.paused;
-        }
-        let pointer = ctx.pointer();
-        let moved = pointer - self.pointer;
-        self.pointer = pointer;
-        let dt = ctx.dt().as_secs_f32();
-        let window = seen.window();
-
-        if ctx.down(Button::Pan) {
-            self.camera.pan_by_pixels(moved, window);
-        }
-        let keys = ctx.axis2(Axis2::Pan);
-        if keys != Vec2::ZERO {
-            self.camera
-                .pan_by_pixels(Vec2::new(-keys.x, keys.y) * KEY_PAN * dt, window);
-        }
-
-        let notches = ctx.axis(Axis::Zoom);
-        match &mut self.drag {
-            // The wheel adjusts how many units a send moves while one is in
-            // progress, so it is not zooming then.
-            Some(drag) => drag.adjust(notches),
-            None if notches != 0.0 => self.camera.zoom(ZOOM_STEP.powf(f64::from(-notches))),
-            None => {}
-        }
-
-        self.point(ctx, seen, aimed, seen.point_at(pointer), dt);
-    }
-
-    /// The pointer's own gestures: the press, the drag, the release, the
-    /// held repeat, and the hover preview.
-    fn point(
-        &mut self,
-        ctx: &mut FrameCtx<'_, Self>,
-        seen: &Screen,
-        aimed: Option<&Wheel>,
-        at: egui::Pos2,
-        dt: f32,
-    ) {
-        let slot = aimed.and_then(|wheel| {
-            wheel
-                .slot_at(at)
-                .map(|(row, band)| (wheel.place(), row, band))
-        });
-        let ring = self.ring_at(seen, at);
-
-        if ctx.pressed(Button::Select) {
-            match (slot, ring) {
-                (Some((place, row, band)), _) => {
-                    self.edit(place, row, band);
-                    self.holding = Some(Holding {
-                        row,
-                        band,
-                        held: 0.0,
-                        edits: 1,
-                    });
-                }
-                (None, Some(from)) => {
-                    self.drag = Some(Drag {
-                        from,
-                        count: Sending::present(&self.view, from, self.session.state().roster()),
-                        adjusted: 0.0,
-                    });
-                }
-                (None, None) => self.selection = None,
-            }
-        }
-
-        if ctx.released(Button::Select) {
-            self.holding = None;
-            if let Some(drag) = self.drag.take() {
-                self.finish(drag, ring);
-            }
-        }
-
-        // A repeat follows the band the press landed on: slide off it and
-        // the repeat stops rather than editing another row.
-        if let (Some(holding), Some((place, row, band))) = (&mut self.holding, slot)
-            && (holding.row, holding.band) == (row, band)
-        {
-            holding.held += dt;
-            if holding.due() {
-                holding.edits += 1;
-                self.edit(place, row, band);
-            }
-        }
-
-        self.hover = match (&self.drag, slot) {
-            (Some(drag), _) => ring.filter(|to| *to != drag.from).map(|to| {
-                Hover::Send(Sending {
-                    from: drag.from,
-                    to,
-                    count: drag.count,
-                })
-            }),
-            (None, Some((place, row, band))) => Some(Hover::Wheel { place, row, band }),
-            (None, None) => None,
-        };
-    }
-
-    /// One count edit of `row` at `place`, as the band names it.
-    fn edit(&mut self, place: Place, row: RowId, band: WheelBand) {
-        let command = band.edit(place, row, self.wanted(place, row));
-        self.issue(command);
-    }
-
-    /// Ends a drag: a release over another ring is the send, and one over
-    /// the ring it started on selects that ring and focuses its rock.
-    fn finish(&mut self, drag: Drag, ring: Option<Place>) {
-        match ring {
-            Some(to) if to != drag.from => {
-                let sending = Sending {
-                    from: drag.from,
-                    to,
-                    count: drag.count,
-                };
-                for command in sending.commands(&self.view, self.session.state().roster()) {
-                    self.issue(command);
-                }
-            }
-            Some(place) => {
-                self.selection = Some(place);
-                if let Some(pos) = self.rock_pos(place.rock) {
-                    self.camera.set_focus(pos);
-                    self.followed = true;
-                }
-            }
-            None => {}
-        }
-    }
-}
-
-impl Drag {
-    /// Takes `notches` of the zoom axis as units added to or taken off the
-    /// send, whole units at a time.
-    fn adjust(&mut self, notches: f32) {
-        self.adjusted += notches;
-        while self.adjusted >= 1.0 {
-            self.adjusted -= 1.0;
-            self.count += 1;
-        }
-        while self.adjusted <= -1.0 {
-            self.adjusted += 1.0;
-            self.count = self.count.saturating_sub(1);
-        }
-    }
-}
-
-impl Holding {
-    /// Whether the next repeat is due: the first a third of a second after
-    /// the press, and one every [`REPEAT_INTERVAL`] after that.
-    fn due(&self) -> bool {
-        self.held >= REPEAT_DELAY + REPEAT_INTERVAL * (self.edits - 1) as f32
-    }
-}
-
-/// The one panel DISPLAY.md allows: the pause menu, and the standings once
-/// the clock has run out.
-enum Menu {
-    Paused,
-    /// One line per team, in team order.
-    Standings(Vec<String>),
-}
-
-impl Menu {
-    /// Shows the panel and answers whether the player resumed.
-    fn show(&self, ui: &mut egui::Ui) -> bool {
-        let mut resumed = false;
-        egui::Window::new("Probe Game")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ui.ctx(), |ui| match self {
-                Menu::Paused => resumed = ui.button("Resume").clicked(),
-                Menu::Standings(lines) => {
-                    for line in lines {
-                        ui.label(line);
-                    }
-                }
-            });
-        resumed
-    }
-}
-
-/// The middle of the belt's rocks, in meters: where the camera looks until
-/// the player's first placement.
-///
-/// A belt with no rock has no middle, and the origin is where the central
-/// mass is; only a map with nothing on it reaches that.
-fn belt_centre(view: &View) -> Vec3 {
-    let rocks = view.terrain.len().max(1) as f64;
-    view.terrain
-        .iter()
-        .map(|terrain| terrain.orbit.at(view.tick, view.gravity).pos)
-        .fold(Vec3::ZERO, |sum, pos| sum + pos)
-        * (1.0 / rocks)
 }
 
 /// The playable driven headlessly: input through the engine's offscreen
@@ -604,8 +61,14 @@ fn belt_centre(view: &View) -> Vec3 {
 mod tests {
     use std::path::PathBuf;
 
+    use mirage_engine::egui;
     use mirage_engine::headless::Session as Offscreen;
-    use probe_game::display::scene::Fill;
+    use mirage_engine::math::Vec2;
+    use probe_game::display::scene::{Fill, Scene, WheelBand};
+    use probe_game::display::screen::Screen;
+    use probe_game::display::wheel::Wheel;
+    use probe_game::screens::play::Play;
+    use probe_game::screens::{lobby, title};
     use probe_sim::RockId;
     use probe_sim::roster::SHIPYARD;
 
@@ -619,34 +82,67 @@ mod tests {
     const ROCK: RockId = RockId(10);
 
     /// A headless run of the playable.
-    fn play() -> Offscreen<Play> {
+    fn game() -> Offscreen<Probe> {
         Offscreen::new(
             Config::new("probe-play").with_tick_interval(probe_sim::TICK),
             TARGET,
-            |_| Ok(Play::new()),
+            |_| Ok(Probe::new()),
         )
         .expect("the offscreen session starts")
     }
 
-    /// The frame's projection, as the game builds it: the offscreen layer
+    /// The whole target as a screen's own measure: the offscreen layer
     /// paints one point per pixel.
-    fn screen(session: &Offscreen<Play>) -> Screen {
-        Screen::of(&session.game().camera, TARGET, 1.0)
+    fn window() -> egui::Rect {
+        egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(TARGET.x as f32, TARGET.y as f32),
+        )
     }
 
-    /// Where `ROCK` draws, in points.
-    fn rock_at(session: &Offscreen<Play>) -> egui::Pos2 {
-        let play = session.game();
-        screen(session)
-            .point_of(play.rock_pos(ROCK).expect("the rock is on the map"))
-            .expect("the rock is in front of the eye")
+    /// The match on screen.
+    fn play(session: &Offscreen<Probe>) -> &Play {
+        session.game().flow.play().expect("the match is on screen")
+    }
+
+    /// The frame's projection, as the match builds it.
+    fn screen(session: &Offscreen<Probe>) -> Screen {
+        Screen::of(play(session).camera(), TARGET, 1.0)
+    }
+
+    /// One click of the left button where the pointer stands.
+    fn click(session: &mut Offscreen<Probe>) {
+        session.press(MouseButton::Left);
+        session.step();
+        session.release(MouseButton::Left);
+        session.step();
+    }
+
+    /// One click of the left button at `at`, in points.
+    fn click_at(session: &mut Offscreen<Probe>, at: egui::Pos2) {
+        session.set_pointer(Vec2::new(at.x, at.y));
+        session.step();
+        click(session);
+    }
+
+    /// One press and release of `key`.
+    fn tap(session: &mut Offscreen<Probe>, key: Key) {
+        session.press(key);
+        session.step();
+        session.release(key);
+        session.step();
+    }
+
+    /// `ticks` sim ticks.
+    fn advance(session: &mut Offscreen<Probe>, ticks: u64) {
+        for _ in 0..ticks {
+            session.tick();
+        }
     }
 
     /// The point of `wheel` that names `row`'s plus band, found through the
-    /// wheel's own hit test. The selected rock is the focus, so the wheel is
-    /// centred on the target's own centre.
-    fn plus_band(wheel: &Wheel, row: RowId) -> egui::Pos2 {
-        let centre = egui::pos2(TARGET.x as f32 / 2.0, TARGET.y as f32 / 2.0);
+    /// wheel's own hit test.
+    fn plus_band(wheel: &Wheel, centre: egui::Pos2, row: probe_sim::RowId) -> egui::Pos2 {
         (0..3_600)
             .map(|step| {
                 let angle = core::f32::consts::TAU * step as f32 / 3_600.0;
@@ -659,23 +155,8 @@ mod tests {
             .expect("the row has a slot")
     }
 
-    /// One click of the left button where the pointer stands.
-    fn click(session: &mut Offscreen<Play>) {
-        session.press(MouseButton::Left);
-        session.step();
-        session.release(MouseButton::Left);
-        session.step();
-    }
-
-    /// `ticks` sim ticks.
-    fn advance(session: &mut Offscreen<Play>, ticks: u32) {
-        for _ in 0..ticks {
-            session.tick();
-        }
-    }
-
     /// Writes the target's pixels to `game/look/<name>.png`.
-    fn save(session: &Offscreen<Play>, name: &str) -> PathBuf {
+    fn save(session: &Offscreen<Probe>, name: &str) -> PathBuf {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("look");
         std::fs::create_dir_all(&out).expect("game/look is writable");
         let path = out.join(format!("{name}.png"));
@@ -688,77 +169,164 @@ mod tests {
     }
 
     #[test]
-    fn a_click_on_a_ring_and_one_on_the_wheel_place_a_shipyard() {
-        let mut session = play();
+    fn a_skirmish_runs_from_the_title_to_the_results() {
+        let mut session = game();
         session.step();
-        save(&session, "play_start");
-        assert!(
-            session.game().view.seen.is_empty(),
-            "a match starts with nothing on the map"
-        );
+        save(&session, "title");
 
-        session.set_pointer(pixel(rock_at(&session)));
-        click(&mut session);
-        let place = session.game().selection.expect("the ring was selected");
+        let [skirmish, ..] = title::actions(window());
+        click_at(&mut session, skirmish.center());
+        let lobby = session
+            .game()
+            .flow
+            .lobby()
+            .expect("Skirmish opens a lobby")
+            .clone();
+        assert!(
+            matches!(lobby.slots()[1].control, probe_protocol::Control::Bot(_)),
+            "a skirmish seats a bot in seat one"
+        );
+        assert_eq!(lobby.seat_of(1), Some(probe_sim::SeatId(1)));
+        save(&session, "lobby");
+
+        // The shortest clock the lobby offers, so the drive reaches the
+        // standings: two clicks of the clock action, from fifteen minutes.
+        let [_, _, clock] = lobby::shape_actions(window());
+        click_at(&mut session, clock.center());
+        click_at(&mut session, clock.center());
+        let shortest = session
+            .game()
+            .flow
+            .lobby()
+            .expect("still the lobby")
+            .clock();
+        assert_eq!(shortest, probe_protocol::CLOCK_RANGE.start().clone());
+
+        let [start, _] = lobby::bottom_actions(window());
+        click_at(&mut session, start.center());
+        session.tick();
+        session.step();
+        let started = play(&session);
+        assert_eq!(started.session().state().clock(), shortest);
+        assert_eq!(started.seat(), probe_sim::SeatId(0));
+
+        placed(&mut session);
+        paused(&mut session);
+
+        while session
+            .game()
+            .flow
+            .play()
+            .is_some_and(|play| play.view().standings.is_none())
+        {
+            advance(&mut session, 1);
+        }
+        session.step();
+        assert!(
+            session.game().flow.results().is_some(),
+            "the clock runs out into the results"
+        );
+        // The step that hands over still draws the match; the next one is
+        // the first the results paint in.
+        session.step();
+        save(&session, "results");
+    }
+
+    /// A click on a ring and one on the wheel place a shipyard.
+    fn placed(session: &mut Offscreen<Probe>) {
+        let at = screen(session)
+            .point_of(
+                play(session)
+                    .rock_pos(ROCK)
+                    .expect("the rock is on the map"),
+            )
+            .expect("the rock is in front of the eye");
+        click_at(session, at);
+        let place = play(session).selection().expect("the ring was selected");
         assert_eq!(place.rock, ROCK);
 
-        let wheel = session
-            .game()
-            .wheel(&screen(&session))
+        let centre = screen(session)
+            .point_of(play(session).rock_pos(ROCK).expect("the rock"))
+            .expect("the rock is in front of the eye");
+        let wheel = play(session)
+            .wheel(&screen(session))
             .expect("the wheel is open on the selection");
-        session.set_pointer(pixel(plus_band(&wheel, SHIPYARD)));
+        click_at(session, plus_band(&wheel, centre, SHIPYARD));
+        advance(session, 2);
         session.step();
-        assert!(
-            matches!(session.game().hover, Some(Hover::Wheel { row, .. }) if row == SHIPYARD),
-            "the hovered band previews its own row"
-        );
-        click(&mut session);
-        advance(&mut session, 2);
 
-        let view = &session.game().view;
+        let view = play(session).view();
         let shipyard = view
             .seen
             .iter()
             .find(|seen| seen.row == SHIPYARD)
             .expect("the reserve placed the shipyard");
-        assert_eq!(shipyard.seat, PLAYER);
+        assert_eq!(shipyard.seat, play(session).seat());
         assert_eq!(shipyard.home, Some(place));
+        assert!(
+            has_a_solid_glyph(session, place),
+            "the shipyard's glyph is on the ring"
+        );
+    }
 
+    /// Escape opens the pause screen and closes it again.
+    fn paused(session: &mut Offscreen<Probe>) {
+        let before = play(session).session().state().tick();
+        tap(session, Key::Escape);
+        assert!(play(session).paused(), "Escape opens the pause screen");
+        advance(session, 4);
+        assert_eq!(
+            play(session).session().state().tick(),
+            before,
+            "a skirmish stops under the pause screen"
+        );
+
+        tap(session, Key::Escape);
+        assert!(!play(session).paused());
+        advance(session, 4);
+        assert!(play(session).session().state().tick() > before);
+    }
+
+    /// Whether the run at `place` holds a glyph of something present.
+    fn has_a_solid_glyph(session: &Offscreen<Probe>, place: probe_sim::Place) -> bool {
+        let play = play(session);
         let scene = Scene::from_view(
-            view,
-            session.game().session.state().roster(),
-            Client {
-                selection: session.game().selection,
-                hover: session.game().hover.clone(),
-                fights: &session.game().fights,
+            play.view(),
+            play.session().state().roster(),
+            probe_game::display::scene::Client {
+                selection: play.selection(),
+                hover: play.hover().cloned(),
+                fights: &probe_game::display::fights::Fights::default(),
             },
         );
-        let ring = scene
+        scene
             .rings
             .iter()
             .find(|ring| ring.place == place)
-            .expect("its ring draws");
-        assert!(
-            ring.runs.iter().any(|run| run
-                .marks
-                .iter()
-                .any(|mark| mark.fill == Fill::Solid && !mark.dim)),
-            "the shipyard's glyph is on the ring"
-        );
-
-        session.step();
-        save(&session, "play_placed");
+            .is_some_and(|ring| {
+                ring.runs.iter().any(|run| {
+                    run.marks
+                        .iter()
+                        .any(|mark| mark.fill == Fill::Solid && !mark.dim)
+                })
+            })
     }
 
     #[test]
     fn the_opening_view_frames_the_belt_with_the_focus_at_its_centre() {
-        let mut session = play();
+        let mut session = game();
         session.step();
-        let play = session.game();
-        let screen = screen(&session);
+        let [skirmish, ..] = title::actions(window());
+        click_at(&mut session, skirmish.center());
+        let [start, _] = lobby::bottom_actions(window());
+        click_at(&mut session, start.center());
+        session.tick();
+        session.step();
 
+        let play = play(&session);
+        let screen = screen(&session);
         let focus = screen
-            .point_of(play.camera.focus())
+            .point_of(play.camera().focus())
             .expect("the focus is in front of the eye");
         assert!(
             focus.distance(egui::pos2(TARGET.x as f32 / 2.0, TARGET.y as f32 / 2.0)) <= 1.0,
@@ -766,7 +334,7 @@ mod tests {
         );
 
         let framed = play
-            .view
+            .view()
             .terrain
             .iter()
             .filter_map(|terrain| screen.point_of(play.rock_pos(terrain.rock)?))
@@ -775,7 +343,6 @@ mod tests {
             })
             .count();
 
-        println!("the opening view holds {framed} rocks' rings");
         assert!(
             framed > 1,
             "the opening zoom shows {framed} rings, so there is nothing to choose between"
@@ -784,16 +351,23 @@ mod tests {
 
     #[test]
     fn a_right_drag_moves_the_belt_under_the_pointer() {
-        let mut session = play();
+        let mut session = game();
         session.step();
+        let [skirmish, ..] = title::actions(window());
+        click_at(&mut session, skirmish.center());
+        let [start, _] = lobby::bottom_actions(window());
+        click_at(&mut session, start.center());
+        session.tick();
+        session.step();
+
         let from = egui::pos2(400.0, 300.0);
         let dragged = egui::vec2(-120.0, 60.0);
-        session.set_pointer(pixel(from));
+        session.set_pointer(Vec2::new(from.x, from.y));
         session.step();
         let was = rock_at(&session);
 
         session.press(MouseButton::Right);
-        session.set_pointer(pixel(from + dragged));
+        session.set_pointer(Vec2::new(from.x + dragged.x, from.y + dragged.y));
         session.step();
 
         // The pan is scaled at the focus's depth, and the drag itself moves
@@ -806,9 +380,14 @@ mod tests {
         );
     }
 
-    /// A painted point as the pointer's own physical pixel, which the
-    /// offscreen layer draws one of per point.
-    fn pixel(at: egui::Pos2) -> Vec2 {
-        Vec2::new(at.x, at.y)
+    /// Where [`ROCK`] draws, in points.
+    fn rock_at(session: &Offscreen<Probe>) -> egui::Pos2 {
+        screen(session)
+            .point_of(
+                play(session)
+                    .rock_pos(ROCK)
+                    .expect("the rock is on the map"),
+            )
+            .expect("the rock is in front of the eye")
     }
 }

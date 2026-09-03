@@ -44,7 +44,8 @@ impl Sending {
     }
 
     /// The two count edits per row it moves: the source's want down by what
-    /// leaves, the destination's up by what arrives.
+    /// leaves, the destination's up by what arrives, and never above
+    /// [`MAX_WANT`], which the sim would reject.
     pub fn commands(&self, view: &View, roster: &Roster) -> Vec<Command> {
         self.rows(view, roster)
             .into_iter()
@@ -53,11 +54,17 @@ impl Sending {
                     Command::Want {
                         place: self.from,
                         row,
+                        // A surplus is held above the want, so a drag can
+                        // move more than the source wants: the floor is the
+                        // arithmetic, not a tolerated failure.
                         count: wanted(view, self.from, row).saturating_sub(count),
                     },
                     Command::Want {
                         place: self.to,
                         row,
+                        // A `Want(u32)` bounded by `MAX_WANT` in `sim`, with
+                        // the cap in the type, would delete this clamp;
+                        // `Command::Want`'s count is a bare `u32` today.
                         count: (wanted(view, self.to, row) + count).min(MAX_WANT),
                     },
                 ]

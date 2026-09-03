@@ -1,5 +1,6 @@
 //! The constants one scripted agent plays by, and the two the game ships.
 
+use probe_protocol::Bot;
 use probe_sim::RowId;
 use probe_sim::roster::Roster;
 
@@ -102,6 +103,15 @@ impl Personality {
             mix: Mix::Counters,
             range_taste: 0.0,
             armour_taste: 0.0,
+        }
+    }
+
+    /// The constants a lobby's `bot` plays by. Exhaustive, so a scripted
+    /// opponent the protocol can name always has a way of playing.
+    pub fn of(bot: Bot) -> Personality {
+        match bot {
+            Bot::Turtle => Personality::turtle(),
+            Bot::Expand => Personality::expand(),
         }
     }
 
@@ -262,5 +272,17 @@ mod tests {
         assert_eq!(Personality::named("turtle"), Some(Personality::turtle()));
         assert_eq!(Personality::named("expand"), Some(Personality::expand()));
         assert_eq!(Personality::named("scripted"), None);
+    }
+
+    #[test]
+    fn every_bot_a_lobby_can_seat_plays_by_the_personality_of_its_own_name() {
+        for bot in [Bot::Turtle, Bot::Expand] {
+            let personality = Personality::of(bot);
+            assert_eq!(
+                Personality::named(personality.name),
+                Some(personality.clone()),
+                "{bot:?} plays by no shipped personality"
+            );
+        }
     }
 }

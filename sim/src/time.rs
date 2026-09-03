@@ -3,10 +3,14 @@
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 
+use serde::{Deserialize, Serialize};
+
 use crate::TICKS_PER_SECOND;
 
 /// Steps since the match began.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize,
+)]
 pub struct Tick(pub u64);
 
 /// A fractional tick: when a weapon is next ready, and the order shots

@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use crate::history::log::Log;
-use crate::history::record::Record;
 use crate::history::snapshots::{Retention, Snapshots};
 use crate::ids::SeatId;
 use crate::setup::Setup;
@@ -21,6 +20,12 @@ pub enum Rewound {
     /// This tick's outcome and every later one may now differ, and so may
     /// every state after it.
     From(Tick),
+}
+
+/// A local seat the setup does not seat, which no frozen lobby produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Unseated {
+    pub seat: SeatId,
 }
 
 /// One match in progress: what every frontend drives.
@@ -40,23 +45,18 @@ pub struct Session {
 impl Session {
     /// A session over the match `setup` names, keeping the states
     /// `retention` names and acknowledging the seats `local` names as it
-    /// advances.
-    ///
-    /// # Panics
-    ///
-    /// For a local seat the setup does not seat, which no lobby produces
-    /// and which a match would answer by never settling.
-    pub fn new(setup: Setup, retention: Retention, local: &[SeatId]) -> Session {
+    /// advances. A local seat the setup does not seat is refused, since a
+    /// match would answer it by never settling.
+    pub fn new(setup: Setup, retention: Retention, local: &[SeatId]) -> Result<Session, Unseated> {
         let seats = setup.teams().len();
-        assert!(
-            local.iter().all(|seat| usize::from(seat.0) < seats),
-            "a local seat the setup does not seat: {local:?} of {seats} seats"
-        );
+        if let Some(seat) = local.iter().find(|seat| usize::from(seat.0) >= seats) {
+            return Err(Unseated { seat: *seat });
+        }
         let mut local = local.to_vec();
         local.sort_unstable();
         local.dedup();
         let initial = State::start(&setup);
-        Session {
+        Ok(Session {
             setup,
             live: initial.clone(),
             initial,
@@ -65,7 +65,7 @@ impl Session {
             outcomes: BTreeMap::new(),
             acknowledged: vec![Tick::ZERO; seats],
             local,
-        }
+        })
     }
 
     /// The state at the tick this session shows.
@@ -150,9 +150,15 @@ impl Session {
             .and_then(|at| self.outcome_at(at))
     }
 
-    /// What the match is up to its settled tick.
-    pub fn record(&self) -> Record {
-        Record::new(self.setup.clone(), self.log.until(self.settled()))
+    /// What the match was set up as, the same value on every machine.
+    pub fn setup(&self) -> &Setup {
+        &self.setup
+    }
+
+    /// Every command stamped before the settled tick, in tick then
+    /// `(seat, seq)` order: what a record of this match holds.
+    pub fn commands(&self) -> Vec<Stamped> {
+        self.log.until(self.settled()).stamped().collect()
     }
 
     /// One tick from the live state: its snapshot kept if the policy names
@@ -244,7 +250,13 @@ mod tests {
     /// A session of two seats, both this machine's, keeping every tick of
     /// `span` ticks.
     fn session(span: u32) -> Session {
-        Session::new(setup(), window(span, 1), &BOTH)
+        Session::new(setup(), window(span, 1), &BOTH).expect("both seats are seated")
+    }
+
+    /// A session of the same match with seat one another machine's, so it
+    /// settles only as that seat is acknowledged.
+    fn one_local() -> Session {
+        Session::new(setup(), Retention::shipped(), &[SeatId(0)]).expect("seat zero is seated")
     }
 
     fn window(ticks: u32, every: u32) -> Retention {
@@ -371,8 +383,8 @@ mod tests {
     }
 
     #[test]
-    fn a_record_holds_the_match_to_its_settled_tick_and_replays_to_its_hash() {
-        let mut session = Session::new(setup(), Retention::shipped(), &[SeatId(0)]);
+    fn the_commands_a_session_hands_out_are_those_stamped_before_its_settled_tick() {
+        let mut session = one_local();
         for stamped in script() {
             assert!(session.insert(stamped).is_ok());
         }
@@ -380,25 +392,33 @@ mod tests {
         session.acknowledge(SeatId(1), Tick(10));
         let settled = session.settled();
 
-        let record = session.record();
-
-        assert_eq!(record.setup(), &setup());
+        assert_eq!(session.setup(), &setup());
         assert_eq!(
-            record.commands(),
+            session.commands(),
             script()
-                .iter()
+                .into_iter()
                 .filter(|stamped| stamped.tick < settled)
-                .count()
+                .collect::<Vec<_>>()
         );
+        assert!(
+            settled < UNTIL,
+            "an unsettled tail is what makes the filter mean anything"
+        );
+    }
+
+    #[test]
+    fn a_local_seat_the_setup_does_not_seat_is_refused_by_name() {
+        let beyond = SeatId(setup().teams().len() as u8);
+
         assert_eq!(
-            Some(record.replay(settled).hash()),
-            session.hash_at(settled)
+            Session::new(setup(), Retention::shipped(), &[SeatId(0), beyond]).err(),
+            Some(Unseated { seat: beyond })
         );
     }
 
     #[test]
     fn settling_is_the_smallest_acknowledgement_over_the_seats() {
-        let mut session = Session::new(setup(), Retention::shipped(), &[SeatId(0)]);
+        let mut session = one_local();
         run(&mut session, 10);
 
         assert_eq!(
@@ -423,7 +443,8 @@ mod tests {
     fn a_hash_at_a_tick_no_state_was_kept_for_is_the_one_a_kept_tick_holds() {
         let mut dense = session(240);
         play(&mut dense, UNTIL);
-        let mut sparse = Session::new(setup(), window(240, 7), &BOTH);
+        let mut sparse =
+            Session::new(setup(), window(240, 7), &BOTH).expect("both seats are seated");
         play(&mut sparse, UNTIL);
 
         for at in 0..UNTIL.0 {
@@ -453,7 +474,8 @@ mod tests {
     #[ignore = "cost report: cargo test -p probe-sim --release -- --ignored --nocapture"]
     fn the_worst_rewind_the_window_allows_fits_the_budget() {
         let span = Retention::shipped().span();
-        let mut session = Session::new(setup(), Retention::shipped(), &BOTH);
+        let mut session =
+            Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
             let place = inner(at % 21);
             let body = Maneuver::spawn_body(&session.live, place, Tick::ZERO);

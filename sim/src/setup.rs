@@ -1,5 +1,7 @@
 //! What a match starts from, the same value on every machine.
 
+use serde::{Deserialize, Serialize};
+
 use crate::ids::TeamId;
 use crate::time::Tick;
 
@@ -8,7 +10,11 @@ pub const MAX_SEATS: usize = 4;
 
 /// What every machine of a match builds its initial state from: who sits
 /// where, the map's seed, and the tick the match ends at.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// Deserialising goes through [`Setup::new`], so a setup off the wire is
+/// checked for its seat count once, wherever it came from.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
+#[serde(try_from = "Fields")]
 pub struct Setup {
     teams: Vec<TeamId>,
     seed: u64,
@@ -22,6 +28,14 @@ pub enum BadSetup {
     NoSeats,
     /// More seats than [`MAX_SEATS`].
     TooManySeats,
+}
+
+/// A [`Setup`]'s fields as they travel, before the seat count is checked.
+#[derive(Deserialize)]
+struct Fields {
+    teams: Vec<TeamId>,
+    seed: u64,
+    clock: Tick,
 }
 
 impl Setup {
@@ -48,6 +62,23 @@ impl Setup {
     /// The tick the match ends at.
     pub fn clock(&self) -> Tick {
         self.clock
+    }
+}
+
+impl core::fmt::Display for BadSetup {
+    fn fmt(&self, out: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            BadSetup::NoSeats => out.write_str("a match with no seats"),
+            BadSetup::TooManySeats => write!(out, "a match of more than {MAX_SEATS} seats"),
+        }
+    }
+}
+
+impl TryFrom<Fields> for Setup {
+    type Error = BadSetup;
+
+    fn try_from(fields: Fields) -> Result<Setup, BadSetup> {
+        Setup::new(fields.teams, fields.seed, fields.clock)
     }
 }
 
