@@ -70,8 +70,14 @@ impl Results {
     }
 
     /// Paints the results over the still belt and answers what the player
-    /// picked.
-    pub fn frame<G: crate::screens::Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Option<Step>
+    /// picked. `rematch` says whether a rematch is offered, which a match
+    /// played in a room is not: the room would have to open its lobby
+    /// again, and no message asks it to.
+    pub fn frame<G: crate::screens::Playable>(
+        &mut self,
+        ctx: &mut FrameCtx<'_, G>,
+        rematch: bool,
+    ) -> Option<Step>
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
@@ -91,7 +97,7 @@ impl Results {
         ctx.ui(|ui| {
             hud::paint(scene, &screen, None, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
-            picked = paint(&panel, standings, teams);
+            picked = paint(&panel, standings, teams, rematch);
         });
         picked
     }
@@ -147,7 +153,12 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
 }
 
 /// The results panel, and what the player picked in it.
-fn paint(panel: &Panel<'_>, standings: &Standings, teams: &[TeamId]) -> Option<Step> {
+fn paint(
+    panel: &Panel<'_>,
+    standings: &Standings,
+    teams: &[TeamId],
+    rematch: bool,
+) -> Option<Step> {
     let window = panel.window();
     let rows = standings.teams().len();
     let height = panel::ROW_HEIGHT * (rows as f32 * 1.25 + 6.0);
@@ -177,9 +188,9 @@ fn paint(panel: &Panel<'_>, standings: &Standings, teams: &[TeamId]) -> Option<S
         over.center().x - ACTION_WIDTH - panel::ROW_HEIGHT / 2.0,
         over.bottom() - panel::MARGIN - panel::ROW_HEIGHT,
     );
-    let rematch = Rect::from_min_size(actions, Vec2::new(ACTION_WIDTH, panel::ROW_HEIGHT));
-    let leave = rematch.translate(Vec2::new(ACTION_WIDTH + panel::ROW_HEIGHT, 0.0));
-    if panel.action(rematch, "Rematch", true) {
+    let again = Rect::from_min_size(actions, Vec2::new(ACTION_WIDTH, panel::ROW_HEIGHT));
+    let leave = again.translate(Vec2::new(ACTION_WIDTH + panel::ROW_HEIGHT, 0.0));
+    if panel.action(again, "Rematch", rematch) {
         return Some(Step::Rematch);
     }
     if panel.action(leave, "Leave", true) {

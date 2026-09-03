@@ -131,6 +131,14 @@ impl Lobby {
         }
     }
 
+    /// The shape a room opens on: the host in slot zero, one open seat, the
+    /// rest closed, so a guest has somewhere to join.
+    pub fn room(host: PlayerId) -> Lobby {
+        let mut lobby = Lobby::skirmish(host);
+        lobby.slots[1].control = Control::Open;
+        lobby
+    }
+
     /// Every slot, in slot order.
     pub fn slots(&self) -> &[SeatSlot] {
         &self.slots
@@ -204,11 +212,11 @@ impl Lobby {
         Ok(())
     }
 
-    /// Steps the seed by [`SEED_STEP`], which is what the lobby's
-    /// regenerate action does. The sim has no clock and no randomness to
-    /// draw a fresh seed from, and a step needs neither.
-    pub fn regenerate_seed(&mut self) {
-        self.seed = self.seed.wrapping_add(SEED_STEP);
+    /// The seed the regenerate action asks for: this one stepped by
+    /// [`SEED_STEP`]. The sim has no clock and no randomness to draw a
+    /// fresh seed from, and a step needs neither.
+    pub fn next_seed(&self) -> u64 {
+        self.seed.wrapping_add(SEED_STEP)
     }
 
     /// The match this lobby starts, or why it is not one yet: every slot
@@ -497,7 +505,9 @@ mod tests {
         let mut walked = vec![lobby.seed()];
 
         for _ in 0..MAX_SLOTS * 8 {
-            lobby.regenerate_seed();
+            lobby
+                .edit(PlayerId::HOST, LobbyEdit::SetSeed(lobby.next_seed()))
+                .expect("the host sets the seed");
             walked.push(lobby.seed());
         }
 

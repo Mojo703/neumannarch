@@ -22,7 +22,9 @@ where
 {
 }
 
+pub mod field;
 pub mod flow;
+pub mod held;
 pub mod loading;
 pub mod lobby;
 pub mod panel;

@@ -5,11 +5,10 @@ use mirage_engine::egui;
 use mirage_engine::math::Vec2;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
-use probe_protocol::{Control, Lobby, Message, PlayerId};
+use probe_protocol::Lobby;
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
-use probe_sim::step::fire::Shots;
-use probe_sim::{Band, Place, Retention, Rewound, RowId, SeatId, Session, Setup, Stamped, Vec3};
+use probe_sim::{Band, Place, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Axis, Axis2, Button, Controls};
 use crate::display::camera::BeltCamera;
@@ -20,10 +19,11 @@ use crate::display::screen::Screen;
 use crate::display::send::Sending;
 use crate::display::wheel::Wheel;
 use crate::display::{belt, hud};
-use crate::net::controller::Controller;
-use crate::net::local::Local;
+use crate::net::machine::Machine;
+use crate::net::pace::Allowed;
 use crate::net::transport::Transport;
 use crate::screens::flow::Step;
+use crate::screens::held::Held;
 use crate::screens::panel::{self, Panel};
 use crate::screens::pause::Pause;
 use crate::screens::{Playable, results};
@@ -63,14 +63,11 @@ struct Holding {
     edits: u32,
 }
 
-/// One match in progress: the session, one controller per seat, the
-/// transport its peers hear it through, and what the pointer is doing.
+/// One match in progress: this machine's part of it, and what the pointer
+/// is doing over it.
 pub struct Play {
     lobby: Lobby,
-    seat: SeatId,
-    session: Session,
-    controllers: Vec<Controller>,
-    transport: Local,
+    machine: Machine,
     view: View,
     fights: Fights,
     camera: BeltCamera,
@@ -79,6 +76,8 @@ pub struct Play {
     drag: Option<Drag>,
     holding: Option<Holding>,
     paused: bool,
+    /// Why the match is holding, where it is.
+    held: Option<Held>,
     /// Whether the focus has followed the player's first placement yet.
     followed: bool,
     /// Where the pointer was last frame, in physical pixels.
@@ -86,32 +85,13 @@ pub struct Play {
 }
 
 impl Play {
-    /// The match `setup` names, with one controller per seat `lobby` gives
-    /// and the person at this machine playing `me`'s slot.
-    pub fn of(lobby: Lobby, setup: Setup, me: PlayerId) -> Play {
-        // A skirmish seats its host, and the server unit seats a joiner
-        // before it starts the match, so the person always holds a slot.
-        let seat = lobby
-            .slot_of(me)
-            .and_then(|slot| lobby.seat_of(slot))
-            .expect("the person at this machine holds a slot");
-        let local: Vec<SeatId> = lobby
-            .slots()
-            .iter()
-            .enumerate()
-            .filter(|(_, slot)| slot.holds(me) || matches!(slot.control, Control::Bot(_)))
-            .filter_map(|(at, _)| lobby.seat_of(at))
-            .collect();
-        // Every seat `seat_of` names is one of the setup's, since a freeze
-        // seats exactly the slots that are not closed.
-        let session = Session::new(setup, Retention::shipped(), &local)
-            .expect("a frozen lobby seats every slot it names");
-        let controllers = Controller::of(&lobby, me, session.state().roster());
-        let view = View::of(session.state(), seat, &Shots::default());
+    /// The match `machine` is playing, set up in `lobby`.
+    pub fn of(lobby: Lobby, machine: Machine) -> Play {
+        let view = machine.view();
         let camera = BeltCamera::new(
             Scene::from_view(
                 &view,
-                session.state().roster(),
+                machine.session().state().roster(),
                 Client {
                     selection: None,
                     hover: None,
@@ -123,10 +103,7 @@ impl Play {
         );
         Play {
             lobby,
-            seat,
-            session,
-            controllers,
-            transport: Local,
+            machine,
             view,
             fights: Fights::default(),
             camera,
@@ -135,6 +112,7 @@ impl Play {
             drag: None,
             holding: None,
             paused: false,
+            held: None,
             followed: false,
             pointer: Vec2::ZERO,
         }
@@ -142,7 +120,7 @@ impl Play {
 
     /// The seat the person at this machine plays.
     pub fn seat(&self) -> SeatId {
-        self.seat
+        self.machine.seat()
     }
 
     /// The tick's fogged view of the match, as the player sees it.
@@ -152,7 +130,7 @@ impl Play {
 
     /// The session at the tick it shows.
     pub fn session(&self) -> &Session {
-        &self.session
+        self.machine.session()
     }
 
     /// The ring the wheel is open on.
@@ -191,26 +169,32 @@ impl Play {
         let centre = screen.point_of(self.rock_pos(place.rock)?)?;
         Some(Wheel::open(
             place,
-            self.seat,
-            self.session.state().roster(),
+            self.machine.seat(),
+            self.machine.session().state().roster(),
             centre,
         ))
     }
 
-    /// One tick of the match: every controller's commands, then the step.
+    /// One tick of the match, through `transport`: this machine's part of
+    /// it, and then what the frame draws from.
     ///
-    /// A skirmish stops under the pause screen, as DISPLAY.md states, and
-    /// a match past its clock advances nothing, since the standings the
+    /// A skirmish stops under the pause screen, as DISPLAY.md states, and a
+    /// match past its clock advances nothing, since the standings the
     /// results screen shows are already final.
-    pub fn tick(&mut self) {
-        if self.paused || self.over() {
+    pub fn tick(&mut self, transport: &mut dyn Transport) {
+        if (self.paused && self.machine.alone()) || self.over() {
             return;
         }
-        self.speak();
-        self.hear();
-        self.session.advance();
-        self.tell();
-        self.view = self.viewed();
+        let ticked = self.machine.tick(transport);
+        if ticked.rewound {
+            self.fights = Fights::default();
+            self.hover = None;
+        }
+        self.held = self.holding(ticked.pace);
+        self.view = self.machine.view();
+        if ticked.pace != Allowed::Advance {
+            return;
+        }
         self.fights.observe(&self.view);
         self.camera
             .advance(probe_sim::TICK.as_secs_f64(), self.view.gravity);
@@ -239,7 +223,7 @@ impl Play {
         let wheel = self.wheel(&screen);
         let scene = Scene::from_view(
             &self.view,
-            self.session.state().roster(),
+            self.machine.session().state().roster(),
             Client {
                 selection: self.selection,
                 hover: self.hover.clone(),
@@ -252,12 +236,16 @@ impl Play {
         let clicked = ctx.pressed(Button::Select);
         let over = panel::window_of(window, points_per_pixel);
         let paused = self.paused;
+        let held = self.held.as_ref();
         let mut picked = None;
         ctx.ui(|ui| {
             hud::paint(&scene, &screen, wheel.as_ref(), ui.painter());
+            let panel = Panel::new(ui.painter(), over, pointer, clicked);
+            if let Some(held) = held {
+                picked = held.frame(&panel);
+            }
             if paused {
-                let panel = Panel::new(ui.painter(), over, pointer, clicked);
-                picked = Pause.frame(&panel);
+                picked = Pause.frame(&panel).or(picked.take());
             }
         });
         match picked {
@@ -270,7 +258,7 @@ impl Play {
                 self.lobby.clone(),
                 scene,
                 self.camera,
-                self.session.state(),
+                self.machine.session().state(),
             )))),
             None => None,
         }
@@ -283,76 +271,12 @@ impl Play {
         self.view.standings.is_some()
     }
 
-    /// The player's fogged view of the tick the session shows.
-    fn viewed(&self) -> View {
-        let quiet = Shots::default();
-        let shots = self
-            .session
-            .outcome()
-            .map_or(&quiet, |outcome| &outcome.shots);
-        View::of(self.session.state(), self.seat, shots)
-    }
-
-    /// Every local controller's commands, into this session at once and on
-    /// to the peers.
-    fn speak(&mut self) {
-        let issued: Vec<Stamped> = self
-            .controllers
-            .iter_mut()
-            .flat_map(|controller| controller.issue(&self.session))
-            .collect();
-        for stamped in issued {
-            // A controller stamps the tick the session shows and yields at
-            // most that tick's cap, so the batch takes every one.
-            self.session
-                .insert(stamped)
-                .expect("a controller's own command is one this tick takes");
-            self.transport.send(stamped);
-        }
-    }
-
-    /// What this machine now knows: how far each seat it owns is
-    /// acknowledged, and its hash at the settled tick, which is the tick
-    /// hashes are compared at.
-    fn tell(&mut self) {
-        let latest = self.session.state().tick();
-        let settled = self.session.settled();
-        for seat in self
-            .controllers
-            .iter()
-            .filter(|controller| !matches!(controller, Controller::Remote(_)))
-            .map(Controller::seat)
-            .collect::<Vec<_>>()
-        {
-            self.transport.acknowledge(seat, latest);
-        }
-        if let Some(hash) = self.session.hash_at(settled) {
-            self.transport.report(settled, hash);
-        }
-    }
-
-    /// What the peers have said since the last tick.
-    fn hear(&mut self) {
-        for message in self.transport.received() {
-            match message {
-                Message::Command(stamped) => {
-                    // A peer outside the window has already been cut off by
-                    // the pacing rule, which lands with the socket.
-                    if let Ok(Rewound::From(_)) = self.session.insert(stamped) {
-                        self.fights = Fights::default();
-                        self.hover = None;
-                    }
-                }
-                Message::Acknowledge { seat, up_to } => self.session.acknowledge(seat, up_to),
-                Message::Hash { .. } | Message::Desync { .. } => {}
-                // The room's lobby phase is over once a match is running.
-                Message::Join
-                | Message::Welcome { .. }
-                | Message::Edit(_)
-                | Message::Lobby(_)
-                | Message::Start(_)
-                | Message::Leave => {}
-            }
+    /// Why the match is holding under `pace`, where it is.
+    fn holding(&self, pace: Allowed) -> Option<Held> {
+        match (self.machine.desynced(), pace) {
+            (Some(tick), _) => Some(Held::Desynced(tick)),
+            (None, Allowed::Held) => Some(Held::Waiting(self.machine.waiting())),
+            (None, Allowed::Advance | Allowed::Slowed) => None,
         }
     }
 
@@ -366,7 +290,7 @@ impl Play {
             .view
             .seen
             .iter()
-            .filter(|seen| seen.seat == self.seat)
+            .filter(|seen| seen.seat == self.machine.seat())
             .find_map(|seen| seen.home)
         else {
             return;
@@ -420,13 +344,7 @@ impl Play {
     /// Asks the person's own controller for `command`, which the next tick
     /// stamps and issues.
     fn issue(&mut self, command: Command) {
-        let seat = self.seat;
-        if let Some(human) = self
-            .controllers
-            .iter_mut()
-            .find(|controller| controller.seat() == seat)
-            .and_then(Controller::human)
-        {
+        if let Some(human) = self.machine.human() {
             human.want(command);
         }
     }
@@ -503,7 +421,11 @@ impl Play {
                 (None, Some(from)) => {
                     self.drag = Some(Drag {
                         from,
-                        count: Sending::present(&self.view, from, self.session.state().roster()),
+                        count: Sending::present(
+                            &self.view,
+                            from,
+                            self.machine.session().state().roster(),
+                        ),
                         adjusted: 0.0,
                     });
                 }
@@ -559,7 +481,8 @@ impl Play {
                     to,
                     count: drag.count,
                 };
-                for command in sending.commands(&self.view, self.session.state().roster()) {
+                for command in sending.commands(&self.view, self.machine.session().state().roster())
+                {
                     self.issue(command);
                 }
             }

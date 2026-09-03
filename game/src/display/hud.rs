@@ -15,10 +15,10 @@ use crate::display::tint;
 use crate::display::wheel::Wheel;
 
 /// The inner ring's screen radius, in points.
-pub const INNER_RADIUS: f32 = 40.0;
+pub const INNER_RADIUS: f32 = 56.0;
 
 /// The outer ring's screen radius, in points.
-pub const OUTER_RADIUS: f32 = 64.0;
+pub const OUTER_RADIUS: f32 = 88.0;
 
 /// The wheel stands clear of both rings, so a click on one of its bands is
 /// never a click on a ring.
@@ -63,8 +63,26 @@ const ARC_SEGMENTS: usize = 24;
 /// A flight line's stroke width, in points.
 const FLIGHT_WIDTH: f32 = 1.5;
 
-/// A flight line's colour.
+/// A flight line's colour, at [`FLIGHT_FULL_ALPHA`] at the destination and
+/// [`FLIGHT_FAINT_ALPHA`] at the ship.
 const FLIGHT_COLOUR: Color32 = Color32::from_gray(200);
+
+/// A flight line's dash length, in points.
+const FLIGHT_DASH_LENGTH: f32 = 6.0;
+
+/// A flight line's gap length, in points.
+const FLIGHT_GAP_LENGTH: f32 = 5.0;
+
+/// How fast a flight line's dashes roll toward the destination, in points
+/// per second of the frame's own elapsed time: `egui`'s input clock, the
+/// client's, never the sim's tick.
+const FLIGHT_SPEED: f32 = 30.0;
+
+/// A flight line's alpha at the ship's own end.
+const FLIGHT_FAINT_ALPHA: f32 = 0.15;
+
+/// A flight line's alpha at the destination.
+const FLIGHT_FULL_ALPHA: f32 = 0.9;
 
 /// A radar contact's colour: no seat, since radar does not say whose it is.
 const BLIP_COLOUR: Color32 = Color32::from_gray(170);
@@ -104,7 +122,7 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
         ) else {
             continue;
         };
-        painter.line_segment([from, to], Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR));
+        paint_flight_line(painter, from, to);
     }
 
     for blip in &scene.blips {
@@ -113,6 +131,37 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
 
     if let Some(wheel) = wheel {
         wheel.paint(painter, hovered_slot(scene, wheel));
+    }
+}
+
+/// A flight's line from `from`, the ship, to `to`, the destination: faint
+/// at `from` and full at `to`, its dashes rolling toward `to` by the
+/// frame's own elapsed time.
+fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2) {
+    let delta = to - from;
+    let length = delta.length();
+    if length <= 0.0 {
+        return;
+    }
+    let direction = delta / length;
+    let cycle = FLIGHT_DASH_LENGTH + FLIGHT_GAP_LENGTH;
+    let elapsed = painter.ctx().input(|input| input.time) as f32;
+    let offset = (elapsed * FLIGHT_SPEED) % cycle;
+
+    let mut start = offset - cycle;
+    while start < length {
+        let end = (start + FLIGHT_DASH_LENGTH).min(length);
+        let clipped_start = start.max(0.0);
+        if clipped_start < end {
+            let mid = (clipped_start + end) / 2.0;
+            let alpha =
+                FLIGHT_FAINT_ALPHA + (FLIGHT_FULL_ALPHA - FLIGHT_FAINT_ALPHA) * (mid / length);
+            painter.line_segment(
+                [from + direction * clipped_start, from + direction * end],
+                Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR.gamma_multiply(alpha)),
+            );
+        }
+        start += cycle;
     }
 }
 
@@ -176,8 +225,14 @@ fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: 
     }
 }
 
+/// A fight arc's own screen radius: [`ARC_INSET`] inside `ring_radius`, the
+/// radius of the ring the fight is at, whichever band that is.
+fn arc_radius(ring_radius: f32) -> f32 {
+    ring_radius - ARC_INSET
+}
+
 fn paint_arc(painter: &egui::Painter, centre: Pos2, ring_radius: f32, span: Span, arc: &Arc) {
-    let radius = ring_radius - ARC_INSET;
+    let radius = arc_radius(ring_radius);
     let drained = span.at(arc.fraction);
     paint_arc_segment(
         painter,
@@ -284,6 +339,15 @@ mod tests {
     fn a_ring_radius_follows_its_band() {
         assert_eq!(ring_radius(Band::Inner), INNER_RADIUS);
         assert_eq!(ring_radius(Band::Outer), OUTER_RADIUS);
+    }
+
+    #[test]
+    fn a_fight_arc_is_inset_within_the_ring_it_fights_at_whichever_band() {
+        for radius in [INNER_RADIUS, OUTER_RADIUS] {
+            assert_eq!(arc_radius(radius), radius - ARC_INSET);
+            assert!(arc_radius(radius) < radius);
+        }
+        assert_ne!(arc_radius(INNER_RADIUS), arc_radius(OUTER_RADIUS));
     }
 
     #[test]

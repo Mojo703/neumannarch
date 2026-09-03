@@ -16,6 +16,8 @@ impl Transport for Local {
 
     fn acknowledge(&mut self, _seat: SeatId, _up_to: Tick) {}
 
+    fn leave(&mut self) {}
+
     fn report(&mut self, _tick: Tick, _hash: u64) {}
 
     fn received(&mut self) -> Vec<Message> {

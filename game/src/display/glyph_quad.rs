@@ -8,16 +8,13 @@ use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
 use probe_sim::roster::Roster;
 use probe_sim::{MAX_SEATS, SeatId};
 
-use crate::display::glyph::{Frame, Glyph, GlyphMark, Size};
+use crate::display::glyph::{Frame, Glyph, GlyphMark, Size, geometry};
 
 /// A glyph texture's side, in texels.
-pub const CELL_PIXELS: u32 = 32;
+pub const CELL_PIXELS: u32 = 48;
 
 /// The band counted as outline, as a fraction of the shape's own scale.
 const OUTLINE_FRACTION: f32 = 0.18;
-
-/// A mark's half-size, as a fraction of the cell's half-width.
-const MARK_HALF: f32 = 0.2;
 
 /// The seat palette: one colour per seat a match can hold, indexed by
 /// [`SeatId`].
@@ -120,13 +117,16 @@ fn coverage(glyph: &Glyph, x: f32, y: f32) -> Coverage {
     // a smaller size class draws a smaller frame within the same cell.
     let extent = cell_fraction(&glyph.size);
     let (x, y) = (x / extent, y / extent);
+    // Checked before the frame itself: the arc mark reads over the apex,
+    // outside the frame's own silhouette.
+    if marks_cover(&glyph.marks, &glyph.frame, x, y) {
+        return Coverage::Mark;
+    }
     let depth = frame_depth(&glyph.frame, x, y);
     if depth < 0.0 {
         Coverage::Outside
     } else if depth < OUTLINE_FRACTION {
         Coverage::Outline
-    } else if marks_cover(&glyph.marks, x, y) {
-        Coverage::Mark
     } else {
         Coverage::Fill
     }
@@ -148,42 +148,45 @@ fn frame_depth(frame: &Frame, x: f32, y: f32) -> f32 {
     }
 }
 
-/// Whether any of `marks`, spread evenly across the cell, covers `(x, y)`.
-fn marks_cover(marks: &[GlyphMark], x: f32, y: f32) -> bool {
-    let count = marks.len();
-    marks.iter().enumerate().any(|(index, mark)| {
-        let at = mark_x(index, count);
-        mark_covers(mark, x - at, y)
+/// Whether any of `marks`, each at its own place on `frame`, covers `(x, y)`.
+fn marks_cover(marks: &[GlyphMark], frame: &Frame, x: f32, y: f32) -> bool {
+    marks.iter().any(|mark| {
+        let (ax, ay) = mark.anchor(frame);
+        mark_covers(mark, frame, x - ax, y - ay)
     })
 }
 
-/// The `index`th of `count` marks' centre, spread across the cell's width.
-fn mark_x(index: usize, count: usize) -> f32 {
-    if count <= 1 {
-        0.0
-    } else {
-        let span = 0.8;
-        -span / 2.0 + span * index as f32 / (count - 1) as f32
-    }
-}
-
-/// Whether `mark`, centred at the origin, covers the point `(x, y)` offset
-/// from its centre.
-fn mark_covers(mark: &GlyphMark, x: f32, y: f32) -> bool {
+/// Whether `mark`, anchored at the origin, covers the point `(x, y)` offset
+/// from its anchor.
+fn mark_covers(mark: &GlyphMark, frame: &Frame, x: f32, y: f32) -> bool {
     match mark {
-        GlyphMark::Dot => x.hypot(y) <= MARK_HALF,
-        GlyphMark::Bar => x.abs() <= MARK_HALF && y.abs() <= MARK_HALF * 0.4,
+        GlyphMark::Dot => x.hypot(y) <= geometry::DOT_RADIUS,
+        // From the anchor, the incircle's top, to the base, its own
+        // diameter further down.
+        GlyphMark::Bar => {
+            let height = 2.0 * frame.incircle().1;
+            x.abs() <= geometry::BAR_HALF_WIDTH && (0.0..=height).contains(&y)
+        }
         GlyphMark::Plus => {
-            (x.abs() <= MARK_HALF * 0.3 && y.abs() <= MARK_HALF)
-                || (x.abs() <= MARK_HALF && y.abs() <= MARK_HALF * 0.3)
+            (x.abs() <= geometry::PLUS_THICKNESS && y.abs() <= geometry::PLUS_ARM)
+                || (x.abs() <= geometry::PLUS_ARM && y.abs() <= geometry::PLUS_THICKNESS)
         }
         GlyphMark::Chevron => {
-            let thickness = MARK_HALF * 0.3;
-            let near_upper =
-                distance_to_segment((x, y), (-MARK_HALF, -MARK_HALF), (MARK_HALF, 0.0));
-            let near_lower = distance_to_segment((x, y), (MARK_HALF, 0.0), (-MARK_HALF, MARK_HALF));
-            near_upper.min(near_lower) <= thickness
+            let (span, rise) = (geometry::CHEVRON_HALF_WIDTH, geometry::CHEVRON_HEIGHT);
+            let near_upper = distance_to_segment((x, y), (-span, -rise), (0.0, 0.0));
+            let near_lower = distance_to_segment((x, y), (0.0, 0.0), (span, -rise));
+            near_upper.min(near_lower) <= geometry::CHEVRON_THICKNESS
         }
+        GlyphMark::Arc => {
+            let half_angle = geometry::ARC_HALF_ANGLE;
+            let angle = x.atan2(-y);
+            let on_ring = (x.hypot(y) - geometry::ARC_RADIUS).abs() <= geometry::ARC_THICKNESS;
+            on_ring && angle.abs() <= half_angle
+        }
+        GlyphMark::Belt => {
+            x.abs() <= geometry::BELT_HALF_WIDTH && y.abs() <= geometry::BELT_THICKNESS
+        }
+        GlyphMark::Ring => (x.hypot(y) - geometry::RING_RADIUS).abs() <= geometry::RING_THICKNESS,
     }
 }
 
@@ -215,6 +218,10 @@ mod tests {
 
     use super::*;
 
+    /// The least texels a row's marks must change in its cell at the small
+    /// size class, so a mark reads there and not only at medium or large.
+    const MIN_MARK_TEXELS: usize = 20;
+
     fn glyphs() -> Vec<Glyph> {
         Roster::shipped()
             .iter()
@@ -245,6 +252,39 @@ mod tests {
                 .chunks_exact(4)
                 .any(|texel| texel == [255, 255, 255, 255]);
             assert!(has_white, "{glyph:?} has no white outline pixel");
+        }
+    }
+
+    #[test]
+    fn a_marked_rows_small_cell_reads_its_marks() {
+        for (_, row) in Roster::shipped().iter() {
+            let marked = Glyph::of(row);
+            if marked.marks.is_empty() {
+                continue;
+            }
+            let small = |glyph: Glyph| Glyph {
+                size: Size::Small,
+                ..glyph
+            };
+            let bare = small(Glyph {
+                marks: Vec::new(),
+                ..marked.clone()
+            });
+            let marked = small(marked);
+
+            let with_marks = rasterize(&marked, seat_colour(SeatId(0)));
+            let bare = rasterize(&bare, seat_colour(SeatId(0)));
+            let changed = with_marks
+                .pixels()
+                .chunks_exact(4)
+                .zip(bare.pixels().chunks_exact(4))
+                .filter(|(a, b)| a != b)
+                .count();
+            assert!(
+                changed >= MIN_MARK_TEXELS,
+                "{row}'s small cell changed only {changed} texels for its marks",
+                row = row.name,
+            );
         }
     }
 }

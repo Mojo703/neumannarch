@@ -36,6 +36,10 @@ target-state only. Agents see this file only through their briefs.
   clock only, and an eliminated seat's end needs a DESIGN.md ruling. The
   fight arc refills when a seat reinforces, which DISPLAY.md's "full at
   the fight's start and drains" does not say; held for play.
+- From the icon judgements 2026-09-03: at close zoom the ring sits far
+  from the ships it counts, and a judge read the belt's ship billboards
+  near the rock as unexplained units outside the ring. Held with the
+  ring-inside-the-rock gap for the owner's ruling on rings at close zoom.
 - Held for the owner's play, in one list: heavy-row lag after a send and
   its braking-pull candidate; the planner's earliest-fit arrival; crowd
   packing past half the spacing; unarmed rows never chase; tidal drift at
@@ -86,16 +90,34 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
    Host, Join, Settings, Quit (engine gap), Surrender (no DESIGN rule).
    Key files for the owner: protocol/src/, game/src/net/,
    game/src/screens/, game/src/display/tint.rs.
-6. `server` and `Socket`, Opus: rooms, forwarding, hash reports, desync,
+6. Landed and committed 2026-09-03, gate green on the overseer's run
+   with the icon unit (placed marks, three new marks, glyph half-width
+   11 pt, size steps 0.85/1.0/1.2, rolling faded flight lines): `server` (rooms
+   pure and network-free, `stream.rs` the only socket), `Socket` over
+   `tokio-tungstenite` on native and `web-sys` in the browser, `Machine`
+   as the engine-free lockstep loop, pacing (hold on the window, slow one
+   step in four past a 24-tick lead), the address field, Host and Join,
+   held states, a two-machine test over real sockets in one process.
+   Two gaps for a small follow-up: Rematch after a room match needs a
+   room-side rule and a message; a refused lobby edit is silent in the
+   lobby (the room's broadcast is the truth). Was: rooms, forwarding, hash reports, desync,
    records; host embeds it; join by address; pacing and the waiting
    screen. Multiplayer functional.
-7. The two play rulings: one frame per row at a time; a selected rock
+7. Controls (owner critique 2026-09-03, DISPLAY.md Controls section):
+   three kinds of control, enabled means it will work with the reason on
+   hover, no notices or errors except inside the join field; the lobby
+   row as holder choice with Kick, team choice, seed field with
+   Regenerate inside, clock choice; stalled-for-material belt mark and
+   hover reasons on run glyphs; wheel bands disabled at the cap and at
+   zero; Quit disabled with its reason until the engine can close;
+   Rematch in a room. Next unit, Opus, critique stop first.
+8. The two play rulings: one frame per row at a time; a selected rock
    owns the focus.
-8. A proper asteroid belt and the star: map generation from seed with
+9. A proper asteroid belt and the star: map generation from seed with
    regional caps; the star as a distant light and disc.
-9. From the harness: seat 0's edge isolated and removed; territory that
+10. From the harness: seat 0's edge isolated and removed; territory that
    varies with composition; combat before the last third of a match.
-10. Icons by placement (owner's concept sheet, art/concepts/, kept out of
+11. Icons by placement (owner's concept sheet, art/concepts/, kept out of
     git, 2026-09-03): marks placed by role plus an arc for radar above
     default, a belt for plating, a ring for capacity; DISPLAY.md's three
     glyph rules become six placement rules; `Glyph::of` and both painters
@@ -105,10 +127,10 @@ bullets and DISPLAY.md's Screens section state the rules and the look.
     rule (mesh above a screen size, glyph below), the stencil icon, and a
     DESIGN.md line that a faction skews the hull's dialect and never the
     glyph.
-11. A sweep over the whole codebase for the comment and test rule above:
+12. A sweep over the whole codebase for the comment and test rule above:
     cut useless tests, replace comments with types, rename tests as
     guarantees; one agent per crate, owner reviews the diff.
-12. The held list from play, each a ruling then a unit; fog in the
+13. The held list from play, each a ruling then a unit; fog in the
     display; gamepad; the twelve-slot wheel; a display for an unplannable
     send.
 
@@ -221,6 +243,13 @@ Reported to the owner as it is found; the game never works around a gap.
   static host answers 403 while the index answers 200), so a new
   dependency must already be in the cargo cache; `serde` and `ciborium`
   were, `postcard` was not. Owner's environment, 2026-09-03.
+- No runtime tick interval: `Config::with_tick_interval` is fixed at
+  construction, so the game paces its own sim by treating every engine
+  tick as an opportunity to step. Found 2026-09-03.
+- No character input in the action vocabulary: the address field reads
+  `egui::Event::Text`, Backspace and Enter off the UI layer's context, and
+  `Session::offer_ui` is behind the `ui` feature, so typing is driven
+  headlessly only behind it. Found 2026-09-03.
 - A game cannot quit: the engine exits only on the window's close
   request and there is no `ctx.quit()`; the pause menu has Resume only.
   Found 2026-09-03.

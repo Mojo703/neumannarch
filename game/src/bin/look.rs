@@ -178,6 +178,10 @@ fn region_scene() -> Scene {
         rock: RockId(1),
         band: Band::Inner,
     };
+    let inner_c = Place {
+        rock: RockId(2),
+        band: Band::Inner,
+    };
 
     let entities = vec![
         ship(0, RAIDER, Vec3::new(4.0, 0.0, 2.0)),
@@ -210,6 +214,7 @@ fn region_scene() -> Scene {
             ],
         ),
         ring(inner_b, vec![present(0, &[SHIPYARD, FRIGATE])], vec![]),
+        ring(inner_c, vec![], vec![]),
     ];
 
     let flights = vec![FlightLine {

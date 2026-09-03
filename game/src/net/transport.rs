@@ -15,6 +15,9 @@ pub trait Transport {
     /// Passes on that no command of `seat` before `up_to` is unknown here.
     fn acknowledge(&mut self, seat: SeatId, up_to: Tick);
 
+    /// Passes on that this machine is leaving the match.
+    fn leave(&mut self);
+
     /// Passes on this machine's state hash at a settled tick.
     fn report(&mut self, tick: Tick, hash: u64);
 

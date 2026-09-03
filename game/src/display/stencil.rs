@@ -3,7 +3,7 @@
 
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 
-use crate::display::glyph::{Frame, Glyph, GlyphMark};
+use crate::display::glyph::{Frame, Glyph, GlyphMark, geometry};
 use crate::display::scene::Fill;
 
 /// A glyph's outline width, in points.
@@ -18,8 +18,8 @@ const GAP_LENGTH: f32 = 2.0;
 /// The alpha a dimmed glyph is painted at, over its own.
 const DIM_ALPHA: f32 = 0.5;
 
-/// A mark's half-size, as a fraction of the glyph's half-width.
-const MARK_HALF: f32 = 0.3;
+/// The straight segments an arc mark is approximated by.
+const ARC_SEGMENTS: usize = 8;
 
 /// One glyph ready to paint: where it goes, how big, whose colour it takes,
 /// and what its unit's state is.
@@ -88,55 +88,96 @@ impl Stencil<'_> {
         }
     }
 
-    /// The weapon marks, spread evenly across the glyph's width.
+    /// Each mark, at its own place on the frame; see [`GlyphMark::anchor`].
     fn paint_marks(&self, painter: &egui::Painter, colour: Color32) {
-        let count = self.glyph.marks.len();
-        let radius = self.half * MARK_HALF;
-        for (index, mark) in self.glyph.marks.iter().enumerate() {
+        for mark in &self.glyph.marks {
+            let (ax, ay) = mark.anchor(&self.glyph.frame);
             let at = egui::pos2(
-                self.centre.x + spread(index, count) * self.half,
-                self.centre.y,
+                self.centre.x + ax * self.half,
+                self.centre.y + ay * self.half,
             );
-            match mark {
-                GlyphMark::Dot => {
-                    painter.circle_filled(at, radius, colour);
-                }
-                GlyphMark::Bar => {
-                    let height = radius * 0.7;
-                    painter.add(Shape::convex_polygon(
-                        vec![
-                            egui::pos2(at.x - radius, at.y - height),
-                            egui::pos2(at.x + radius, at.y - height),
-                            egui::pos2(at.x + radius, at.y + height),
-                            egui::pos2(at.x - radius, at.y + height),
-                        ],
-                        colour,
-                        Stroke::NONE,
-                    ));
-                }
-                GlyphMark::Plus => {
-                    let stroke = Stroke::new(radius * 0.4, colour);
-                    painter.line_segment(
-                        [
-                            egui::pos2(at.x, at.y - radius),
-                            egui::pos2(at.x, at.y + radius),
-                        ],
-                        stroke,
-                    );
-                    painter.line_segment(
-                        [
-                            egui::pos2(at.x - radius, at.y),
-                            egui::pos2(at.x + radius, at.y),
-                        ],
-                        stroke,
-                    );
-                }
-                GlyphMark::Chevron => {
-                    let stroke = Stroke::new(radius * 0.35, colour);
-                    let tip = egui::pos2(at.x + radius * 0.3, at.y);
-                    painter.line_segment([egui::pos2(at.x - radius, at.y - radius), tip], stroke);
-                    painter.line_segment([tip, egui::pos2(at.x - radius, at.y + radius)], stroke);
-                }
+            self.paint_mark(painter, mark, at, colour);
+        }
+    }
+
+    fn paint_mark(&self, painter: &egui::Painter, mark: &GlyphMark, at: Pos2, colour: Color32) {
+        let half = self.half;
+        match mark {
+            GlyphMark::Dot => {
+                let radius = (geometry::DOT_RADIUS * half).max(geometry::MIN_DOT_RADIUS);
+                painter.circle_filled(at, radius, colour);
+            }
+            GlyphMark::Bar => {
+                let width = (geometry::BAR_HALF_WIDTH * half).max(geometry::MIN_STROKE / 2.0);
+                let base = self.centre.y + half;
+                painter.add(Shape::convex_polygon(
+                    vec![
+                        egui::pos2(at.x - width, at.y),
+                        egui::pos2(at.x + width, at.y),
+                        egui::pos2(at.x + width, base),
+                        egui::pos2(at.x - width, base),
+                    ],
+                    colour,
+                    Stroke::NONE,
+                ));
+            }
+            GlyphMark::Plus => {
+                let arm = geometry::PLUS_ARM * half;
+                let thickness = (geometry::PLUS_THICKNESS * half).max(geometry::MIN_STROKE);
+                let stroke = Stroke::new(thickness, colour);
+                painter.line_segment(
+                    [egui::pos2(at.x, at.y - arm), egui::pos2(at.x, at.y + arm)],
+                    stroke,
+                );
+                painter.line_segment(
+                    [egui::pos2(at.x - arm, at.y), egui::pos2(at.x + arm, at.y)],
+                    stroke,
+                );
+            }
+            GlyphMark::Chevron => {
+                let span = geometry::CHEVRON_HALF_WIDTH * half;
+                let rise = geometry::CHEVRON_HEIGHT * half;
+                let thickness = (geometry::CHEVRON_THICKNESS * half).max(geometry::MIN_STROKE);
+                let stroke = Stroke::new(thickness, colour);
+                let tip = egui::pos2(at.x, at.y);
+                painter.line_segment([egui::pos2(at.x - span, at.y - rise), tip], stroke);
+                painter.line_segment([tip, egui::pos2(at.x + span, at.y - rise)], stroke);
+            }
+            GlyphMark::Arc => {
+                let radius = geometry::ARC_RADIUS * half;
+                let thickness = (geometry::ARC_THICKNESS * half).max(geometry::MIN_STROKE);
+                let stroke = Stroke::new(thickness, colour);
+                let points: Vec<Pos2> = (0..=ARC_SEGMENTS)
+                    .map(|step| {
+                        let angle = -geometry::ARC_HALF_ANGLE
+                            + 2.0 * geometry::ARC_HALF_ANGLE * step as f32 / ARC_SEGMENTS as f32;
+                        let (sin, cos) = angle.sin_cos();
+                        egui::pos2(at.x + radius * sin, at.y - radius * cos)
+                    })
+                    .collect();
+                painter.add(Shape::line(points, stroke));
+            }
+            GlyphMark::Belt => {
+                let width = geometry::BELT_HALF_WIDTH * half;
+                let thickness = (geometry::BELT_THICKNESS * half).max(geometry::MIN_STROKE / 2.0);
+                painter.add(Shape::convex_polygon(
+                    vec![
+                        egui::pos2(at.x - width, at.y - thickness),
+                        egui::pos2(at.x + width, at.y - thickness),
+                        egui::pos2(at.x + width, at.y + thickness),
+                        egui::pos2(at.x - width, at.y + thickness),
+                    ],
+                    colour,
+                    Stroke::NONE,
+                ));
+            }
+            GlyphMark::Ring => {
+                let thickness = (geometry::RING_THICKNESS * half).max(geometry::MIN_STROKE);
+                painter.circle_stroke(
+                    at,
+                    geometry::RING_RADIUS * half,
+                    Stroke::new(thickness, colour),
+                );
             }
         }
     }
@@ -165,13 +206,4 @@ fn below(points: &[Pos2], cutoff: f32) -> Vec<Pos2> {
         }
     }
     kept
-}
-
-/// The `index`th of `count` marks' offset from the centre, as a fraction of
-/// the glyph's half-width.
-fn spread(index: usize, count: usize) -> f32 {
-    match count {
-        0 | 1 => 0.0,
-        _ => -0.4 + 0.8 * index as f32 / (count - 1) as f32,
-    }
 }

@@ -1,0 +1,22 @@
+[package]
+name = "probe-server"
+version.workspace = true
+edition.workspace = true
+description = "The match server of Probe Game: rooms, lobby authority and forwarding"
+
+[[bin]]
+name = "probe-server"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = [
+    "sink",
+    "std",
+] }
+probe-protocol = { path = "../protocol" }
+probe-sim = { path = "../sim" }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync"] }
+tokio-tungstenite = "0.29"
+
+[lints]
+workspace = true

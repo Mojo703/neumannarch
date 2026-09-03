@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["sim", "protocol", "agents", "game"]
+members = ["sim", "protocol", "agents", "server", "game"]
 
 [workspace.package]
 version = "0.1.0"

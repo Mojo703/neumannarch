@@ -30,7 +30,11 @@ impl Controller {
     /// One controller per seat of the match `lobby` freezes into, in seat
     /// order: the person at this machine in the slot `me` holds, a bot in
     /// each slot this machine runs one for, and the rest remote.
+    ///
+    /// Only a host seats a bot, so only the host's machine runs one; on
+    /// every other machine that seat is another machine's.
     pub fn of(lobby: &Lobby, me: PlayerId, roster: &Roster) -> Vec<Controller> {
+        let host = lobby.host() == me;
         lobby
             .slots()
             .iter()
@@ -40,11 +44,11 @@ impl Controller {
                 Control::Player { player, .. } if player == me => {
                     Controller::Human(Human::new(seat))
                 }
-                Control::Bot(bot) => Controller::Bot(Box::new(Seated::new(
+                Control::Bot(bot) if host => Controller::Bot(Box::new(Seated::new(
                     seat,
                     Box::new(Scripted::new(Personality::of(bot), roster.clone())),
                 ))),
-                Control::Player { .. } | Control::Open | Control::Closed => {
+                Control::Bot(_) | Control::Player { .. } | Control::Open | Control::Closed => {
                     Controller::Remote(seat)
                 }
             })
@@ -151,6 +155,33 @@ mod tests {
         assert!(matches!(controllers[0], Controller::Human(_)));
         assert!(matches!(controllers[1], Controller::Bot(_)));
         assert_eq!(controllers[1].seat(), SeatId(1));
+    }
+
+    #[test]
+    fn a_bot_is_run_by_the_hosts_machine_and_by_no_other() {
+        let mut lobby = skirmish();
+        lobby
+            .edit(
+                PlayerId::HOST,
+                probe_protocol::LobbyEdit::SetSlot {
+                    slot: 2,
+                    control: Control::Player {
+                        player: PlayerId(4),
+                        ready: true,
+                    },
+                },
+            )
+            .expect("the host seats a guest");
+
+        let host = Controller::of(&lobby, PlayerId::HOST, &Roster::shipped());
+        let guest = Controller::of(&lobby, PlayerId(4), &Roster::shipped());
+
+        assert!(matches!(host[1], Controller::Bot(_)));
+        assert!(
+            matches!(guest[1], Controller::Remote(_)),
+            "the guest's machine leaves the bot to the host"
+        );
+        assert!(matches!(guest[2], Controller::Human(_)));
     }
 
     #[test]

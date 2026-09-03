@@ -17,12 +17,36 @@ probe-sim = { path = "../sim" }
 image = { version = "0.25.10", optional = true, default-features = false, features = [
     "png",
 ] }
+probe-server = { path = "../server", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-util = { version = "0.3", default-features = false, features = [
+    "sink",
+    "std",
+] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync"] }
+tokio-tungstenite = "0.29"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3.104"
+wasm-bindgen = "0.2.127"
+web-sys = { version = "0.3.104", features = [
+    "BinaryType",
+    "CloseEvent",
+    "Event",
+    "MessageEvent",
+    "WebSocket",
+] }
 
 [features]
 # The `look` binary: synthetic scenes to screenshots, over the engine's
 # offscreen Session. Kept out of the default build and the wasm build,
 # which must not pull `image` or `offscreen`.
 look = ["mirage-engine/offscreen", "dep:image"]
+
+# Serving a room in the game's own process, which is what Host does.
+# Native only: the browser opens sockets and does not answer them.
+host = ["dep:probe-server"]
 
 [lints]
 workspace = true

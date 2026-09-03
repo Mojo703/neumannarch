@@ -16,11 +16,11 @@ use crate::display::stencil::Stencil;
 /// A band's radial half-width around [`RADIUS`], in points: the span
 /// [`Wheel::slot_at`] answers, split at the radius into plus (outer) and
 /// minus (inner).
-pub const BAND_WIDTH: f32 = 16.0;
+pub const BAND_WIDTH: f32 = 22.0;
 
 /// How far the wheel's inner edge clears the outer ring, in points, so the
 /// annulus reads as its own control and not a third ring.
-pub const GAP: f32 = 40.0;
+pub const GAP: f32 = 55.0;
 
 /// The wheel's own screen radius, in points: its annulus's mid radius,
 /// [`GAP`] beyond the outer ring.
@@ -31,7 +31,7 @@ const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::display::hud::O
 
 /// A slot's glyph half-width, in points, before its size class steps it.
 /// Wider than a ring's, since a slot is a control and not a unit.
-const GLYPH_HALF: f32 = 9.0;
+const GLYPH_HALF: f32 = 14.0;
 
 /// The annulus's own stroke width, in points.
 const EDGE_WIDTH: f32 = 1.0;

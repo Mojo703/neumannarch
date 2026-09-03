@@ -45,6 +45,12 @@ impl Record {
         }
     }
 
+    /// A record of `setup` over `ticks`: what a room's forwarded log is,
+    /// which is one batch per tick already.
+    pub fn played(setup: Setup, ticks: BTreeMap<Tick, Batch>) -> Record {
+        Record { setup, ticks }
+    }
+
     /// What the match was set up as.
     pub fn setup(&self) -> &Setup {
         &self.setup

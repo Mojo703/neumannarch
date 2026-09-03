@@ -4,7 +4,18 @@ use probe_sim::{SeatId, Setup, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
-use crate::lobby::{Lobby, LobbyEdit};
+use crate::lobby::{Lobby, LobbyEdit, NotReady, Refused};
+
+/// Why the room did not do what a machine asked.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
+pub enum Refusal {
+    /// The edit was not this machine's to make.
+    Edit(Refused),
+    /// The lobby is not a match yet, so it does not start.
+    NotReady(NotReady),
+    /// Every slot is held, so a joining machine has nowhere to sit.
+    Full,
+}
 
 /// One message between a member of a room and the room. Everything before
 /// [`Message::Start`] is about the lobby; everything after is the match.
@@ -18,6 +29,8 @@ pub enum Message {
     Edit(LobbyEdit),
     /// The lobby after an edit landed, to every member.
     Lobby(Lobby),
+    /// Why the room did nothing, to the machine that asked.
+    Refused(Refusal),
     /// The frozen lobby: every machine builds its initial state from this.
     Start(Setup),
     /// A command, at the tick it takes effect at.
@@ -56,6 +69,9 @@ mod tests {
                 control: Control::Open,
             }),
             Message::Lobby(lobby.clone()),
+            Message::Refused(Refusal::Edit(Refused::NotHost)),
+            Message::Refused(Refusal::NotReady(NotReady::OpenSeat { slot: 1 })),
+            Message::Refused(Refusal::Full),
             Message::Start(lobby.freeze().expect("a skirmish is a match")),
             Message::Command(Stamped {
                 tick: Tick(9),

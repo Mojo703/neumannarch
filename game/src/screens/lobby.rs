@@ -16,8 +16,6 @@ use crate::display::scene::Scene;
 use crate::display::screen::Screen;
 use crate::display::{belt, hud};
 use crate::screens::Playable;
-use crate::screens::flow::Step;
-use crate::screens::loading::Loading;
 use crate::screens::panel::{self, Panel};
 
 /// The eye-to-focus distance the lobby and loading screens show the belt
@@ -81,8 +79,11 @@ impl LobbyScreen {
     }
 
     /// Paints the belt, the seats and the shape, and answers what the
-    /// player picked.
-    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Option<Step>
+    /// viewer asked for and the edits it asked of the lobby.
+    ///
+    /// It applies no edit itself: the room a multiplayer lobby is in is the
+    /// authority on it, and a skirmish's own flow stands in for one.
+    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Asked
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
@@ -103,44 +104,42 @@ impl LobbyScreen {
         let scene = &self.scene;
         let lobby = &self.lobby;
         let me = self.me;
-        let mut picked = None;
-        let mut edit = None;
+        let mut asked = Asked::default();
         ctx.ui(|ui| {
             hud::paint(scene, &screen, None, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
-            let (step, asked) = paint(&panel, lobby, me);
-            picked = step;
-            edit = asked;
+            asked = paint(&panel, lobby, me);
         });
-
-        match edit {
-            Some(Asked::Edits(edits)) => {
-                for edit in edits {
-                    // Every control the screen draws as an action is one
-                    // this viewer owns, so the lobby takes it.
-                    self.lobby
-                        .edit(me, edit)
-                        .expect("a control the screen offers is an edit its viewer owns");
-                }
-            }
-            Some(Asked::Regenerate) => self.lobby.regenerate_seed(),
-            None => {}
-        }
-        picked
+        asked
     }
 
     /// The lobby as it stands, which a match is frozen from.
     pub fn lobby(&self) -> &Lobby {
         &self.lobby
     }
+
+    /// Takes the lobby the room says stands now.
+    pub fn takes(&mut self, lobby: Lobby) {
+        self.lobby = lobby;
+    }
 }
 
-/// What a control on the screen asked of the lobby.
-enum Asked {
+/// What the lobby's viewer asked for this frame.
+#[derive(Default)]
+pub struct Asked {
     /// Edits to apply in order; every one is the viewer's to make.
-    Edits(Vec<LobbyEdit>),
-    /// The seed's own action, which steps the seed rather than setting it.
-    Regenerate,
+    pub edits: Vec<LobbyEdit>,
+    /// The action across the bottom the viewer picked.
+    pub picked: Option<Wants>,
+}
+
+/// What the lobby's own actions ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wants {
+    /// Leave the lobby for the title.
+    Leave,
+    /// Start the match, which only the host is offered.
+    Start,
 }
 
 /// One line of the seat column: a team's heading, one of its seats, or one
@@ -198,13 +197,16 @@ fn spare(lobby: &Lobby) -> Option<usize> {
         .position(|slot| slot.control == Control::Closed)
 }
 
-/// The edits that put `control` on `team` in the first spare slot.
-fn added(lobby: &Lobby, team: TeamId, control: Control) -> Option<Asked> {
-    let slot = spare(lobby)?;
-    Some(Asked::Edits(vec![
+/// The edits that put `control` on `team` in the first spare slot, or none
+/// where every slot is held.
+fn added(lobby: &Lobby, team: TeamId, control: Control) -> Vec<LobbyEdit> {
+    let Some(slot) = spare(lobby) else {
+        return Vec::new();
+    };
+    vec![
         LobbyEdit::SetSlot { slot, control },
         LobbyEdit::SetTeam { slot, team },
-    ]))
+    ]
 }
 
 /// The next thing a click on a bot's holder puts in its slot: the
@@ -264,24 +266,21 @@ fn belt_of(_seed: u64) -> Scene {
     Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO)
 }
 
-/// The whole screen, and what it asked of the lobby.
-fn paint(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> (Option<Step>, Option<Asked>) {
+/// The whole screen, and what its viewer asked for.
+fn paint(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> Asked {
     let window = panel.window();
     let host = lobby.host() == me;
-    let mut asked = None;
+    let mut edits = Vec::new();
 
     let laid = lines(lobby, host);
     for (rect, line) in rows(window, laid.len()).zip(&laid) {
-        if let Some(one) = paint_line(panel, rect, lobby, me, line) {
-            asked = Some(one);
-        }
+        edits.extend(paint_line(panel, rect, lobby, me, line));
     }
+    edits.extend(paint_shape(panel, lobby, host));
 
-    if let Some(one) = paint_shape(panel, lobby, host) {
-        asked = Some(one);
-    }
-    let (step, readied) = bottom(panel, lobby, me);
-    (step, readied.or(asked))
+    let mut asked = bottom(panel, lobby, me);
+    asked.edits.extend(edits);
+    asked
 }
 
 /// One line of the seat column.
@@ -291,7 +290,7 @@ fn paint_line(
     lobby: &Lobby,
     me: PlayerId,
     line: &Line,
-) -> Option<Asked> {
+) -> Vec<LobbyEdit> {
     match line {
         Line::Heading(team) => {
             panel.text(
@@ -301,7 +300,7 @@ fn paint_line(
                 panel::INK,
                 panel::HEADING_SIZE * 0.7,
             );
-            None
+            Vec::new()
         }
         Line::Seat(at) => paint_seat(panel, rect, lobby, me, *at),
         Line::Actions(team) => paint_team_actions(panel, rect, lobby, *team),
@@ -316,7 +315,7 @@ fn paint_seat(
     lobby: &Lobby,
     me: PlayerId,
     at: usize,
-) -> Option<Asked> {
+) -> Vec<LobbyEdit> {
     let slot = lobby.slots()[at];
     let host = lobby.host() == me;
     let mine = slot.holds(me);
@@ -341,16 +340,16 @@ fn paint_seat(
         Vec2::new(cells * 0.42, rect.height()),
     );
 
-    let mut asked = None;
+    let mut asked = Vec::new();
     // Only a bot's holder has anything to cycle to; every other holder is
     // stated rather than offered.
     let name = holder_name(&slot, me);
     match host && matches!(slot.control, Control::Bot(_)) {
         true if panel.action(holder, &name, true) => {
-            asked = Some(Asked::Edits(vec![LobbyEdit::SetSlot {
+            asked.push(LobbyEdit::SetSlot {
                 slot: at,
                 control: cycled(slot.control),
-            }]));
+            });
         }
         true => {}
         false => panel.label(
@@ -360,10 +359,10 @@ fn paint_seat(
         ),
     }
     if panel.action(moved, &moved_name(slot.team), host || mine) {
-        asked = Some(Asked::Edits(vec![LobbyEdit::SetTeam {
+        asked.push(LobbyEdit::SetTeam {
             slot: at,
             team: next_team(slot.team),
-        }]));
+        });
     }
     panel.text(
         match slot.control {
@@ -380,7 +379,12 @@ fn paint_seat(
 }
 
 /// Add Bot and Open Seat under one team, which only the host is shown.
-fn paint_team_actions(panel: &Panel<'_>, rect: Rect, lobby: &Lobby, team: TeamId) -> Option<Asked> {
+fn paint_team_actions(
+    panel: &Panel<'_>,
+    rect: Rect,
+    lobby: &Lobby,
+    team: TeamId,
+) -> Vec<LobbyEdit> {
     let room = spare(lobby).is_some();
     let width = (rect.width() - 2.0 * SWATCH) / 2.0 - 6.0;
     let add = Rect::from_min_size(
@@ -394,12 +398,12 @@ fn paint_team_actions(panel: &Panel<'_>, rect: Rect, lobby: &Lobby, team: TeamId
     if panel.action(open, "Open Seat", room) {
         return added(lobby, team, Control::Open);
     }
-    None
+    Vec::new()
 }
 
 /// The host's shape down the right: the seed with its regenerate action,
 /// and the clock.
-fn paint_shape(panel: &Panel<'_>, lobby: &Lobby, host: bool) -> Option<Asked> {
+fn paint_shape(panel: &Panel<'_>, lobby: &Lobby, host: bool) -> Vec<LobbyEdit> {
     let [seed, regenerate, clock] = shape_actions(panel.window());
     panel.text(
         &format!("Seed {}", lobby.seed()),
@@ -409,63 +413,53 @@ fn paint_shape(panel: &Panel<'_>, lobby: &Lobby, host: bool) -> Option<Asked> {
         panel::BODY_SIZE,
     );
     if panel.action(regenerate, "Regenerate", host) {
-        return Some(Asked::Regenerate);
+        return vec![LobbyEdit::SetSeed(lobby.next_seed())];
     }
     if panel.action(
         clock,
         &format!("Clock · {} min", lobby.clock().seconds() as u64 / 60),
         host,
     ) {
-        return Some(Asked::Edits(vec![LobbyEdit::SetClock(next_clock(
-            lobby.clock(),
-        ))]));
+        return vec![LobbyEdit::SetClock(next_clock(lobby.clock()))];
     }
-    None
+    Vec::new()
 }
 
 /// The actions across the bottom: Start for the host, Ready for a guest,
 /// and Leave.
-fn bottom(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> (Option<Step>, Option<Asked>) {
+fn bottom(panel: &Panel<'_>, lobby: &Lobby, me: PlayerId) -> Asked {
     let window = panel.window();
     let host = lobby.host() == me;
     let [start, leave] = bottom_actions(window);
+    let leaving = panel.action(leave, "Leave", true).then_some(Wants::Leave);
 
-    let frozen = lobby.freeze().ok();
     if !host {
-        let asked = panel
-            .action(start, "Ready", true)
-            .then(|| Asked::Edits(vec![LobbyEdit::SetReady { ready: true }]));
-        return (leaving(panel, leave), asked);
+        let readied = panel.action(start, "Ready", true);
+        return Asked {
+            edits: match readied {
+                true => vec![LobbyEdit::SetReady { ready: true }],
+                false => Vec::new(),
+            },
+            picked: leaving,
+        };
     }
-    let picked = panel.action(start, "Start", frozen.is_some());
-    match frozen {
-        // The action answers true only where it was drawn enabled, which is
-        // where the lobby froze.
-        Some(setup) if picked => {
-            return (
-                Some(Step::Loading(Box::new(Loading::of(
-                    lobby.clone(),
-                    setup,
-                    me,
-                )))),
-                None,
-            );
-        }
-        Some(_) => {}
-        None => panel.text(
+    let ready = lobby.freeze().is_ok();
+    let picked = panel.action(start, "Start", ready);
+    if !ready {
+        panel.text(
             "Every seat held, every guest ready",
             Pos2::new(window.center().x, start.top() - panel::ROW_HEIGHT / 2.0),
             Align2::CENTER_CENTER,
             panel::DIM_INK,
             panel::BODY_SIZE,
-        ),
+        );
     }
-    (leaving(panel, leave), None)
-}
-
-/// The Leave action, which every viewer of a lobby has.
-fn leaving(panel: &Panel<'_>, rect: Rect) -> Option<Step> {
-    panel.action(rect, "Leave", true).then_some(Step::Title)
+    Asked {
+        edits: Vec::new(),
+        // The action answers true only where it was drawn enabled, which is
+        // where the lobby froze.
+        picked: picked.then_some(Wants::Start).or(leaving),
+    }
 }
 
 /// `count` lines down the left of `window`, in points.
@@ -565,10 +559,7 @@ mod tests {
     fn adding_a_bot_to_a_team_seats_the_first_personality_in_the_first_spare_slot() {
         let mut lobby = skirmish();
 
-        let Some(Asked::Edits(edits)) = added(&lobby, TeamId(0), Control::Bot(FIRST_BOT)) else {
-            panic!("a skirmish has two spare slots");
-        };
-        for edit in edits {
+        for edit in added(&lobby, TeamId(0), Control::Bot(FIRST_BOT)) {
             lobby
                 .edit(PlayerId::HOST, edit)
                 .expect("the host adds a bot");
@@ -601,7 +592,7 @@ mod tests {
         }
 
         assert_eq!(spare(&lobby), None);
-        assert!(added(&lobby, TeamId(0), Control::Open).is_none());
+        assert!(added(&lobby, TeamId(0), Control::Open).is_empty());
     }
 
     #[test]

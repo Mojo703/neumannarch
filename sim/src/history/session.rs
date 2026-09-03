@@ -113,9 +113,18 @@ impl Session {
     /// seat's acknowledgement never goes backward, and a seat the match
     /// does not have holds nothing to record.
     pub fn acknowledge(&mut self, seat: SeatId, up_to: Tick) {
+        // An acknowledgement off the wire names any seat at all; a
+        // `SeatId` bound to a seat of this match would delete the lookup,
+        // and no type can bind an id to one match's seating.
         if let Some(known) = self.acknowledged.get_mut(usize::from(seat.0)) {
             *known = (*known).max(up_to);
         }
+    }
+
+    /// How far `seat` is acknowledged: the tick before which none of its
+    /// commands is unknown. `None` for a seat the match does not have.
+    pub fn acknowledged(&self, seat: SeatId) -> Option<Tick> {
+        self.acknowledged.get(usize::from(seat.0)).copied()
     }
 
     /// The smallest acknowledgement over the seats: the state at it, and

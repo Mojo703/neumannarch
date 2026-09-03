@@ -76,6 +76,16 @@ impl<'a> Panel<'a> {
         self.painter
     }
 
+    /// Whether the select button went down this frame, wherever it was.
+    pub fn clicked(&self) -> bool {
+        self.clicked
+    }
+
+    /// Whether the select button went down over `rect` this frame.
+    pub fn picked(&self, rect: Rect) -> bool {
+        self.clicked && rect.contains(self.pointer)
+    }
+
     /// Fills the window, hiding whatever was drawn under it.
     pub fn backdrop(&self) {
         self.painter.rect_filled(self.window, 0.0, BACKDROP);
