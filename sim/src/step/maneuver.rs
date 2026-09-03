@@ -198,6 +198,7 @@ mod tests {
         let orbit = Orbit::from_body(body, Tick::ZERO, MU).expect("a circular orbit");
         State::new(
             Tick(120_000),
+            0,
             MU,
             Roster::shipped(),
             vec![Rock::new(orbit, Materials::ZERO, 100.0)],

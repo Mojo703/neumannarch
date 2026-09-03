@@ -105,15 +105,11 @@ fn wanted(view: &View, place: Place, row: RowId) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::belt::Belt;
     use probe_sim::roster::{CONSTRUCTOR, SHIPYARD};
-    use probe_sim::session::Session;
-    use probe_sim::state::{Issued, State};
-    use probe_sim::{Band, RockId, SeatId, TICKS_PER_SECOND, TeamId, Tick};
+    use probe_sim::{Band, RockId};
 
     use super::*;
-
-    const PLAYER: SeatId = SeatId(0);
+    use crate::display::local::Local;
 
     fn inner(rock: u32) -> Place {
         Place {
@@ -124,35 +120,17 @@ mod tests {
 
     /// A match where the player has placed its reserve at rock zero: a
     /// shipyard, which never moves, and a constructor, which does.
-    fn placed() -> Session {
-        let mut session = Session::new(State::start(
-            Tick(15 * 60 * TICKS_PER_SECOND as u64),
-            Belt::GRAVITY,
-            Belt::fixed(Belt::GRAVITY),
-            &[TeamId(0)],
-        ));
-        let wants = [(SHIPYARD, 1), (CONSTRUCTOR, 1)].map(|(row, count)| Issued {
-            seat: PLAYER,
-            command: Command::Want {
-                place: inner(0),
-                row,
-                count,
-            },
-        });
-        assert!(session.advance(wants.into()).is_empty());
-        session
+    fn placed() -> Local {
+        let mut local = Local::start(1);
+        local.want(&[(inner(0), SHIPYARD, 1), (inner(0), CONSTRUCTOR, 1)]);
+        local
     }
-
-    fn view(session: &Session) -> View {
-        View::of(session.state(), PLAYER, session.shots())
-    }
-
     #[test]
     fn a_drag_starts_out_moving_every_unit_but_no_structure() {
-        let session = placed();
+        let local = placed();
 
         assert_eq!(
-            Sending::present(&view(&session), inner(0), session.state().roster()),
+            Sending::present(&local.view(), inner(0), local.session().state().roster()),
             1,
             "the shipyard never moves"
         );
@@ -160,8 +138,8 @@ mod tests {
 
     #[test]
     fn a_send_takes_the_source_want_down_and_the_destination_up() {
-        let session = placed();
-        let roster = session.state().roster();
+        let local = placed();
+        let roster = local.session().state().roster();
         let sending = Sending {
             from: inner(0),
             to: inner(1),
@@ -169,7 +147,7 @@ mod tests {
         };
 
         assert_eq!(
-            sending.commands(&view(&session), roster),
+            sending.commands(&local.view(), roster),
             vec![
                 Command::Want {
                     place: inner(0),
@@ -187,45 +165,34 @@ mod tests {
 
     #[test]
     fn a_drag_of_more_than_the_source_holds_moves_what_it_holds() {
-        let session = placed();
-        let roster = session.state().roster();
+        let local = placed();
+        let roster = local.session().state().roster();
         let sending = Sending {
             from: inner(0),
             to: inner(1),
             count: 9,
         };
 
-        assert_eq!(
-            sending.rows(&view(&session), roster),
-            vec![(CONSTRUCTOR, 1)]
-        );
+        assert_eq!(sending.rows(&local.view(), roster), vec![(CONSTRUCTOR, 1)]);
     }
 
     #[test]
     fn a_send_from_a_place_holding_nothing_issues_nothing() {
-        let session = placed();
-        let roster = session.state().roster();
+        let local = placed();
+        let roster = local.session().state().roster();
         let sending = Sending {
             from: inner(7),
             to: inner(1),
             count: 3,
         };
 
-        assert!(sending.commands(&view(&session), roster).is_empty());
+        assert!(sending.commands(&local.view(), roster).is_empty());
     }
 
     #[test]
     fn a_unit_the_seat_no_longer_wants_there_can_still_be_sent() {
-        let mut session = placed();
-        let dropped = Issued {
-            seat: PLAYER,
-            command: Command::Want {
-                place: inner(0),
-                row: CONSTRUCTOR,
-                count: 0,
-            },
-        };
-        assert!(session.advance(vec![dropped]).is_empty());
+        let mut local = placed();
+        local.want(&[(inner(0), CONSTRUCTOR, 0)]);
         let sending = Sending {
             from: inner(0),
             to: inner(1),
@@ -233,7 +200,7 @@ mod tests {
         };
 
         assert_eq!(
-            sending.rows(&view(&session), session.state().roster()),
+            sending.rows(&local.view(), local.session().state().roster()),
             vec![(CONSTRUCTOR, 1)],
             "a surplus unit is still on the run, so a drag can move it"
         );

@@ -259,7 +259,7 @@ mod tests {
         let orbit = Orbit::from_body(body, Tick::ZERO, MU).expect("a circular orbit");
         let rock = Rock::new(orbit, Materials::new(1.0, 1.0, 1.0), 100.0);
         let seat = Seat::new(TeamId(0), Materials::new(1e3, 1e3, 1e3), BTreeMap::new());
-        State::new(Tick(120_000), MU, roster, vec![rock], vec![seat])
+        State::new(Tick(120_000), 0, MU, roster, vec![rock], vec![seat])
     }
 
     fn state() -> State {

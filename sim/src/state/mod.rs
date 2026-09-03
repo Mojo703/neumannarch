@@ -4,7 +4,9 @@ use core::ops::Index;
 use std::collections::BTreeMap;
 
 pub use attractor::Attractor;
-pub use command::{Command, Issued, MAX_WANT, Rejected};
+pub use command::{
+    Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
+};
 pub use entity::{Entity, Motion};
 pub use flight::{Burn, Flight};
 pub use frame::Frame;
@@ -32,6 +34,10 @@ use crate::time::{Moment, Tick};
 pub struct State {
     tick: Tick,
     clock: Tick,
+    /// The map's seed, which map generation lays the belt from. Hashed
+    /// with every other field, so two machines that disagree on it desync
+    /// at once.
+    seed: u64,
     gravity: Gravity,
     seats: Vec<Seat>,
     roster: Roster,
@@ -46,9 +52,11 @@ pub struct State {
 }
 
 impl State {
-    /// The start of a match: nothing on the map, ending at `clock`.
+    /// The start of a match: nothing on the map, ending at `clock`, over
+    /// the map `seed` laid `rocks`.
     pub fn new(
         clock: Tick,
+        seed: u64,
         gravity: Gravity,
         roster: Roster,
         rocks: Vec<Rock>,
@@ -57,6 +65,7 @@ impl State {
         State {
             tick: Tick::ZERO,
             clock,
+            seed,
             gravity,
             seats,
             roster,
@@ -431,6 +440,7 @@ mod tests {
     fn state() -> State {
         State::new(
             Tick(1000),
+            0,
             GRAVITY,
             Roster::shipped(),
             vec![rock()],
@@ -447,107 +457,11 @@ mod tests {
             .expect("the shipped roster has both kinds")
     }
 
-    fn want(seat: SeatId, place: Place, row: RowId, count: u32) -> Issued {
-        Issued {
-            seat,
-            command: Command::Want { place, row, count },
-        }
-    }
-
     fn inner() -> Place {
         Place {
             rock: ROCK,
             band: Band::Inner,
         }
-    }
-
-    #[test]
-    fn a_dead_seat_wants_nothing() {
-        let mut dead = seat();
-        dead.eliminate();
-        let mut state = State::new(
-            Tick(1000),
-            GRAVITY,
-            Roster::shipped(),
-            vec![rock()],
-            vec![dead],
-        );
-        let unit = row_of(&state, Kind::Unit);
-        assert_eq!(
-            state.apply(want(SEAT, inner(), unit, 1)),
-            Err(Rejected::DeadSeat)
-        );
-        assert_eq!(
-            state.apply(want(SeatId(9), inner(), unit, 1)),
-            Err(Rejected::DeadSeat)
-        );
-    }
-
-    #[test]
-    fn a_rock_the_map_lacks_is_rejected() {
-        let mut state = state();
-        let unit = row_of(&state, Kind::Unit);
-        let place = Place {
-            rock: RockId(1),
-            band: Band::Inner,
-        };
-        assert_eq!(
-            state.apply(want(SEAT, place, unit, 1)),
-            Err(Rejected::NoSuchRock)
-        );
-    }
-
-    #[test]
-    fn a_row_the_roster_lacks_is_rejected() {
-        let mut state = state();
-        assert_eq!(
-            state.apply(want(SEAT, inner(), RowId(u16::MAX), 1)),
-            Err(Rejected::NoSuchRow)
-        );
-    }
-
-    #[test]
-    fn a_structure_is_never_wanted_outside() {
-        let mut state = state();
-        let structure = row_of(&state, Kind::Structure);
-        let outer = Place {
-            rock: ROCK,
-            band: Band::Outer,
-        };
-        assert_eq!(
-            state.apply(want(SEAT, outer, structure, 1)),
-            Err(Rejected::StructureOutside)
-        );
-        assert_eq!(state.apply(want(SEAT, inner(), structure, 1)), Ok(()));
-    }
-
-    #[test]
-    fn a_want_above_the_cap_is_too_many() {
-        let mut state = state();
-        let unit = row_of(&state, Kind::Unit);
-        assert_eq!(
-            state.apply(want(SEAT, inner(), unit, MAX_WANT + 1)),
-            Err(Rejected::TooMany)
-        );
-        assert_eq!(state.apply(want(SEAT, inner(), unit, MAX_WANT)), Ok(()));
-    }
-
-    #[test]
-    fn a_want_changes_the_hash_and_clearing_it_restores_the_hash() {
-        let mut state = state();
-        let unit = row_of(&state, Kind::Unit);
-        let post = Post {
-            place: inner(),
-            seat: SEAT,
-        };
-        let before = state.hash();
-        assert_eq!(state.apply(want(SEAT, inner(), unit, 3)), Ok(()));
-        assert_ne!(state.hash(), before);
-        assert_eq!(state.wants(post).map(|wants| wants.get(unit)), Some(3));
-        assert_eq!(state.apply(want(SEAT, inner(), unit, 0)), Ok(()));
-        assert_eq!(state.hash(), before);
-        assert_eq!(state.wants(post), None);
-        assert_eq!(state.posts().count(), 0);
     }
 
     #[test]

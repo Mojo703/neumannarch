@@ -3,7 +3,7 @@
 
 use core::f32::consts::TAU;
 
-use crate::scene::Run;
+use crate::display::scene::Run;
 
 /// One ring's screen measures.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,8 +176,8 @@ mod tests {
     use probe_sim::SeatId;
 
     use super::{Geometry, Layout};
-    use crate::glyph::{Frame, Glyph, Size};
-    use crate::scene::{Fill, Mark, Run};
+    use crate::display::glyph::{Frame, Glyph, Size};
+    use crate::display::scene::{Fill, Mark, Run};
 
     /// A 100 px ring with 16 px glyphs: a lone run holds thirty-nine.
     const RING: Geometry = Geometry {

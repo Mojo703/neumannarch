@@ -30,8 +30,22 @@ roster in `sim`, never here.
 - Teammates share sight and nothing else. A player edits only their own
   compositions.
 - Agents play through the same fogged view and the same verb as humans.
-- Deterministic lockstep. Commands travel over a relay; the command log is
-  the replay.
+  A bot holds a seat like a player and is run by the machine of the
+  player who added it.
+- Every machine runs the whole match. A command takes effect at the tick
+  its player issued it. The issuer's machine applies it at once; every
+  other machine applies it when it arrives, restoring that tick and
+  replaying from it, so all machines converge on one history. A tick is settled once every seat's commands up to it are
+  known; the settled history is the match's record and its replay, and
+  two machines whose settled histories differ have desynced, which ends
+  the match.
+- A match is set up in a lobby. The player who opens it is its host and
+  owns its shape: the map's seed, the clock, the teams, and what holds
+  each seat: a player, a bot with a personality, open, meaning a player
+  may still take it, or closed, meaning the seat is not in the match. A guest owns only their own seat's team, within the host's
+  shape, and their readiness. The host starts the match when every player
+  is ready and every seat is held or closed. A skirmish is a lobby whose
+  seats are all on one machine.
 
 ## World
 
@@ -212,7 +226,9 @@ composition per player. The verb sets one count.
 Per player, from the union of their sensors. **Sight** is exact. **Radar**
 gives position, velocity, and rough mass. **Terrain** is every rock, its
 orbit, its caps, and all its future positions, always. Sight is shared
-across a player's entities.
+across a player's entities. The standings are revealed at the clock and
+never before; until then a player knows of another side's rocks and army
+only what sight and radar have shown.
 
 ## Build order
 

@@ -3,8 +3,8 @@
 
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 
-use crate::glyph::{Frame, Glyph, GlyphMark};
-use crate::scene::Fill;
+use crate::display::glyph::{Frame, Glyph, GlyphMark};
+use crate::display::scene::Fill;
 
 /// A glyph's outline width, in points.
 const OUTLINE_WIDTH: f32 = 1.5;

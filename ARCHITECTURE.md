@@ -37,17 +37,36 @@ document.
 ## Crates
 
 ```
-sim/      probe-sim     the rules; no engine, both targets
-                        bin: `harness`, behind a `harness` feature once
-                        it lands — agents, matrices, determinism checks
-game/     probe-game    lib: scene, glyphs, rings, wheel, camera, belt, hud
-                        bin: the playable on Mirage; `look`, behind a
-                        `look` feature, synthetic scenes through the
-                        engine's offscreen Session to screenshots
+sim/       probe-sim       the state system: state, rules, orbit, roster,
+                           belt, and history (snapshots, the stamped log,
+                           rewind, settling, replay); no engine, both
+                           targets
+protocol/  probe-protocol  every value two machines exchange, defined in
+                           Protocol below; serialisable; no io; both
+                           targets
+agents/    probe-agents    the agent frontend: the Agent trait, the
+                           scripted opponent; bin: `harness`, native only
+game/      probe-game      the player frontend: display/, net/, screens/;
+                           bin: the playable on Mirage; `look`, behind a
+                           `look` feature, synthetic scenes through the
+                           engine's offscreen Session to screenshots
+server/    probe-server    the match server: rooms, lobby authority,
+                           forwarding, records; a library `game` embeds
+                           on native to host, and a binary; native only
 ```
 
-`game` depends on `sim`; `sim` depends on `libm` and nothing else.
-`check.sh` fails if `sim`'s dependency tree names the engine.
+Dependencies point one way: `protocol` and `agents` depend on `sim`;
+`game` depends on `sim`, `protocol` and `agents`, and on `server` only
+under a native `host` feature; `server` depends on `protocol`. `sim`
+depends on `libm` and nothing else. The browser build carries `sim`,
+`protocol`, `agents` and `game`. `check.sh` fails if `sim`'s dependency
+tree names the engine. `protocol` and `server` are created by the units
+that need them, never as empty crates.
+
+The two frontends have one role each and share everything below them: a
+human and a scripted agent both read a `View` and speak a `Command`, and
+both drive the same `Session`. Nothing in `sim` or `protocol` knows which
+frontend is speaking.
 
 ## Sim: numbers
 
@@ -143,29 +162,118 @@ pub struct Burn { from: Tick, to: Tick, accel: Vec3 }       // constant thrust
 
 ```rust
 pub enum Command { Want { place: Place, row: RowId, count: u32 } }
-pub struct Issued { pub seat: SeatId, pub command: Command }
-pub enum Rejected { DeadSeat, NoSuchRock, NoSuchRow, StructureOutside, TooMany }
+pub struct Issued { pub seat: SeatId, pub seq: u32, pub command: Command }
+pub struct Stamped { pub tick: Tick, pub issued: Issued }
+pub struct Batch(Vec<Issued>);                      // one tick's, ordered
+pub struct Sequence { seat: SeatId, next: u32 }
+pub struct Setup { teams: Vec<TeamId>, seed: u64, clock: Tick }
+pub enum BadSetup { NoSeats, TooManySeats }
+pub enum Rejected { NoSuchSeat, DeadSeat, NoSuchRock, NoSuchRow,
+                    StructureOutside, TooMany }
+pub enum Refused { Duplicate, TooMany, Late, Ahead }
 
 impl State {
-    pub fn step(&self, issued: &[Issued]) -> (State, Outcome);
+    pub fn step(&self, issued: &Batch) -> (State, Outcome);
 }
 pub struct Outcome { rejected: Vec<(Issued, Rejected)>, shots: Shots }
-pub struct Session { state: State, log: Vec<(Tick, Issued)>, outcome: Outcome }
 ```
 
-`step` applies the commands to a copy of the snapshot, then runs the
-phases over that copy as an immutable snapshot, and returns the next
-state and the tick's `Outcome`. `Belt::fixed(gravity)` lays the shipped
-rocks and
-`State::start(clock, gravity, rocks, teams)` seats one player per team
-with its reserve and starting stock. A rejected command comes back with
-the command that was refused and changes nothing. `TooMany` is the one cap the sim states: a want above
-`MAX_WANT` per post and row, a roster constant. Command volume is the
-relay's concern. `Session::advance` returns the outcome's rejections and
-keeps the outcome, so `Session::shots()` is what a view of the tick is
-built with; no field of the state records a shot.
-`Session::replay(initial, log, until)` rebuilds a state
-from a log, and `harness` asserts the hash matches.
+`step` applies the batch to a copy of the snapshot, then runs the phases
+over that copy as an immutable snapshot, and returns the next state and
+the tick's `Outcome`. A `Batch` holds one tick's commands in `(seat, seq)`
+order with no key twice, so the result cannot depend on the order they
+arrived in: `Batch::insert` refuses a `(seat, seq)` it already holds as
+`Duplicate` and a seat past `MAX_COMMANDS_PER_TICK` as `TooMany`, which
+is the cap on what a peer can put in one tick. `seq` counts a seat's
+commands from zero for the match and a `Sequence` per local seat stamps
+it, so no frontend counts for itself.
+
+`Setup::new` refuses a match with no seats or more than `MAX_SEATS` by
+name, so a setup off the wire is checked once. `State::start(&setup)`
+seats the players it names, each with their reserve and starting stock,
+lays `Belt::fixed`, and carries the seed, which is hashed and unused
+until map generation lands. A rejected command comes back with the
+command that was refused and changes nothing. `Rejected::TooMany` is a
+want above `MAX_WANT` per post and row, a roster constant.
+
+## Sim: history
+
+Every frontend drives a `Session`, and rollback is a property of it, not
+of the network: a command applies at the tick it was stamped at wherever
+it is applied, and a session that learns of one late restores that tick
+and re-steps. `Snapshots` and `Log` are the two stores under it.
+
+```rust
+pub struct Session {
+    setup: Setup,
+    initial: State,
+    live: State,                           // at the tick the frontend shows
+    snapshots: Snapshots,                  // the states Retention keeps
+    log: Log,                              // stamped commands by tick
+    outcomes: BTreeMap<Tick, Outcome>,     // of the ticks inside the window
+    acknowledged: Vec<Tick>,               // per seat: no command before this tick is unknown
+    local: Vec<SeatId>,                    // the seats this machine owns
+}
+pub enum Retention { Window { ticks: u32, every: NonZeroU32 } }
+pub enum Rewound { Nothing, From(Tick) }
+pub struct Record { setup: Setup, log: Log }
+
+impl Session {
+    pub fn new(setup: Setup, retention: Retention, local: &[SeatId]) -> Session;
+    pub fn advance(&mut self) -> &Outcome;                 // one tick on
+    pub fn insert(&mut self, stamped: Stamped) -> Result<Rewound, Refused>;
+    pub fn acknowledge(&mut self, seat: SeatId, up_to: Tick);
+    pub fn settled(&self) -> Tick;                         // min over seats
+    pub fn hash_at(&self, tick: Tick) -> Option<u64>;      // kept, or re-stepped
+    pub fn outcome_at(&self, tick: Tick) -> Option<&Outcome>;
+    pub fn outcome(&self) -> Option<&Outcome>;             // of the tick shown
+    pub fn state(&self) -> &State;
+    pub fn record(&self) -> Record;
+}
+impl Record { pub fn replay(&self, until: Tick) -> State; }
+```
+
+- **Insert.** A stamped command at or after the tick the session shows is
+  logged for the step that reaches it, and nothing is re-stepped:
+  `Rewound::Nothing`. One before it restores the newest kept state at or
+  before that tick, logs the command, and re-steps to the tick shown,
+  replacing the outcomes on the way; the frontend is told
+  `Rewound::From` that tick, whose outcome and every later one may now
+  differ, and so may every state after it. A tick further back than the
+  window is `Refused::Late` and one further ahead than the window is
+  `Refused::Ahead`; keeping peers inside the window is the transport's
+  pacing rule, below, so either is a peer that has already been cut off.
+- **Retention** decides which ticks keep a state. Nothing outside
+  `history` names a snapshot: `hash_at` and the rewind both ask the ring
+  for the newest kept state at or before a tick and re-step from there,
+  so sparse snapshots with re-simulation between them change `Retention`
+  and the ring and nothing else. `Window` keeps every `every`th tick
+  inside `ticks` ticks behind the tick shown, and the newest kept tick at
+  or before the window's start, so every tick a command may still arrive
+  at has a state to restore. The shipped policy keeps every tick of
+  `WINDOW_SECONDS`.
+- **Settling.** `acknowledge` records that no command of a seat before
+  `up_to` is unknown, and never goes backward; `settled` is the smallest
+  over the seats, and the state at it and every state before it is final.
+  `advance` acknowledges the local seats up to the tick it reaches, so a
+  machine that owns every seat settles every tick it plays. Hashes are
+  compared only at settled ticks, since unsettled ticks legitimately
+  differ between machines. `settled` names a tick a machine has not
+  stepped when every seat's next command is still ahead of it, and
+  `hash_at` answers `None` there.
+- **Shots and views.** An outcome is kept per tick while the state it
+  produced is inside the window, so a view of any tick the frontend shows
+  is built with that tick's shots; no field of the state records a shot.
+  `outcome()` is the one that produced the tick shown. A rewind replaces
+  the outcomes it re-steps.
+- **The record** is the setup and the log to the settled tick;
+  `Record::replay` builds the initial state from the setup and steps it
+  over the log, which is what a replay file and a desync report hold. It
+  moves to `protocol` when that crate lands.
+- The harness checks: a record reproduces the live hash; the same match
+  played twice hashes the same; a match with every command inserted late,
+  in scrambled order inside the window, hashes the same at every settled
+  tick as the same commands applied on time.
 
 ## Sim: the step
 
@@ -298,9 +406,10 @@ order; anything sorted is sorted by a total key ending in an id.
   which say per place and seat whether a shot the seat saw was fired or
   landed there; the gravity its terrain's orbits are read at; every rock
   with its orbit
-  and caps; the standings. Nothing in a `View` refers to anything a seat
-  cannot see. The roster is match-constant and travels with the initial
-  state, so a client holds it from the session rather than from a view.
+  and caps; the standings, `Some` only once the clock has run out.
+  Nothing in a `View` refers to anything a seat cannot see. The roster is
+  match-constant and travels with the initial state, so a client holds it
+  from the session rather than from a view.
 - `State::hash() -> u64`: FNV-1a over `Hash` of the whole state. The hasher
   widens every `usize` to `u64` and writes integers little-endian, so a
   `Vec` length prefix hashes the same on wasm32 and native.
@@ -309,11 +418,6 @@ order; anything sorted is sorted by a total key ending in an id.
   seats is still in; `over()` says the clock has run out and `leaders()`
   applies DESIGN.md's tie-break. The clock is a field of the state, so the
   end is a query.
-- `Session { state, log, outcome }`: `advance(issued)` logs, steps, and
-  returns what the tick refused; `shots()` is the tick's shots beside the
-  state; `replay(initial, log, until)` rebuilds a state from a log, and a
-  test asserts the replayed hash equals the live one over a scripted
-  match.
 
 ## Game: the display library
 
@@ -371,20 +475,21 @@ order; anything sorted is sorted by a total key ending in an id.
   wheel and an `egui::Painter` to painted shapes — rings, runs, arcs, the
   wheel, flight lines, radar contacts, the selection and the hover
   preview; it calls `ring::Layout` and paints glyphs through `Stencil`.
-- The binary is the playable: a `Game` whose `tick` advances a `Session`
-  with the commands the input issued, reads the tick's `View` and feeds
-  the `Fights`, and whose `frame` builds a `Scene` and draws it — `belt`
-  then `hud`, so the HUD is never occluded — over one full-window
-  transparent egui layer that claims no widgets. Input is keyboard and
-  mouse through the engine's action vocabularies: a ring click selects and
-  focuses, a wheel band click edits one want and repeats while held, a
-  left drag from ring to ring is the send, the right or middle button and
-  the pan keys drag the belt, and the zoom axis zooms or, during a send,
-  sets how many go. The gamepad bindings DISPLAY.md states are a later
-  unit. The pause menu is the one panel: Escape toggles it, and at the
-  clock it shows the standings as text. Its own headless drive, behind the
-  `look` feature, plays it through the engine's offscreen `Session` and
-  writes `game/look/play_*.png`.
+- The binary is the playable: a `Game` whose `tick` runs the live screen
+  of the `Flow` (Game: net and screens, below); in `Play`, that inserts
+  the local controllers' stamped commands into the `Session`, advances it
+  within the pacing rule, reads the tick's `View` and feeds the `Fights`.
+  Its `frame` builds a `Scene` and draws it — `belt` then `hud`, so the
+  HUD is never occluded — over one full-window transparent egui layer
+  that claims no widgets, and the screens outside `Play` are drawn on
+  that same layer. Input is keyboard and mouse through the engine's
+  action vocabularies: a ring click selects and focuses, a wheel band
+  click edits one want and repeats while held, a left drag from ring to
+  ring is the send, the right or middle button and the pan keys drag the
+  belt, and the zoom axis zooms or, during a send, sets how many go. The
+  gamepad bindings DISPLAY.md states are a later unit. Its own headless
+  drive, behind the `look` feature, plays it through the engine's
+  offscreen `Session` and writes `game/look/play_*.png`.
 
 ## Look
 
@@ -399,12 +504,97 @@ probe-game --features look --all-targets`, so the default binary and the
 wasm build never pull `image` or `offscreen`. It is the only way a
 display change is verified.
 
-## Harness
+## Agents
 
-`harness` is a native binary over `sim`: scripted agents over `View` and
-`Command`, matrices of composition against composition, and the
-determinism checks: replay reproduces the hash, and the same match at
-twice the tick rate. Its shape lands with the first sim system.
+`agents` is the agent frontend, a library over `sim` and the `harness`
+binary. `Agent::decide(&mut self, view: &View) -> Vec<Command>` is
+called on `DECISION_INTERVAL`, at most `MAX_COMMANDS_PER_DECISION` per
+call. `Seated { seat, agent }` builds the view and stamps the seat and
+the sequence, so no caller does. `Scripted` is the shipped opponent: a
+`Personality`'s constants read through `Survey` (one decision's tally of a
+view, with memory folded in) into a `Plan` (a target composition per
+place, diffed against the view into `Want`s), stepping a `Memory` (what
+the view carries no history of) and a `Dice` (the one seeded,
+deterministic source of variation an agent has). `Roles` reads the roster
+once into the row an agent prefers per job, so no agent names a row by
+id. A bot in a lobby is a `Seated` agent run by the machine that owns its
+seat, through `game`'s bot controller; the sim never knows.
+
+`harness`, native only, no feature gate: `match` seats agents and plays
+one to the clock, tracing standings as it goes; `replay` checks the
+record reproduces the live hash and that the same match built twice from
+independent initial states hashes the same; `rollback` inserts every
+command late and scrambled and checks the settled hashes match the
+on-time match; `matrix` plays named compositions pairwise from symmetric
+starts and prints a table of rocks and the tie-break's verdict. Doubling
+the tick rate and asserting the same outcome is a future check threading
+through flights, weapon intervals and the manoeuvring gains.
+
+## Protocol
+
+`protocol` is every value two machines exchange, serialisable, with no
+io and no engine, so `game`, `server` and the harness's record files all
+speak it.
+
+```rust
+pub struct Lobby {
+    seats: Vec<SeatSlot>,      // SeatSlot { team, control: Open | Closed | Player(PlayerId) | Bot(Personality), ready }
+    seed: u64, clock: Tick, host: PlayerId,
+}
+pub enum LobbyEdit { SetSlot, SetTeam, SetSeed, SetClock, SetReady, .. }
+pub enum Message {
+    Join, Welcome { player, lobby }, Edit(LobbyEdit), Lobby(Lobby), Start(Setup),
+    Command(Stamped), Acknowledge { seat, up_to: Tick }, Hash { tick, hash },
+    Desync { tick }, Leave,
+}
+pub struct Record { setup: Setup, log: Vec<Stamped> }
+```
+
+`Lobby::freeze(&self) -> Setup` is the one way a match starts, on every
+machine, from the same value; `sim`'s `Setup` holds only what the state
+needs (teams per seat, seed, clock), and `Lobby` holds who controls each
+seat, which the sim never learns.
+
+## Game: net and screens
+
+- **Controllers.** Each machine owns the seats its lobby slots name as
+  its player or its bots. `Controller::Human` turns input into commands,
+  `Controller::Bot` runs a `Seated` agent on its cadence, and a seat no
+  local controller owns is `Remote`. Every controller yields `Stamped`
+  commands at the session's latest tick, which the machine inserts into
+  its own session at once and hands to the transport. Nothing waits.
+- **Transport.** `Transport` carries stamped commands, acknowledgements
+  and hash reports both ways. `Local` returns nothing and exists so the
+  loop has one shape. `Socket` speaks `protocol::Message` over a
+  WebSocket to the server. Received commands are inserted into the
+  session, which rewinds as needed; the loop reads `Rewound` only to
+  reset client-side memories (fights, hover) that may now be stale.
+- **Pacing.** A machine advances no further than the retention window
+  ahead of the lowest acknowledged tick among peers, and shows a waiting
+  state past that; a machine ahead of the others' settled ticks by a
+  threshold slows its tick rate by a stated fraction until level. Both
+  numbers are constants with units.
+- **Screens.** One `Flow` value owns which screen is live: `Title`,
+  `Lobby`, `Loading`, `Play`, `Results`, with `Pause` over `Play`. Skirmish
+  opens a lobby whose slots are all local; Host embeds the server and
+  opens the same lobby; Join connects to an address and receives it.
+  Start freezes the lobby into a `Setup` on the host, every machine
+  builds the initial state from it, and the tick-zero hash is the first
+  report. Results holds the standings and the record, and returns to the
+  lobby for a rematch or to the title.
+
+## Server
+
+`server` holds rooms. Each room owns one `Lobby` and is the authority on
+it: the host's edits and each guest's own-seat edits are applied in
+arrival order and the result broadcast; any other edit is refused by
+name. Once started, the room forwards every stamped command and
+acknowledgement to every other member, collects hash reports per
+settled tick, and declares a desync when two differ, sending both
+records to their owners. It keeps the record of every finished match. It
+holds no tick clock and steps no sim. `game` embeds it under the `host`
+feature so host-by-address needs no separate process; the binary serves
+a room list later.
 
 ## Module layout
 
@@ -412,6 +602,7 @@ twice the tick rate. Its shape lands with the first sim system.
 sim/src/
   lib.rs            TICKS_PER_SECOND, TICK; the public surface
   belt.rs           Belt::fixed, State::start
+  setup.rs          Setup, MAX_SEATS, BadSetup
   real.rs           Real
   vec3.rs           Vec3
   materials.rs      Materials, Stockpile
@@ -424,25 +615,41 @@ sim/src/
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
                     entity.rs Entity, Motion; flight.rs Flight, Burn;
                     attractor.rs; sight.rs; wants.rs Wants; frame.rs;
-                    ready.rs; command.rs Command, Issued, Rejected, apply;
+                    ready.rs; command.rs Command, Issued, Stamped, Batch,
+                    Sequence, Rejected, Refused, apply;
                     sweep.rs; view.rs View; hash.rs;
                     standings.rs Standings
   step/             mod.rs step, next; maneuver.rs; propagation.rs;
                     fulfilment.rs; extraction.rs; construction.rs; fire.rs
-  session.rs        Session, replay
-  bin/harness.rs    behind the `harness` feature, once it lands
+  history/          mod.rs; snapshots.rs Retention and the ring behind it;
+                    log.rs the stamped log by tick; record.rs Record;
+                    session.rs Session: advance, insert, acknowledge,
+                    settled, hash_at, outcome_at, record
+protocol/src/
+  lib.rs            the surface
+  lobby.rs          Lobby, SeatSlot, LobbyEdit, freeze
+  message.rs        Message
+  record.rs         Record
+agents/src/
+  lib.rs            Agent, Seated, DECISION_INTERVAL; the surface
+  dice.rs  memory.rs  roles.rs  survey.rs  plan.rs  personality.rs
+  scripted.rs       Scripted
+  bin/harness.rs    native only: match, replay, rollback, matrix
 game/src/
-  lib.rs            the display library's surface
-  scene.rs  glyph.rs  glyph_quad.rs  ring.rs  wheel.rs  camera.rs
-  screen.rs         the frame's projection
-  stencil.rs        one glyph painted on the HUD
-  fights.rs         the fight memory over successive views
-  send.rs           the drag gesture and the edits it issues
-  belt.rs           Scene and Screen to the engine's 3D draws
-  hud.rs            Scene, Screen, the open wheel and an egui::Painter to
-                    painted shapes
+  lib.rs            the surface
+  display/          mod.rs; scene.rs glyph.rs glyph_quad.rs ring.rs
+                    wheel.rs camera.rs screen.rs stencil.rs fights.rs
+                    send.rs belt.rs hud.rs, as before
+  net/              controller.rs Controller; transport.rs Transport;
+                    local.rs Local; socket.rs Socket; pace.rs pacing
+  screens/          flow.rs Flow; title.rs lobby.rs loading.rs play.rs
+                    pause.rs results.rs
   main.rs           the playable, and its headless drive
   bin/look.rs       behind the `look` feature
+server/src/
+  lib.rs            the surface game embeds
+  rooms.rs  lobby.rs  stream.rs  records.rs
+  main.rs           the standalone binary
 ```
 
 One concern per file; a file that needs a section comment is two files.
@@ -463,11 +670,16 @@ One concern per file; a file that needs a section comment is two files.
 
 | crate | scope | why |
 |---|---|---|
-| `libm` | `sim` | transcendentals identical on every target; `std`'s are the platform's |
+| `libm` | `sim`, `agents` | transcendentals identical on every target; `std`'s are the platform's; an agent's arithmetic must replay identically too |
 | `mirage-engine` | `game` | the engine, by path; `look`'s bin additionally needs its `offscreen` feature |
 | `image` | `game`, behind the `look` feature | writing PNGs; already in the engine's tree |
+| a serialiser, to be named by the protocol unit | `protocol` | one wire encoding for native and the browser |
+| a WebSocket client running on native and in the browser, to be named by the net unit | `game` | the transport |
+| an async runtime and a WebSocket server, to be named by the server unit | `server` | rooms and forwarding; native only |
 
-Adding one requires a row here.
+Adding one requires a row here. A row naming "to be named" is a
+placeholder for the unit that lands it, which replaces it with the crate
+and the reason it was chosen over its alternatives.
 
 ## Invariants (checked on every change)
 

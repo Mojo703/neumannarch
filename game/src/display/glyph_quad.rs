@@ -8,7 +8,7 @@ use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
 use probe_sim::SeatId;
 use probe_sim::roster::Roster;
 
-use crate::glyph::{Frame, Glyph, GlyphMark, Size};
+use crate::display::glyph::{Frame, Glyph, GlyphMark, Size};
 
 /// A glyph texture's side, in texels.
 pub const CELL_PIXELS: u32 = 32;
@@ -30,9 +30,9 @@ const PALETTE: [Color; 4] = [
 
 /// A glyph's fraction of the cell its frame fills by cost class, `Large`
 /// reaching the cell's own edge; the size class over
-/// [`crate::glyph::WIDEST_SCALE`].
+/// [`crate::display::glyph::WIDEST_SCALE`].
 fn cell_fraction(size: &Size) -> f32 {
-    size.scale() / crate::glyph::WIDEST_SCALE
+    size.scale() / crate::display::glyph::WIDEST_SCALE
 }
 
 /// `seat`'s colour, wrapping past the palette's length.

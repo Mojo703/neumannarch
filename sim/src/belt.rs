@@ -4,11 +4,11 @@
 use core::f64::consts::TAU;
 use std::collections::BTreeMap;
 
-use crate::ids::TeamId;
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
 use crate::roster::{CONSTRUCTOR, Roster, SHIPYARD};
+use crate::setup::Setup;
 use crate::state::{Rock, Seat, State};
 use crate::time::Tick;
 use crate::vec3::Vec3;
@@ -70,16 +70,28 @@ impl Belt {
 }
 
 impl State {
-    /// The start of a match: nothing on the map, one seat per entry of
-    /// `teams`, each holding one shipyard and one constructor in reserve
-    /// and [`STARTING_STOCK`] to spend.
-    pub fn start(clock: Tick, gravity: Gravity, rocks: Vec<Rock>, teams: &[TeamId]) -> State {
+    /// The start of the match `setup` names: nothing on the map, one seat
+    /// per team it seats, each holding one shipyard and one constructor in
+    /// reserve and [`STARTING_STOCK`] to spend.
+    ///
+    /// The rocks are [`Belt::fixed`] whatever the seed says; the seed is
+    /// carried and hashed, and map generation lays the belt from it when
+    /// that lands.
+    pub fn start(setup: &Setup) -> State {
         let reserve = BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]);
-        let seats = teams
+        let seats = setup
+            .teams()
             .iter()
             .map(|team| Seat::new(*team, STARTING_STOCK, reserve.clone()))
             .collect();
-        State::new(clock, gravity, Roster::shipped(), rocks, seats)
+        State::new(
+            setup.clock(),
+            setup.seed(),
+            Belt::GRAVITY,
+            Roster::shipped(),
+            Belt::fixed(Belt::GRAVITY),
+            seats,
+        )
     }
 }
 

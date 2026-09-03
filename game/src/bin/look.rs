@@ -16,12 +16,14 @@ use mirage_engine::headless::Session;
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
-use probe_game::camera::BeltCamera;
-use probe_game::glyph::Glyph;
-use probe_game::glyph_quad::GlyphQuad;
-use probe_game::scene::{Arc, EntityView, Fill, FlightLine, Mark, RingView, RockView, Run, Scene};
-use probe_game::screen::Screen;
-use probe_game::{belt, hud};
+use probe_game::display::camera::BeltCamera;
+use probe_game::display::glyph::Glyph;
+use probe_game::display::glyph_quad::GlyphQuad;
+use probe_game::display::scene::{
+    Arc, EntityView, Fill, FlightLine, Mark, RingView, RockView, Run, Scene,
+};
+use probe_game::display::screen::Screen;
+use probe_game::display::{belt, hud};
 use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD};
 use probe_sim::{Band, Place, RockId, RowId, SeatId, Vec3};
 

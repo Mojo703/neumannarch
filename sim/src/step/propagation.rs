@@ -126,6 +126,7 @@ mod tests {
             World {
                 state: State::new(
                     Tick(1_000_000),
+                    0,
                     gravity,
                     Roster::shipped(),
                     vec![rock(RADIUS, gravity), rock(RADIUS + 1_000.0, gravity)],

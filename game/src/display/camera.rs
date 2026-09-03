@@ -67,7 +67,7 @@ impl BeltCamera {
     pub fn pan_by_pixels(&mut self, delta: math::Vec2, window: math::UVec2) {
         let Some(pixels_per_meter) = self
             .engine_camera()
-            .pixels_per_meter(engine_point(self.focus), window)
+            .pixels_per_meter(math::Vec3::ZERO, window)
         else {
             return;
         };
@@ -98,13 +98,27 @@ impl BeltCamera {
     }
 
     /// The engine camera drawing this view: the eye at the tilt offset from
-    /// the focus, looking at it. Build it once per frame; a
-    /// [`crate::screen::Screen`] holds it for everything that projects.
+    /// the focus, looking at it, both relative to the focus. Build it once
+    /// per frame; a [`crate::display::screen::Screen`] holds it for everything that
+    /// projects, and converts every other point the same way so the engine
+    /// never sees an absolute coordinate.
     pub fn engine_camera(&self) -> Camera {
         Camera::new(
-            View::look_at(engine_point(self.eye()), engine_point(self.focus)),
+            View::look_at(self.local(self.eye()), math::Vec3::ZERO),
             Projection::perspective(Self::FOV_DEGREES),
         )
+    }
+
+    /// `point`, in sim meters, relative to the focus, as the engine's
+    /// `f32` vector.
+    ///
+    /// The engine's `f32` has about a meter of resolution at the belt's
+    /// 1e7 m scale; converting relative to the focus, which never strays
+    /// far in sim meters from what the frame draws, keeps every draw and
+    /// projection well inside `f32`'s precision.
+    pub(crate) fn local(&self, point: Vec3) -> math::Vec3 {
+        let relative = point - self.focus;
+        math::Vec3::new(relative.x as f32, relative.y as f32, relative.z as f32)
     }
 
     /// Where the eye stands: `distance` from the focus, `TILT_DEGREES`
@@ -124,11 +138,6 @@ impl BeltCamera {
 /// passes.
 fn circular_rate(radius: f64, gravity: Gravity) -> Option<f64> {
     (radius > 0.0).then(|| (gravity.mu() / radius.powi(3)).sqrt())
-}
-
-/// `point`, in sim meters, as the engine's `f32` vector.
-pub(crate) fn engine_point(point: Vec3) -> math::Vec3 {
-    math::Vec3::new(point.x as f32, point.y as f32, point.z as f32)
 }
 
 #[cfg(test)]
@@ -190,7 +199,7 @@ mod tests {
     #[test]
     fn a_pointer_drag_keeps_the_belt_under_the_pointer() {
         let camera = over_the_belt();
-        let screen = crate::screen::Screen::of(&camera, WINDOW, 1.0);
+        let screen = crate::display::screen::Screen::of(&camera, WINDOW, 1.0);
         // The point under the pointer is the focus: a perspective view
         // keeps the drag exact at one depth, and that is the depth the pan
         // is scaled at.
@@ -201,7 +210,7 @@ mod tests {
         let mut dragged = camera;
         dragged.pan_by_pixels(delta, WINDOW);
 
-        let now = crate::screen::Screen::of(&dragged, WINDOW, 1.0)
+        let now = crate::display::screen::Screen::of(&dragged, WINDOW, 1.0)
             .pixel_of(held)
             .expect("the point stays on screen");
         // The pan is scaled at the focus's depth, and the drag itself
@@ -234,7 +243,7 @@ mod tests {
         };
         let (first, second) = (body(0), body(1));
         let camera = BeltCamera::new(first.pos, *BeltCamera::ZOOM_RANGE.end());
-        let screen = crate::screen::Screen::of(&camera, WINDOW, 1.0);
+        let screen = crate::display::screen::Screen::of(&camera, WINDOW, 1.0);
 
         let apart = screen
             .pixel_of(second.pos)

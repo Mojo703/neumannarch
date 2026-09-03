@@ -8,9 +8,9 @@ use probe_sim::roster::Roster;
 use probe_sim::state::view::{MassClass, View};
 use probe_sim::{Band, Place, RockId, RowId, SeatId, Vec3};
 
-use crate::fights::Fights;
-use crate::glyph::Glyph;
-use crate::send::Sending;
+use crate::display::fights::Fights;
+use crate::display::glyph::Glyph;
+use crate::display::send::Sending;
 
 /// How a glyph on a ring is drawn: the state of the unit it stands for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -418,18 +418,10 @@ fn nearest_body(bodies: &[(RockId, Body)], pos: Vec3) -> Option<Body> {
 #[cfg(test)]
 mod tests {
     use probe_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
-    use probe_sim::session::Session;
-    use probe_sim::state::{Command, Issued, State};
-    use probe_sim::{TICKS_PER_SECOND, Tick};
 
     use super::*;
-    use crate::glyph::Frame;
-
-    /// The seat every test plays.
-    const PLAYER: SeatId = SeatId(0);
-
-    /// A clock no test reaches.
-    const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+    use crate::display::glyph::Frame;
+    use crate::display::local::{Local, PLAYER};
 
     fn inner(rock: u32) -> Place {
         Place {
@@ -445,56 +437,20 @@ mod tests {
         }
     }
 
-    fn start() -> Session {
-        Session::new(State::start(
-            CLOCK,
-            probe_sim::belt::Belt::GRAVITY,
-            probe_sim::belt::Belt::fixed(probe_sim::belt::Belt::GRAVITY),
-            &[probe_sim::TeamId(0), probe_sim::TeamId(1)],
-        ))
-    }
-
-    /// One tick with the player's wants.
-    fn want(session: &mut Session, wants: &[(Place, RowId, u32)]) {
-        let issued = wants
-            .iter()
-            .map(|(place, row, count)| Issued {
-                seat: PLAYER,
-                command: Command::Want {
-                    place: *place,
-                    row: *row,
-                    count: *count,
-                },
-            })
-            .collect();
-        assert!(session.advance(issued).is_empty(), "a want was rejected");
-    }
-
-    /// `ticks` ticks with no wants.
-    fn run(session: &mut Session, ticks: u64) {
-        for _ in 0..ticks {
-            session.advance(Vec::new());
-        }
-    }
-
-    fn view(session: &Session) -> View {
-        View::of(session.state(), PLAYER, session.shots())
-    }
-
-    /// The scene of `session`'s tick, with nothing selected or hovered.
-    fn scene(session: &Session, fights: &Fights) -> Scene {
-        drawn(session, fights, None, None)
+    /// The scene of the match's tick, with nothing selected or hovered.
+    fn scene(local: &Local, fights: &Fights) -> Scene {
+        drawn(local, fights, None, None)
     }
 
     fn drawn(
-        session: &Session,
+        local: &Local,
         fights: &Fights,
         selection: Option<Place>,
         hover: Option<Hover>,
     ) -> Scene {
         Scene::from_view(
-            &view(session),
-            session.state().roster(),
+            &local.view(),
+            local.session().state().roster(),
             Client {
                 selection,
                 hover,
@@ -517,10 +473,10 @@ mod tests {
 
     #[test]
     fn every_rock_draws_an_inner_ring_and_an_empty_outer_ring_draws_nothing() {
-        let session = start();
-        let scene = scene(&session, &Fights::default());
+        let local = Local::start(2);
+        let scene = scene(&local, &Fights::default());
 
-        assert_eq!(scene.rocks.len(), session.state().rocks().len());
+        assert_eq!(scene.rocks.len(), local.session().state().rocks().len());
         assert_eq!(
             scene.rings.len(),
             scene.rocks.len(),
@@ -540,10 +496,10 @@ mod tests {
 
     #[test]
     fn a_placed_structure_draws_one_solid_square_on_its_ring() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), SHIPYARD, 1)]);
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), SHIPYARD, 1)]);
 
-        let marks = run_at(&scene(&session, &Fights::default()), inner(0)).expect("its ring");
+        let marks = run_at(&scene(&local, &Fights::default()), inner(0)).expect("its ring");
 
         assert_eq!(marks.len(), 1);
         assert_eq!(marks[0].fill, Fill::Solid);
@@ -553,15 +509,12 @@ mod tests {
 
     #[test]
     fn a_frame_fills_where_a_builder_stands_and_is_dashed_where_none_does() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), SHIPYARD, 1)]);
-        want(
-            &mut session,
-            &[(inner(0), STORAGE, 1), (inner(5), FRIGATE, 1)],
-        );
-        run(&mut session, 60);
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), SHIPYARD, 1)]);
+        local.want(&[(inner(0), STORAGE, 1), (inner(5), FRIGATE, 1)]);
+        local.run(60);
 
-        let scene = scene(&session, &Fights::default());
+        let scene = scene(&local, &Fights::default());
 
         let built = run_at(&scene, inner(0)).expect("the shipyard's ring");
         let filling = built
@@ -585,9 +538,9 @@ mod tests {
 
     #[test]
     fn a_selected_rock_draws_both_its_rings_even_holding_nothing() {
-        let session = start();
+        let local = Local::start(2);
 
-        let scene = drawn(&session, &Fights::default(), Some(inner(3)), None);
+        let scene = drawn(&local, &Fights::default(), Some(inner(3)), None);
 
         for place in [inner(3), outer(3)] {
             let ring = scene
@@ -602,19 +555,16 @@ mod tests {
 
     #[test]
     fn a_flying_unit_carries_a_flight_line_and_no_glyph_on_a_ring() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), CONSTRUCTOR, 1)]);
-        want(
-            &mut session,
-            &[(inner(0), CONSTRUCTOR, 0), (inner(1), CONSTRUCTOR, 1)],
-        );
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), CONSTRUCTOR, 1)]);
+        local.want(&[(inner(0), CONSTRUCTOR, 0), (inner(1), CONSTRUCTOR, 1)]);
         assert_eq!(
-            session.state().flights().count(),
+            local.session().state().flights().count(),
             1,
             "the send is one flight"
         );
 
-        let scene = scene(&session, &Fights::default());
+        let scene = scene(&local, &Fights::default());
 
         assert_eq!(scene.flights.len(), 1);
         assert_eq!(scene.flights[0].to, RockId(1));
@@ -627,8 +577,8 @@ mod tests {
 
     #[test]
     fn the_plus_band_previews_one_dim_hollow_glyph_at_the_end_of_the_run() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), SHIPYARD, 1)]);
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), SHIPYARD, 1)]);
         let hover = Hover::Wheel {
             place: inner(0),
             row: SHIPYARD,
@@ -636,7 +586,7 @@ mod tests {
         };
 
         let marks = run_at(
-            &drawn(&session, &Fights::default(), Some(inner(0)), Some(hover)),
+            &drawn(&local, &Fights::default(), Some(inner(0)), Some(hover)),
             inner(0),
         )
         .expect("its ring");
@@ -650,8 +600,8 @@ mod tests {
 
     #[test]
     fn the_minus_band_dims_the_last_glyph_of_its_row() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), SHIPYARD, 1)]);
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), SHIPYARD, 1)]);
         let hover = Hover::Wheel {
             place: inner(0),
             row: SHIPYARD,
@@ -659,7 +609,7 @@ mod tests {
         };
 
         let marks = run_at(
-            &drawn(&session, &Fights::default(), Some(inner(0)), Some(hover)),
+            &drawn(&local, &Fights::default(), Some(inner(0)), Some(hover)),
             inner(0),
         )
         .expect("its ring");
@@ -671,20 +621,15 @@ mod tests {
 
     #[test]
     fn a_send_drag_dims_the_source_and_shows_the_destination_hollow() {
-        let mut session = start();
-        want(&mut session, &[(inner(0), CONSTRUCTOR, 1)]);
+        let mut local = Local::start(2);
+        local.want(&[(inner(0), CONSTRUCTOR, 1)]);
         let sending = Sending {
             from: inner(0),
             to: inner(1),
             count: 1,
         };
 
-        let scene = drawn(
-            &session,
-            &Fights::default(),
-            None,
-            Some(Hover::Send(sending)),
-        );
+        let scene = drawn(&local, &Fights::default(), None, Some(Hover::Send(sending)));
 
         let source = run_at(&scene, inner(0)).expect("the source ring");
         assert_eq!(source.len(), 1);

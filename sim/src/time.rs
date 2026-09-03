@@ -21,6 +21,22 @@ impl Tick {
         Tick(self.0 + 1)
     }
 
+    /// The tick before this one; `None` at the start of the match.
+    pub fn previous(self) -> Option<Tick> {
+        self.0.checked_sub(1).map(Tick)
+    }
+
+    /// The tick `ticks` earlier, or the start of the match when it is
+    /// nearer than that.
+    pub fn back(self, ticks: u32) -> Tick {
+        Tick(self.0.saturating_sub(u64::from(ticks)))
+    }
+
+    /// The tick `ticks` later.
+    pub fn ahead(self, ticks: u32) -> Tick {
+        Tick(self.0 + u64::from(ticks))
+    }
+
     /// Seconds since the match began.
     pub fn seconds(self) -> f64 {
         self.0 as f64 / f64::from(TICKS_PER_SECOND)

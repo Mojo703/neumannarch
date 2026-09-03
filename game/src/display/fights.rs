@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use probe_sim::state::view::View;
 use probe_sim::{Place, SeatId, TICKS_PER_SECOND, Tick};
 
-use crate::scene::Arc;
+use crate::display::scene::Arc;
 
 /// How long damage trails the arc's drain as a red segment: a second and a
 /// half, in ticks.
@@ -120,9 +120,8 @@ fn totals(view: &View) -> BTreeMap<(Place, SeatId), f64> {
 mod tests {
     use probe_sim::belt::Belt;
     use probe_sim::orbit::Body;
-    use probe_sim::state::State;
     use probe_sim::state::view::{Exchange, Seen};
-    use probe_sim::{Band, EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
+    use probe_sim::{Band, EntityId, Materials, RockId, RowId, Stockpile, Vec3};
 
     use super::*;
 
@@ -136,13 +135,6 @@ mod tests {
     /// A view of one seat holding `hp` hit points at [`PLACE`] at `tick`,
     /// with shots exchanged there where `shooting`.
     fn view(tick: u64, hp: f64, shooting: bool) -> View {
-        let standings = State::start(
-            Tick(1),
-            Belt::GRAVITY,
-            Belt::fixed(Belt::GRAVITY),
-            &[TeamId(0)],
-        )
-        .standings();
         View {
             seat: SEAT,
             tick: Tick(tick),
@@ -171,7 +163,7 @@ mod tests {
                 false => Vec::new(),
             },
             terrain: Vec::new(),
-            standings,
+            standings: None,
         }
     }
 

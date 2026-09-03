@@ -2,10 +2,9 @@
 
 use mirage_engine::prelude::*;
 
-use crate::camera::engine_point;
-use crate::glyph_quad::GlyphQuad;
-use crate::scene::{EntityView, RockView, Scene};
-use crate::screen::Screen;
+use crate::display::glyph_quad::GlyphQuad;
+use crate::display::scene::{EntityView, RockView, Scene};
+use crate::display::screen::Screen;
 
 /// A rock mesh's density; see [`Sphere::subdivisions`].
 const ROCK_SUBDIVISIONS: u32 = 2;
@@ -29,18 +28,18 @@ where
     ctx.light(Light::directional(SUN, SUN_COLOUR));
 
     for rock in &scene.rocks {
-        ctx.draw(rock_instance::<G>(rock));
+        ctx.draw(rock_instance::<G>(rock, screen));
     }
 
     for entity in &scene.entities {
         let Some(meters_per_point) = screen.meters_per_point(entity.pos) else {
             continue;
         };
-        ctx.draw(ship_instance::<G>(entity, meters_per_point));
+        ctx.draw(ship_instance::<G>(entity, meters_per_point, screen));
     }
 }
 
-fn rock_instance<G: Game>(rock: &RockView) -> Instance<Sphere, G::Styles> {
+fn rock_instance<G: Game>(rock: &RockView, screen: &Screen) -> Instance<Sphere, G::Styles> {
     let diameter = (2.0 * rock.radius) as f32;
     Sphere {
         subdivisions: ROCK_SUBDIVISIONS,
@@ -48,19 +47,20 @@ fn rock_instance<G: Game>(rock: &RockView) -> Instance<Sphere, G::Styles> {
     .at(Transform::from_scale_rotation_translation(
         Vec3::splat(diameter),
         Quat::IDENTITY,
-        engine_point(rock.pos),
+        screen.local(rock.pos),
     ))
     .material(Material::lit(ROCK_COLOUR))
 }
 
-/// `entity`'s glyph at a fixed screen size: [`crate::glyph::HALF`] points
+/// `entity`'s glyph at a fixed screen size: [`crate::display::glyph::HALF`] points
 /// each way, in meters at its own depth, so the belt's ships and the HUD's
 /// runs agree in size.
 fn ship_instance<G: Game>(
     entity: &EntityView,
     meters_per_point: f32,
+    screen: &Screen,
 ) -> Instance<GlyphQuad, G::Styles> {
-    let side = 2.0 * crate::glyph::HALF * meters_per_point;
+    let side = 2.0 * crate::display::glyph::HALF * meters_per_point;
     GlyphQuad {
         glyph: entity.glyph.clone(),
         seat: entity.seat,
@@ -68,7 +68,7 @@ fn ship_instance<G: Game>(
     .at(Transform::from_scale_rotation_translation(
         Vec3::splat(side),
         Quat::IDENTITY,
-        engine_point(entity.pos),
+        screen.local(entity.pos),
     ))
     .billboard()
 }

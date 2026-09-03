@@ -4,10 +4,13 @@
 
 use core::time::Duration;
 
+pub use history::{Record, Retention, Rewound, Session, WINDOW_SECONDS};
 pub use ids::{EntityId, FlightId, RockId, RowId, SeatId, TeamId};
 pub use materials::{Materials, Stockpile};
 pub use place::{Band, Place, Post};
 pub use real::Real;
+pub use setup::{BadSetup, MAX_SEATS, Setup};
+pub use state::{Batch, Refused, Sequence, Stamped};
 pub use time::{Moment, Tick};
 pub use vec3::Vec3;
 
@@ -21,13 +24,14 @@ pub const TICK: Duration = Duration::from_secs(1)
     .unwrap();
 
 pub mod belt;
+pub mod history;
 mod ids;
 mod materials;
 pub mod orbit;
 mod place;
 mod real;
 pub mod roster;
-pub mod session;
+mod setup;
 pub mod state;
 pub mod step;
 mod time;

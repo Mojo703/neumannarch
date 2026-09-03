@@ -5,20 +5,21 @@ use mirage_engine::egui;
 use mirage_engine::math::{UVec2, Vec2};
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
-use probe_game::camera::BeltCamera;
-use probe_game::fights::Fights;
-use probe_game::glyph_quad::GlyphQuad;
-use probe_game::scene::{Client, Hover, Scene, WheelBand};
-use probe_game::screen::Screen;
-use probe_game::send::Sending;
-use probe_game::wheel::Wheel;
-use probe_game::{belt, hud};
-use probe_sim::belt::Belt;
-use probe_sim::session::Session;
+use probe_game::display::camera::BeltCamera;
+use probe_game::display::fights::Fights;
+use probe_game::display::glyph_quad::GlyphQuad;
+use probe_game::display::scene::{Client, Hover, Scene, WheelBand};
+use probe_game::display::screen::Screen;
+use probe_game::display::send::Sending;
+use probe_game::display::wheel::Wheel;
+use probe_game::display::{belt, hud};
+use probe_sim::state::Command;
 use probe_sim::state::view::View;
-use probe_sim::state::{Command, Issued, State};
 use probe_sim::step::fire::Shots;
-use probe_sim::{Band, Place, RowId, SeatId, TICKS_PER_SECOND, TeamId, Tick, Vec3};
+use probe_sim::{
+    Band, Place, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId,
+    Tick, Vec3,
+};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
@@ -30,6 +31,9 @@ const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
 /// The seat the player holds. Seat one is an opponent that issues nothing.
 const PLAYER: SeatId = SeatId(0);
+
+/// The map's seed this match plays.
+const SEED: u64 = 1;
 
 /// The eye-to-focus distance a match opens at, in meters: a region of the
 /// belt, so the player can pick a rock to start on.
@@ -110,6 +114,8 @@ struct Holding {
 /// pointer is doing to it.
 struct Play {
     session: Session,
+    /// The player's own count of its commands, which stamps every one.
+    sequence: Sequence,
     view: View,
     fights: Fights,
     camera: BeltCamera,
@@ -117,8 +123,6 @@ struct Play {
     hover: Option<Hover>,
     drag: Option<Drag>,
     holding: Option<Holding>,
-    /// Commands the input has issued since the last tick.
-    pending: Vec<Issued>,
     paused: bool,
     /// Whether the focus has followed the player's first placement yet.
     followed: bool,
@@ -187,16 +191,15 @@ impl Game for Play {
     type Sources = NoSources;
     type Styles = ();
 
-    /// Advances the match by the commands the input issued, then reads the
-    /// tick's view. A paused match, and one past its clock, advances
-    /// nothing, so the HUD stops with it.
+    /// Advances the match, whose tick already holds the commands the input
+    /// issued, then reads the tick's view. A paused match, and one past its
+    /// clock, advances nothing.
     fn tick(&mut self, _ctx: &mut TickCtx<'_, Self>) {
         if self.paused || self.over() {
             return;
         }
-        let issued = core::mem::take(&mut self.pending);
-        self.session.advance(issued);
-        self.view = View::of(self.session.state(), PLAYER, self.session.shots());
+        self.session.advance();
+        self.view = self.viewed();
         self.fights.observe(&self.view);
         self.camera
             .advance(probe_sim::TICK.as_secs_f64(), self.view.gravity);
@@ -245,16 +248,14 @@ impl Game for Play {
 
 impl Play {
     fn new() -> Play {
-        let state = State::start(
-            CLOCK,
-            Belt::GRAVITY,
-            Belt::fixed(Belt::GRAVITY),
-            &[TeamId(0), TeamId(1)],
-        );
-        let view = View::of(&state, PLAYER, &Shots::default());
+        let setup =
+            Setup::new(vec![TeamId(0), TeamId(1)], SEED, CLOCK).expect("two seats are a match");
+        let session = Session::new(setup, Retention::shipped(), &[PLAYER]);
+        let view = View::of(session.state(), PLAYER, &Shots::default());
         let camera = BeltCamera::new(belt_centre(&view), OPENING_ZOOM);
         Play {
-            session: Session::new(state),
+            session,
+            sequence: Sequence::new(PLAYER),
             view,
             fights: Fights::default(),
             camera,
@@ -262,33 +263,41 @@ impl Play {
             hover: None,
             drag: None,
             holding: None,
-            pending: Vec::new(),
             paused: false,
             followed: false,
             pointer: Vec2::ZERO,
         }
     }
 
+    /// The player's fogged view of the tick the session shows.
+    fn viewed(&self) -> View {
+        let quiet = Shots::default();
+        let shots = self
+            .session
+            .outcome()
+            .map_or(&quiet, |outcome| &outcome.shots);
+        View::of(self.session.state(), PLAYER, shots)
+    }
+
     /// True once the clock has run out, when the standings are the one
-    /// panel DISPLAY.md allows.
+    /// panel DISPLAY.md allows. The view carries them only then.
     fn over(&self) -> bool {
-        self.view.standings.over()
+        self.view.standings.is_some()
     }
 
     /// The panel the match shows, if any: the pause menu, or the standings
     /// once the clock has run out.
     fn menu(&self) -> Option<Menu> {
-        match (self.over(), self.paused) {
-            (true, _) => Some(Menu::Standings(
-                self.view
-                    .standings
+        match (&self.view.standings, self.paused) {
+            (Some(standings), _) => Some(Menu::Standings(
+                standings
                     .teams()
                     .iter()
                     .map(|team| format!("team {} — {} rocks", team.team.0, team.rocks))
                     .collect(),
             )),
-            (false, true) => Some(Menu::Paused),
-            (false, false) => None,
+            (None, true) => Some(Menu::Paused),
+            (None, false) => None,
         }
     }
 
@@ -374,12 +383,14 @@ impl Play {
             .map_or(0, |wanted| wanted.want)
     }
 
-    /// Issues `command` as the player's, for the next tick to apply.
+    /// Issues `command` as the player's at the tick the session shows,
+    /// which is the tick it will be applied at here and on every other
+    /// machine.
     fn issue(&mut self, command: Command) {
-        self.pending.push(Issued {
-            seat: PLAYER,
-            command,
-        });
+        let stamped = self.sequence.stamp(self.session.state().tick(), command);
+        // A frame issues far fewer commands than the tick's cap, and the
+        // tick shown is not stepped yet, so this is never refused.
+        let _ = self.session.insert(stamped);
     }
 
     /// Reads one frame of input: the pause key, the camera, and the
@@ -594,7 +605,7 @@ mod tests {
     use std::path::PathBuf;
 
     use mirage_engine::headless::Session as Offscreen;
-    use probe_game::scene::Fill;
+    use probe_game::display::scene::Fill;
     use probe_sim::RockId;
     use probe_sim::roster::SHIPYARD;
 
@@ -640,7 +651,8 @@ mod tests {
             .map(|step| {
                 let angle = core::f32::consts::TAU * step as f32 / 3_600.0;
                 let (sin, cos) = angle.sin_cos();
-                let out = probe_game::wheel::RADIUS + probe_game::wheel::BAND_WIDTH * 0.5;
+                let out = probe_game::display::wheel::RADIUS
+                    + probe_game::display::wheel::BAND_WIDTH * 0.5;
                 egui::pos2(centre.x + out * sin, centre.y - out * cos)
             })
             .find(|at| wheel.slot_at(*at) == Some((row, WheelBand::Plus)))

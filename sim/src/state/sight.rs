@@ -79,6 +79,7 @@ mod tests {
         let seat = |team| Seat::new(TeamId(team), Materials::ZERO, BTreeMap::new());
         State::new(
             Tick(120_000),
+            0,
             MU,
             Roster::shipped(),
             vec![rock],

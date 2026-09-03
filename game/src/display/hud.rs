@@ -5,13 +5,13 @@ use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use probe_sim::state::view::MassClass;
 use probe_sim::{Band, RowId};
 
-use crate::glyph;
-use crate::glyph_quad::seat_color32;
-use crate::ring::{Geometry, Layout, Span};
-use crate::scene::{Arc, Blip, Hover, RingView, Scene, WheelBand};
-use crate::screen::Screen;
-use crate::stencil::Stencil;
-use crate::wheel::Wheel;
+use crate::display::glyph;
+use crate::display::glyph_quad::seat_color32;
+use crate::display::ring::{Geometry, Layout, Span};
+use crate::display::scene::{Arc, Blip, Hover, RingView, Scene, WheelBand};
+use crate::display::screen::Screen;
+use crate::display::stencil::Stencil;
+use crate::display::wheel::Wheel;
 
 /// The inner ring's screen radius, in points.
 pub const INNER_RADIUS: f32 = 40.0;
@@ -22,7 +22,8 @@ pub const OUTER_RADIUS: f32 = 64.0;
 /// The wheel stands clear of both rings, so a click on one of its bands is
 /// never a click on a ring.
 const _: () = assert!(
-    crate::wheel::RADIUS - crate::wheel::BAND_WIDTH > OUTER_RADIUS && OUTER_RADIUS > INNER_RADIUS
+    crate::display::wheel::RADIUS - crate::display::wheel::BAND_WIDTH > OUTER_RADIUS
+        && OUTER_RADIUS > INNER_RADIUS
 );
 
 /// A stacked glyph's inward step per card, in points.
@@ -242,13 +243,15 @@ mod tests {
     use super::*;
 
     /// A run of `marks` marks, whose glyphs no test reads.
-    fn run(marks: usize) -> crate::scene::Run {
-        crate::scene::Run {
+    fn run(marks: usize) -> crate::display::scene::Run {
+        crate::display::scene::Run {
             seat: probe_sim::SeatId(0),
             marks: (0..marks)
-                .map(|_| crate::scene::Mark {
-                    glyph: crate::glyph::Glyph::of(&probe_sim::roster::Roster::shipped()[RowId(0)]),
-                    fill: crate::scene::Fill::Solid,
+                .map(|_| crate::display::scene::Mark {
+                    glyph: crate::display::glyph::Glyph::of(
+                        &probe_sim::roster::Roster::shipped()[RowId(0)],
+                    ),
+                    fill: crate::display::scene::Fill::Solid,
                     dim: false,
                 })
                 .collect(),

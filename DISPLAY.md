@@ -2,8 +2,9 @@
 
 What the player sees, as the target. The only input is the sim's fogged
 view. Nothing is a numeral, a label, or a panel; every fact is a shape, a
-position, a colour, or a line in the belt. The pause menu is the one
-exception. Every control shows, while hovered, the change to a want it
+position, a colour, or a line in the belt. Inside a match the pause and
+results screens are the only panels; outside a match every screen is a
+panel in the game's style (Screens, below). Every control shows, while hovered, the change to a want it
 will make; what the sim does about that change is drawn in the next tick
 by the same rules as everything else, never predicted by the client.
 
@@ -129,6 +130,40 @@ clicking a rock's ring makes it the focus.
 Enemy ships and their glyphs are drawn on the belt only inside sight. A
 radar contact is a dot with a short velocity streak and no glyph, on the
 HUD. Rocks are always drawn, on the belt.
+
+## Screens
+
+Outside a match the game is a sequence of full-window screens, drawn as
+panels in one style: the HUD's palette, thin lines, no window chrome, the
+roster's glyphs from the same rasteriser as the belt's ships. No screen
+floats over another; each replaces the last.
+
+- **Title.** Skirmish, Host, Join, Settings, Quit, in a column. Join
+  takes an address.
+- **Lobby.** One screen for skirmish and multiplayer. Its centre is the
+  belt the match will be played on, rendered from the seed by the same
+  belt and HUD code as the match, every rock's ring drawn, regions tinted
+  by their caps; it redraws the instant the seed changes. Down the left,
+  one row per seat: its colour, who holds it (the player's name, a bot's
+  personality, open, or closed, as DESIGN.md's lobby rule names them),
+  its team, and its readiness. A row the
+  viewer owns is editable where DESIGN.md's lobby rule allows; the rest
+  is not. Down the right, the host's shape: seed with a regenerate action,
+  clock, team layout. Across the bottom: Ready for a guest, Start for the
+  host, enabled by the same rule, and Leave. A guest sees the host's edits
+  as they land.
+- **Loading.** The belt from the lobby, still, until every machine has
+  built the match and agreed the first hash.
+- **Play.** The match, as every section above describes. Escape opens the
+  pause screen over it: Resume, Surrender, Leave. Play continues under it
+  in multiplayer and stops under it in a skirmish. Play has one held
+  state: in multiplayer, when a peer has fallen behind by the stated
+  span, the match holds, the HUD dims, and the waiting seats' colours are
+  shown; it resumes by itself.
+- **Results.** At the clock or elimination: the final belt under the
+  standings, rocks held and army value per team in the match's own
+  glyphs and colours with the winner named, and Rematch, which returns to
+  the lobby with its shape kept, or Leave to the title.
 
 ## Judging
 

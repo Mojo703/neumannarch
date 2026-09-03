@@ -4,7 +4,7 @@
 use crate::ids::{EntityId, FlightId, SeatId};
 use crate::materials::Materials;
 use crate::roster::Kind;
-use crate::state::{Frame, Issued, Motion, Rejected, State};
+use crate::state::{Batch, Frame, Issued, Motion, Rejected, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::{Extraction, Income};
 use crate::step::fire::{Fire, Shots};
@@ -13,7 +13,7 @@ use crate::step::maneuver::Maneuver;
 use crate::step::propagation::{Moved, Propagation};
 
 /// What one step reports beside the next state.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
     /// Every command that changed nothing, each with why, in the order
     /// they were applied in.
@@ -28,11 +28,11 @@ impl State {
     /// copy as an immutable snapshot, the effects applied in phase order,
     /// and the tick advanced. A rejected command changes nothing and comes
     /// back by name.
-    pub fn step(&self, issued: &[Issued]) -> (State, Outcome) {
+    pub fn step(&self, issued: &Batch) -> (State, Outcome) {
         let mut applied = self.clone();
         let rejected = issued
             .iter()
-            .filter_map(|issued| applied.apply(*issued).err().map(|why| (*issued, why)))
+            .filter_map(|issued| applied.apply(issued).err().map(|why| (issued, why)))
             .collect();
         let snap = &applied;
         let thrusts = Maneuver::of(snap).run();
@@ -297,7 +297,8 @@ mod tests {
     use crate::place::{Band, Place, Post};
     use crate::roster::Roster;
     use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
-    use crate::state::{Command, Flight, Seat};
+    use crate::setup::Setup;
+    use crate::state::{Command, Flight, MAX_WANT, Seat};
     use crate::step::fire::Hit;
     use crate::time::Tick;
 
@@ -306,7 +307,8 @@ mod tests {
 
     /// A match of one seat per team over the shipped belt.
     fn start(teams: &[TeamId]) -> State {
-        State::start(CLOCK, Belt::GRAVITY, Belt::fixed(Belt::GRAVITY), teams)
+        let setup = Setup::new(teams.to_vec(), 0, CLOCK).expect("a match of these teams");
+        State::start(&setup)
     }
 
     fn inner(rock: u32) -> Place {
@@ -323,18 +325,41 @@ mod tests {
         }
     }
 
+    /// A want of `count` of `row` at `place`, as the seat's first command.
     fn want(seat: u8, place: Place, row: RowId, count: u32) -> Issued {
+        numbered(seat, 0, place, row, count)
+    }
+
+    /// A want as `seat`'s `seq`th command, for a tick that carries more
+    /// than one of a seat's.
+    fn numbered(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
+            seq,
             command: Command::Want { place, row, count },
         }
     }
 
+    /// `issued` as one tick's batch, which must hold every one of them.
+    fn batch(issued: &[Issued]) -> Batch {
+        let mut batch = Batch::new();
+        for issued in issued {
+            assert_eq!(batch.insert(*issued), Ok(()));
+        }
+        batch
+    }
+
     /// One tick with `issued`, which must all be accepted.
     fn tick(state: State, issued: &[Issued]) -> State {
-        let (next, outcome) = state.step(issued);
+        let (next, outcome) = state.step(&batch(issued));
         assert_eq!(outcome.rejected, Vec::new(), "the commands were rejected");
         next
+    }
+
+    /// Why `issued` changed nothing, applied to `state` on its own.
+    fn refusal(state: &State, issued: Issued) -> Option<Rejected> {
+        let (_, outcome) = state.step(&batch(&[issued]));
+        outcome.rejected.first().map(|(_, why)| *why)
     }
 
     /// `ticks` ticks with no commands.
@@ -431,8 +456,8 @@ mod tests {
         let state = tick(
             state,
             &[
-                want(0, inner(0), CONSTRUCTOR, 0),
-                want(0, inner(1), CONSTRUCTOR, 1),
+                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
+                numbered(0, 1, inner(1), CONSTRUCTOR, 1),
             ],
         );
 
@@ -461,8 +486,8 @@ mod tests {
         let state = tick(
             state,
             &[
-                want(0, inner(0), SHIPYARD, 1),
-                want(0, inner(0), CONSTRUCTOR, 1),
+                numbered(0, 0, inner(0), SHIPYARD, 1),
+                numbered(0, 1, inner(0), CONSTRUCTOR, 1),
             ],
         );
         let stock = state[SeatId(0)].stockpile().stock();
@@ -509,8 +534,8 @@ mod tests {
         let state = tick(
             state,
             &[
-                want(0, inner(0), SHIPYARD, 1),
-                want(0, inner(0), FRIGATE, 1),
+                numbered(0, 0, inner(0), SHIPYARD, 1),
+                numbered(0, 1, inner(0), FRIGATE, 1),
             ],
         );
         // The frigate costs a hundred and twenty cost units at fifteen a
@@ -546,8 +571,8 @@ mod tests {
         let state = tick(
             state,
             &[
-                want(0, inner(0), SHIPYARD, 1),
-                want(0, inner(0), FRIGATE, 1),
+                numbered(0, 0, inner(0), SHIPYARD, 1),
+                numbered(0, 1, inner(0), FRIGATE, 1),
                 want(1, inner(0), CONSTRUCTOR, 1),
             ],
         );
@@ -567,8 +592,8 @@ mod tests {
         let state = tick(
             state,
             &[
-                want(1, inner(0), CONSTRUCTOR, 0),
-                want(1, inner(1), CONSTRUCTOR, 1),
+                numbered(1, 1, inner(0), CONSTRUCTOR, 0),
+                numbered(1, 2, inner(1), CONSTRUCTOR, 1),
             ],
         );
 
@@ -587,15 +612,67 @@ mod tests {
             Seat::new(TeamId(0), Materials::ZERO, BTreeMap::new()),
             Seat::new(TeamId(1), Materials::ZERO, BTreeMap::from([(SHIPYARD, 1)])),
         ];
-        let state = State::new(CLOCK, Belt::GRAVITY, Roster::shipped(), rocks, seats);
+        let state = State::new(CLOCK, 0, Belt::GRAVITY, Roster::shipped(), rocks, seats);
 
-        let mut state = tick(state, &[]);
+        let state = tick(state, &[]);
 
         assert!(!state[SeatId(0)].alive());
         assert!(state[SeatId(1)].alive());
         assert_eq!(
-            state.apply(want(0, inner(0), SHIPYARD, 1)),
-            Err(Rejected::DeadSeat)
+            refusal(&state, want(0, inner(0), SHIPYARD, 1)),
+            Some(Rejected::DeadSeat)
+        );
+    }
+
+    #[test]
+    fn a_want_the_state_cannot_take_is_rejected_by_name_and_changes_nothing() {
+        let state = start(&[TeamId(0)]);
+        let outer = Place {
+            rock: RockId(0),
+            band: Band::Outer,
+        };
+
+        let refusals = [
+            (want(9, inner(0), SHIPYARD, 1), Rejected::NoSuchSeat),
+            (want(0, inner(99), SHIPYARD, 1), Rejected::NoSuchRock),
+            (want(0, inner(0), RowId(u16::MAX), 1), Rejected::NoSuchRow),
+            (want(0, outer, SHIPYARD, 1), Rejected::StructureOutside),
+            (want(0, inner(0), FRIGATE, MAX_WANT + 1), Rejected::TooMany),
+        ];
+
+        for (issued, why) in refusals {
+            assert_eq!(refusal(&state, issued), Some(why), "{issued:?}");
+            let (next, _) = state.step(&batch(&[issued]));
+            assert_eq!(next.posts().count(), 0, "{issued:?} left a want behind");
+        }
+        assert_eq!(refusal(&state, want(0, inner(0), FRIGATE, MAX_WANT)), None);
+    }
+
+    #[test]
+    fn a_tick_lands_the_same_state_and_hash_however_its_commands_arrived() {
+        let state = start(&[TeamId(0), TeamId(1)]);
+        // Two wants of one row at one post from one seat: the later `seq`
+        // is the count that stands, so the order is the whole answer.
+        let issued = [
+            numbered(0, 0, inner(0), FRIGATE, 3),
+            numbered(0, 1, inner(0), FRIGATE, 7),
+            numbered(1, 0, inner(2), CONSTRUCTOR, 1),
+            numbered(0, 2, inner(1), SHIPYARD, 1),
+        ];
+
+        let (ordered, _) = state.step(&batch(&issued));
+        let mut scrambled = issued;
+        scrambled.reverse();
+        let (arrived, _) = state.step(&batch(&scrambled));
+
+        assert_eq!(ordered.hash(), arrived.hash());
+        assert_eq!(ordered, arrived);
+        assert_eq!(
+            ordered
+                .wants(post(0, inner(0)))
+                .map(|wants| wants.get(FRIGATE)),
+            Some(7),
+            "the seat's later command is the one that stands"
         );
     }
 
@@ -622,8 +699,9 @@ mod tests {
             reason = "a test measuring wall time is not the sim reading a clock"
         )]
         let started = std::time::Instant::now();
+        let quiet = Batch::new();
         for _ in 0..over {
-            let (next, _) = state.step(&[]);
+            let (next, _) = state.step(&quiet);
             state = next;
         }
         let each = started.elapsed().as_secs_f64() / f64::from(over);

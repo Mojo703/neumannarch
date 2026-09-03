@@ -16,6 +16,20 @@ target-state only. Agents see this file only through their briefs.
   glyph, wheel overlapping the outer ring, uneven wheel glyphs, an opening
   view that frames the region). Rock size, ring radii, glyph sizes and
   colours untouched by the owner's word.
+- Owner ruling 2026-09-03, from play: a post builds one frame of a row at
+  a time. A shortfall of N opens one frame; the next opens when it
+  completes. Rows still build in parallel with each other. DESIGN.md's
+  Build is flow and Shortfall bullets, fulfilment, and the ring's fill
+  states (one filling glyph, the rest hollow) follow. Sim unit, after the
+  harness lands.
+- Owner ruling 2026-09-03, from play: a selected rock owns the focus. The
+  camera's focus is the rock's body each tick while a rock is selected, so
+  the camera moves as if connected to it; a pan releases it to the free
+  focus at the local orbital velocity. DISPLAY.md's Camera section and
+  main.rs follow. Display unit, after the harness lands.
+- Landed 2026-09-03, uncommitted: rendering relative to the focus through
+  `Screen::local`, killing the f32 jitter at belt distance; tests state
+  the guarantee and were shown failing on the old conversion.
 - Held for the owner's play, in one list: heavy-row lag after a send and
   its braking-pull candidate; the planner's earliest-fit arrival; crowd
   packing past half the spacing; unarmed rows never chase; tidal drift at
@@ -31,15 +45,52 @@ target-state only. Agents see this file only through their briefs.
 
 ## Plan, in order
 
-1. The owner plays; their judgement of feel and legibility unlocks the held
-   list above, each item a ruling then a unit.
-2. The scripted agent and `harness` as a binary of `sim`: replay-hash and
-   doubled-tick-rate checks, composition matrices; the repair-versus-fire
-   question goes there first.
-3. Display language for a send that cannot be planned.
-4. Map generation from seed with regional caps; fog in the display;
-   gamepad; the twelve-slot wheel level.
-5. The relay and multiplayer lockstep.
+Settled 2026-09-03 with the owner: the foundation is rollback, not
+lockstep. Every machine runs the whole match; a command applies at the
+tick it was issued; a late command rewinds and replays; hashes compare at
+settled ticks; a bot is a seat run by the machine that added it; the
+lobby is one document the host shapes and guests edit their own seat in;
+the match server holds rooms, mirrors the lobby, forwards, and keeps
+records. ARCHITECTURE.md's Crates, Sim: history, Agents, Protocol, Game:
+net and screens, and Server sections state it; DESIGN.md's Session
+bullets and DISPLAY.md's Screens section state the rules and the look.
+
+1. Reorganise the workspace: done 2026-09-03, gate green on the
+   overseer's run, uncommitted by the owner's word. `agents/` split from
+   `sim`, `sim/src/history/`, `game/src/display/`. The agents' play
+   tests make the gate take about a minute.
+2. Register review of the three rewritten docs: done and applied
+   2026-09-03; the owner's read is pending.
+3. The state system: landed 2026-09-03, gate green and the harness
+   `rollback` check passing on the overseer's run. A full-window rewind
+   (two seconds, 240 ticks, 100 entities) costs 73.5 ms in release;
+   `Retention`'s `every` is the dial. Key files: sim/src/history/
+   {session,snapshots,log,record}.rs, sim/src/setup.rs,
+   sim/src/state/command.rs. Was: `Issued.seq`, `Stamped`, `Setup` and
+   `State::start(setup)`, `History` with `Retention::Window`, `Session`
+   as ARCHITECTURE.md states it, `Record`; the harness gains `rollback`.
+   Red-state refactor over today's `Session`; the owner asked for great
+   care here.
+4. `protocol`: `Lobby`, `LobbyEdit`, `Message`, `Record`, freeze; the
+   serialiser row filled in.
+5. `game` net and screens, Opus: controllers, `Local`, `Flow` and the
+   six screens in the styled register; skirmish with bots playable end to
+   end with no network.
+6. `server` and `Socket`, Opus: rooms, forwarding, hash reports, desync,
+   records; host embeds it; join by address; pacing and the waiting
+   screen. Multiplayer functional.
+7. The two play rulings: one frame per row at a time; a selected rock
+   owns the focus.
+8. A proper asteroid belt and the star: map generation from seed with
+   regional caps; the star as a distant light and disc.
+9. From the harness: seat 0's edge isolated and removed; territory that
+   varies with composition; combat before the last third of a match.
+10. A sweep over the whole codebase for the comment and test rule above:
+    cut useless tests, replace comments with types, rename tests as
+    guarantees; one agent per crate, owner reviews the diff.
+11. The held list from play, each a ruling then a unit; fog in the
+    display; gamepad; the twelve-slot wheel; a display for an unplannable
+    send.
 
 ## Operational
 
@@ -50,6 +101,19 @@ target-state only. Agents see this file only through their briefs.
   until the next reboot. The owner does not need it kept. Agents never read
   it.
 - Linear is not set up and is ignored for now (owner, 2026-09-03).
+- Sonnet briefs carry a hard rule (owner, 2026-09-03): every file edit
+  through the Edit and Write tools, never a shell script, sed or heredoc;
+  scripted edits produce lazy, poorly shaped code. Opus is told the same.
+- Owner ruling 2026-09-03, every brief from now: comments and test
+  names across the codebase are poor. A comment is replaced by a type or
+  an invariant upheld at compile time wherever one can carry the fact;
+  rustdoc is one plain sentence of contract. One test per guarantee a
+  module makes to its callers, named as the sentence of that guarantee;
+  no test per branch, field, helper or identity; a test no plausible
+  wrong implementation fails is deleted. A sweep unit over the existing
+  code is queued after the state system lands.
+- Match setup, bots included, is the start menu's job (owner,
+  2026-09-03); the playable takes no command-line arguments.
 
 ## Engine friction
 

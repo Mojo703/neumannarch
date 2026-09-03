@@ -8,10 +8,10 @@ use probe_sim::roster::{Kind, Roster, Row};
 use probe_sim::state::Command;
 use probe_sim::{Band, Place, RowId, SeatId};
 
-use crate::glyph::Glyph;
-use crate::glyph_quad::seat_color32;
-use crate::scene::{Fill, WheelBand};
-use crate::stencil::Stencil;
+use crate::display::glyph::Glyph;
+use crate::display::glyph_quad::seat_color32;
+use crate::display::scene::{Fill, WheelBand};
+use crate::display::stencil::Stencil;
 
 /// A band's radial half-width around [`RADIUS`], in points: the span
 /// [`Wheel::slot_at`] answers, split at the radius into plus (outer) and
@@ -24,10 +24,10 @@ pub const GAP: f32 = 40.0;
 
 /// The wheel's own screen radius, in points: its annulus's mid radius,
 /// [`GAP`] beyond the outer ring.
-pub const RADIUS: f32 = crate::hud::OUTER_RADIUS + GAP + BAND_WIDTH;
+pub const RADIUS: f32 = crate::display::hud::OUTER_RADIUS + GAP + BAND_WIDTH;
 
 /// The annulus's inner edge stands [`GAP`] clear of the outer ring.
-const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::hud::OUTER_RADIUS + GAP);
+const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::display::hud::OUTER_RADIUS + GAP);
 
 /// A slot's glyph half-width, in points, before its size class steps it.
 /// Wider than a ring's, since a slot is a control and not a unit.

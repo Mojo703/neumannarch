@@ -1,0 +1,12 @@
+[package]
+name = "probe-agents"
+version.workspace = true
+edition.workspace = true
+description = "The agent frontend of Probe Game: scripted opponents and the harness"
+
+[dependencies]
+libm = "0.2"
+probe-sim = { path = "../sim" }
+
+[lints]
+workspace = true

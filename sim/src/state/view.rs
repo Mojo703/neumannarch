@@ -116,14 +116,16 @@ pub struct View {
     /// The tick's shots at the places the seat sees, in place then seat
     /// order.
     pub exchanges: Vec<Exchange>,
+    /// Every rock, in rock id order, so `terrain[id]` is the rock at `id`.
     pub terrain: Vec<Terrain>,
-    pub standings: Standings,
+    /// The score, `Some` only once the clock has run out: DESIGN.md's Fog
+    /// section reveals it at the clock and never before.
+    pub standings: Option<Standings>,
 }
 
 impl View {
     /// What `seat` may know of `state`, with `shots` the last step
-    /// resolved. A seat the match does not have sees only the terrain and
-    /// the standings.
+    /// resolved. A seat the match does not have sees only the terrain.
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View {
         let sweep = state.sweep();
         let sight = Sight::of(state, seat, &sweep);
@@ -143,8 +145,27 @@ impl View {
             blips: blips(state, seat, &sight, &sweep),
             exchanges: exchanges(state, &sight, shots),
             terrain: terrain(state),
-            standings: state.standings(),
+            standings: Some(state.standings()).filter(Standings::over),
         }
+    }
+
+    /// The rock at `id`, or `None` when the map lacks it.
+    pub fn terrain_of(&self, id: RockId) -> Option<&Terrain> {
+        self.terrain.get(id.0 as usize)
+    }
+
+    /// Where the rock at `id` is this tick, or `None` when the map lacks
+    /// it.
+    pub fn rock_body(&self, id: RockId) -> Option<Body> {
+        self.terrain_of(id)
+            .map(|terrain| terrain.orbit.at(self.tick, self.gravity))
+    }
+
+    /// The orbit `place`'s anchor follows, or `None` when the map lacks its
+    /// rock. Every seat at a place shares its anchor.
+    pub fn anchor(&self, place: Place) -> Option<Orbit> {
+        self.terrain_of(place.rock)
+            .map(|terrain| terrain.orbit.shifted(place.band.amplitude()))
     }
 }
 
@@ -304,11 +325,11 @@ fn terrain(state: &State) -> Vec<Terrain> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::belt::Belt;
     use crate::ids::TeamId;
     use crate::place::Band;
     use crate::roster::{FRIGATE, SHIPYARD, STORAGE};
-    use crate::state::Motion;
+    use crate::setup::Setup;
+    use crate::state::{Batch, Command, Issued, Motion};
     use crate::step::fire::Fire;
 
     /// The view of `seat`, with no shots this tick.
@@ -316,14 +337,35 @@ mod tests {
         View::of(state, seat, &Shots::default())
     }
 
-    /// A match of two teams over the shipped belt.
+    /// A match of two teams over the shipped belt, ending at `clock`.
+    fn started(clock: Tick) -> State {
+        let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, clock).expect("two seats");
+        State::start(&setup)
+    }
+
+    /// A match of two teams whose clock no test reaches.
     fn state() -> State {
-        State::start(
-            Tick(1_000),
-            Belt::GRAVITY,
-            Belt::fixed(Belt::GRAVITY),
-            &[TeamId(0), TeamId(1)],
-        )
+        started(Tick(1_000))
+    }
+
+    /// One tick with `issued`, which must all be accepted.
+    fn tick(state: &State, issued: &[Issued]) -> State {
+        let mut batch = Batch::new();
+        for issued in issued {
+            assert_eq!(batch.insert(*issued), Ok(()));
+        }
+        let (next, outcome) = state.step(&batch);
+        assert_eq!(outcome.rejected, Vec::new(), "the commands were rejected");
+        next
+    }
+
+    /// A want of `count` of `row` at `place`, as `seat`'s `seq`th command.
+    fn want(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
+        Issued {
+            seat: SeatId(seat),
+            seq,
+            command: Command::Want { place, row, count },
+        }
     }
 
     fn inner(rock: u32) -> Place {
@@ -337,27 +379,12 @@ mod tests {
     fn a_view_holds_the_seats_own_posts_and_no_others() {
         let mut state = state();
         state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
-        assert_eq!(
-            state.apply(crate::state::Issued {
-                seat: SeatId(0),
-                command: crate::state::Command::Want {
-                    place: inner(0),
-                    row: FRIGATE,
-                    count: 2,
-                },
-            }),
-            Ok(())
-        );
-        assert_eq!(
-            state.apply(crate::state::Issued {
-                seat: SeatId(1),
-                command: crate::state::Command::Want {
-                    place: inner(5),
-                    row: FRIGATE,
-                    count: 3,
-                },
-            }),
-            Ok(())
+        let state = tick(
+            &state,
+            &[
+                want(0, 0, inner(0), FRIGATE, 2),
+                want(1, 0, inner(5), FRIGATE, 3),
+            ],
         );
 
         let view = quiet(&state, SeatId(0));
@@ -369,7 +396,6 @@ mod tests {
         assert_eq!(view.compositions[0].rows[0].present, 0);
         assert_eq!(view.reserve[&SHIPYARD], 1);
         assert_eq!(view.terrain.len(), state.rocks().len());
-        assert_eq!(view.standings.teams().len(), 2);
     }
 
     #[test]
@@ -418,6 +444,22 @@ mod tests {
     }
 
     #[test]
+    fn the_standings_are_hidden_until_the_clock_runs_out() {
+        let state = state();
+        assert_eq!(quiet(&state, SeatId(0)).standings, None);
+
+        let over = started(Tick::ZERO);
+
+        let view = quiet(&over, SeatId(0));
+
+        assert_eq!(view.standings.as_ref().map(Standings::over), Some(true));
+        assert_eq!(
+            view.standings.expect("the clock has run out").teams().len(),
+            2
+        );
+    }
+
+    #[test]
     fn a_seat_the_match_lacks_sees_only_the_terrain() {
         let view = quiet(&state(), SeatId(9));
         assert!(view.seen.is_empty());
@@ -438,6 +480,36 @@ mod tests {
         assert_eq!(
             rock.orbit.at(view.tick, view.gravity),
             state.rock_body(rock.rock)
+        );
+    }
+
+    #[test]
+    fn a_view_reads_a_rock_and_an_anchor_by_id() {
+        let state = state();
+        let place = Place {
+            rock: RockId(4),
+            band: Band::Outer,
+        };
+
+        let view = quiet(&state, SeatId(0));
+
+        assert_eq!(
+            view.terrain_of(place.rock).map(|rock| rock.rock),
+            Some(place.rock)
+        );
+        assert_eq!(
+            view.rock_body(place.rock),
+            Some(state.rock_body(place.rock))
+        );
+        assert_eq!(view.anchor(place), Some(state.anchor(place)));
+        assert_eq!(view.terrain_of(RockId(99)), None);
+        assert_eq!(view.rock_body(RockId(99)), None);
+        assert_eq!(
+            view.anchor(Place {
+                rock: RockId(99),
+                ..place
+            }),
+            None
         );
     }
 
@@ -520,12 +592,9 @@ mod tests {
 
     #[test]
     fn a_seat_that_sees_neither_side_of_a_fight_is_told_nothing_of_it() {
-        let mut state = State::start(
-            Tick(1_000),
-            Belt::GRAVITY,
-            Belt::fixed(Belt::GRAVITY),
-            &[TeamId(0), TeamId(1), TeamId(2)],
-        );
+        let setup =
+            Setup::new(vec![TeamId(0), TeamId(1), TeamId(2)], 0, Tick(1_000)).expect("three seats");
+        let mut state = State::start(&setup);
         state.spawn(SeatId(0), FRIGATE, inner(0), holding(&state, inner(0)));
         state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
         state.spawn(SeatId(2), STORAGE, inner(9), Motion::Fixed);
@@ -548,32 +617,16 @@ mod tests {
     /// One tick that re-homes each `(seat, entity)` from rock zero to rock
     /// one, which is the send that makes them fly.
     fn sent(state: State, units: &[(u8, EntityId)]) -> State {
-        let issued: Vec<crate::state::Issued> = units
+        let issued: Vec<Issued> = units
             .iter()
             .flat_map(|(seat, entity)| {
                 let row = state[*entity].row();
                 [
-                    crate::state::Issued {
-                        seat: SeatId(*seat),
-                        command: crate::state::Command::Want {
-                            place: inner(0),
-                            row,
-                            count: 0,
-                        },
-                    },
-                    crate::state::Issued {
-                        seat: SeatId(*seat),
-                        command: crate::state::Command::Want {
-                            place: inner(1),
-                            row,
-                            count: 1,
-                        },
-                    },
+                    want(*seat, 0, inner(0), row, 0),
+                    want(*seat, 1, inner(1), row, 1),
                 ]
             })
             .collect();
-        let (next, outcome) = state.step(&issued);
-        assert_eq!(outcome.rejected, Vec::new());
-        next
+        tick(&state, &issued)
     }
 }
