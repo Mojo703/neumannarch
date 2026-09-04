@@ -1,7 +1,3 @@
-//! The one way a name the sim or the protocol holds in lower case is
-//! shown: every label the game draws is a word in title case.
-
-/// `word` with its first letter upper case.
 pub fn titled(word: &str) -> String {
     let mut letters = word.chars();
     match letters.next() {

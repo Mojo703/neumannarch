@@ -1,14 +1,3 @@
-//! Probe Game's fixed scenes, rendered headlessly to screenshots.
-//!
-//! Behind the `look` feature (`cargo run -p probe-game --features look
-//! --bin look`). DISPLAY.md's "Judging" section names three fixed
-//! scenes; this binary builds each by hand, renders it through the
-//! engine's offscreen `Session` with the `ui` feature, and writes the
-//! pixels to `game/look/<scene>.png`, a directory `.gitignore`d since
-//! screenshots are the judgement's input, never committed. The sim is
-//! not involved: positions are chosen to make each scene legible at its
-//! camera.
-
 use std::fs;
 use std::path::Path;
 
@@ -22,17 +11,15 @@ use probe_game::display::glyph_quad::GlyphQuad;
 use probe_game::display::scene::{
     Arc, EntityView, Fill, FlightLine, Mark, Reason, RingView, RockView, Run, Scene,
 };
-use probe_game::display::screen::Screen;
+use probe_game::display::viewport::Viewport;
 use probe_game::display::{belt, hud};
 use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD};
 use probe_sim::{Band, Materials, Place, RockId, RowId, SeatId, Vec3};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
-/// The offscreen target's size, in physical pixels.
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
-/// `row`'s glyph, by the three rules, over the shipped roster.
 fn glyph_of(row: RowId) -> Glyph {
     Glyph::of(&Roster::shipped()[row])
 }
@@ -51,7 +38,6 @@ fn main() {
     }
 }
 
-/// A scene and the camera it is viewed from, drawn once.
 struct Looker {
     scene: Scene,
     camera: BeltCamera,
@@ -67,22 +53,17 @@ impl Game for Looker {
     fn tick(&mut self, _ctx: &mut TickCtx<'_, Self>) {}
 
     fn frame(&mut self, ctx: &mut FrameCtx<'_, Self>) {
-        // Read before drawing: `points_per_pixel` sizes the belt's ship
-        // glyphs to match the HUD's, and the painter that reads it is only
-        // reachable through `ctx.ui`.
         let mut points_per_pixel = 1.0;
         ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
-        let screen = Screen::of(&self.camera, ctx.window_size(), points_per_pixel);
+        let viewport = Viewport::of(&self.camera, ctx.window_size(), points_per_pixel);
 
-        belt::draw(&self.scene, &screen, ctx);
+        belt::draw(&self.scene, &viewport, ctx);
 
         let scene = &self.scene;
-        ctx.ui(|ui| hud::paint(scene, &screen, None, ui.painter()));
+        ctx.ui(|ui| hud::paint(scene, &viewport, None, ui.painter()));
     }
 }
 
-/// Renders `scene` from `camera` through an offscreen session and reads
-/// the pixels back.
 fn render(scene: Scene, camera: BeltCamera) -> Vec<u8> {
     let mut session = Session::<Looker>::new(
         Config::new("probe-look").with_tick_interval(probe_sim::TICK),
@@ -91,14 +72,11 @@ fn render(scene: Scene, camera: BeltCamera) -> Vec<u8> {
     )
     .expect("the offscreen session starts");
 
-    // The UI layer reads its own claims from the step before; two steps
-    // settle the one full-screen layer this binary ever draws.
     session.step();
     session.step();
     session.pixels().expect("the target reads back")
 }
 
-/// Writes `pixels`, `WINDOW`-sized `RGBA8`, to `path` as a PNG.
 fn save(path: &Path, pixels: &[u8]) {
     image::RgbaImage::from_raw(WINDOW.x, WINDOW.y, pixels.to_vec())
         .expect("the pixels match the window's size")
@@ -106,7 +84,6 @@ fn save(path: &Path, pixels: &[u8]) {
         .expect("the PNG writes");
 }
 
-/// A rock at `pos`, `radius` meters across, at `id`.
 fn rock(id: u32, pos: Vec3, radius: f64) -> RockView {
     RockView {
         id: RockId(id),
@@ -116,8 +93,6 @@ fn rock(id: u32, pos: Vec3, radius: f64) -> RockView {
     }
 }
 
-/// The caps of the rock at `id`: the region its id falls in, so the scenes
-/// carry the belt's three tints on their rocks and their rings alike.
 fn caps_of(id: u32) -> Materials {
     let rich = 8.0;
     let poor = 1.0;
@@ -128,7 +103,6 @@ fn caps_of(id: u32) -> Materials {
     }
 }
 
-/// `seat`'s ring at `place`, over the runs and arcs it carries.
 fn ring(place: Place, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
     RingView {
         place,
@@ -138,7 +112,6 @@ fn ring(place: Place, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
     }
 }
 
-/// One unit of `row`, `seat`'s, at `pos`.
 fn ship(seat: u8, row: RowId, pos: Vec3) -> EntityView {
     EntityView {
         seat: SeatId(seat),
@@ -147,7 +120,6 @@ fn ship(seat: u8, row: RowId, pos: Vec3) -> EntityView {
     }
 }
 
-/// `seat`'s run of `marks`, all present.
 fn present(seat: u8, rows: &[RowId]) -> Run {
     Run {
         seat: SeatId(seat),
@@ -163,7 +135,6 @@ fn present(seat: u8, rows: &[RowId]) -> Run {
     }
 }
 
-/// A region with three rocks, mixed seats, a fight and a flight.
 fn region_scene() -> Scene {
     let rocks = vec![
         rock(0, Vec3::new(0.0, 0.0, 0.0), 6.0),
@@ -234,12 +205,10 @@ fn region_scene() -> Scene {
     }
 }
 
-/// The camera over [`region_scene`].
 fn region_camera() -> BeltCamera {
     BeltCamera::new(Vec3::new(3.0, 0.0, 7.0), 140.0)
 }
 
-/// A fight at one rock, two seats engaged.
 fn fight_scene() -> Scene {
     let rocks = vec![rock(0, Vec3::ZERO, 6.0)];
     let inner = Place {
@@ -286,12 +255,10 @@ fn fight_scene() -> Scene {
     }
 }
 
-/// The camera over [`fight_scene`].
 fn fight_camera() -> BeltCamera {
     BeltCamera::new(Vec3::ZERO, 40.0)
 }
 
-/// The whole belt: five rocks spread wide, held by mixed seats.
 fn belt_scene() -> Scene {
     let positions = [
         Vec3::new(0.0, 0.0, 0.0),
@@ -345,7 +312,6 @@ fn belt_scene() -> Scene {
     }
 }
 
-/// The camera over [`belt_scene`].
 fn belt_camera() -> BeltCamera {
     BeltCamera::new(Vec3::new(0.0, 0.0, -20.0), 420.0)
 }

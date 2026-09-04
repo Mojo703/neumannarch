@@ -1,6 +1,3 @@
-//! The extraction rule: a rock's per-material cap split among the extract
-//! weapons there, over one span, summed into income per seat.
-
 use std::collections::BTreeMap;
 
 use crate::ids::SeatId;
@@ -8,12 +5,10 @@ use crate::materials::Materials;
 use crate::state::State;
 use crate::time::Tick;
 
-/// The extraction phase over one tick's snapshot.
 pub struct Extraction<'a> {
     state: &'a State,
 }
 
-/// What every seat pulled from the rocks this tick, in seat order.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Income(Vec<(SeatId, Materials)>);
 
@@ -22,7 +17,6 @@ impl<'a> Extraction<'a> {
         Extraction { state }
     }
 
-    /// One tick of extraction at every rock, summed per seat.
     pub fn run(self) -> Income {
         let dt = Tick(1).seconds();
         let mut income: BTreeMap<SeatId, Materials> = BTreeMap::new();
@@ -51,23 +45,17 @@ impl<'a> Extraction<'a> {
 }
 
 impl Income {
-    /// What each seat gained, in seat order.
     pub fn iter(&self) -> impl Iterator<Item = (SeatId, Materials)> + '_ {
         self.0.iter().copied()
     }
 }
 
-/// One extract weapon at a rock, as the rule sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Extractor {
-    /// The seat its take is credited to.
     pub seat: SeatId,
-    /// Units per second of each material it pulls, never negative.
     pub rate: f64,
 }
 
-/// The take of every extractor over `dt` seconds at a rock whose cap is
-/// `caps` (units per second), summed per seat, in ascending seat order.
 pub fn extract(caps: Materials, extractors: &[Extractor], dt: f64) -> Vec<(SeatId, Materials)> {
     let rates: Vec<f64> = extractors.iter().map(|e| e.rate).collect();
     let metals = split(caps.metals, &rates);
@@ -82,12 +70,6 @@ pub fn extract(caps: Materials, extractors: &[Extractor], dt: f64) -> Vec<(SeatI
     income.into_iter().collect()
 }
 
-/// The share of `cap` (units per second of one material) each of `rates`
-/// (units per second, never negative) takes, in input order. Each takes its
-/// rate while the sum fits; over the cap, the cap splits equally and any
-/// share an extractor cannot use redistributes equally among the rest. No
-/// share exceeds its rate; the shares sum to the smaller of the cap and the
-/// rates' sum.
 pub fn split(cap: f64, rates: &[f64]) -> Vec<f64> {
     if rates.iter().sum::<f64>() <= cap {
         return rates.to_vec();

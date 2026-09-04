@@ -1,57 +1,39 @@
-//! Who speaks for one seat on this machine.
-
 use probe_agents::{Personality, Scripted, Seated};
-use probe_protocol::{Crew, Holder, Seating};
+use probe_protocol::{Crew, Occupant, Seating};
 use probe_sim::roster::Roster;
 use probe_sim::state::{Command, MAX_COMMANDS_PER_TICK};
 use probe_sim::{SeatId, Sequence, Session, Stamped};
 
-/// The person at this machine, speaking for one seat.
-///
-/// It holds what the frame's gestures asked for until the next tick stamps
-/// it, and never holds more than a tick can carry.
 pub struct Human {
     sequence: Sequence,
     wanted: Vec<Command>,
 }
 
-/// Who speaks for one seat of a match.
 pub enum Controller {
-    /// The person at this machine.
     Human(Human),
-    /// A scripted opponent this machine runs, on the agent's own cadence.
     Bot(Box<Seated>),
-    /// Another machine's seat: it issues nothing here, and its commands
-    /// arrive through the transport.
     Remote(SeatId),
 }
 
 impl Controller {
-    /// One controller per seat of `seating`, in seat order: the person at
-    /// this machine in the seat they hold, a bot in each seat `crew` runs
-    /// one for, and the rest remote.
-    ///
-    /// Only a host seats a bot, so only the host's machine runs one; on
-    /// every other machine that seat is another machine's.
     pub fn of(seating: &Seating, crew: &Crew, roster: &Roster) -> Vec<Controller> {
         seating
             .seats()
             .map(|(seat, holder)| match holder {
-                Holder::Player(player) if player == crew.player() => {
+                Occupant::Player(player) if player == crew.player() => {
                     Controller::Human(Human::new(seat))
                 }
-                Holder::Bot(bot) if crew.seats().contains(&seat) => {
+                Occupant::Bot(bot) if crew.seats().contains(&seat) => {
                     Controller::Bot(Box::new(Seated::new(
                         seat,
                         Box::new(Scripted::new(Personality::of(bot), roster.clone())),
                     )))
                 }
-                Holder::Bot(_) | Holder::Player(_) | Holder::Open => Controller::Remote(seat),
+                Occupant::Bot(_) | Occupant::Player(_) => Controller::Remote(seat),
             })
             .collect()
     }
 
-    /// The seat it speaks for.
     pub fn seat(&self) -> SeatId {
         match self {
             Controller::Human(human) => human.sequence.seat(),
@@ -60,7 +42,6 @@ impl Controller {
         }
     }
 
-    /// The person at this machine, where this controller is one.
     pub fn human(&mut self) -> Option<&mut Human> {
         match self {
             Controller::Human(human) => Some(human),
@@ -68,9 +49,6 @@ impl Controller {
         }
     }
 
-    /// What it issues at the tick `session` shows, stamped with its seat
-    /// and its own count. Never more than [`MAX_COMMANDS_PER_TICK`], so
-    /// the tick's batch takes every one of them.
     pub fn issue(&mut self, session: &Session) -> Vec<Stamped> {
         match self {
             Controller::Human(human) => human.issue(session),
@@ -81,7 +59,6 @@ impl Controller {
 }
 
 impl Human {
-    /// The person holding `seat`, wanting nothing yet.
     pub fn new(seat: SeatId) -> Human {
         Human {
             sequence: Sequence::new(seat),
@@ -89,17 +66,12 @@ impl Human {
         }
     }
 
-    /// Takes `command` for the next tick. One frame's gestures ask for a
-    /// wheel edit or a send's row pairs, well inside a tick's cap, so what
-    /// a frame asks for is what the next tick issues.
     pub fn want(&mut self, command: Command) {
         if self.wanted.len() < MAX_COMMANDS_PER_TICK {
             self.wanted.push(command);
         }
     }
 
-    /// Everything asked for since the last tick, stamped at the tick
-    /// `session` shows.
     fn issue(&mut self, session: &Session) -> Vec<Stamped> {
         let tick = session.state().tick();
         self.wanted
@@ -111,7 +83,7 @@ impl Human {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Control, Lobby, LobbyEdit, PlayerId};
+    use probe_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
     use probe_sim::roster::SHIPYARD;
     use probe_sim::{Band, Place, Retention, RockId};
 
@@ -141,7 +113,6 @@ mod tests {
         .expect("a session owning no seat seats nothing to refuse")
     }
 
-    /// The controllers the machine `me` is at holds of `lobby`'s match.
     fn controllers(lobby: &Lobby, me: PlayerId) -> Vec<Controller> {
         let started = lobby.freeze().expect("the lobby is a match");
         let seating = started.seating();
@@ -169,7 +140,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 2,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: PlayerId(4),
                         ready: true,
                     },
@@ -196,7 +167,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 1,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: PlayerId(4),
                         ready: true,
                     },

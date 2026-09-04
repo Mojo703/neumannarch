@@ -1,22 +1,14 @@
-//! What one seat's radar reports: contacts it cannot see.
-
 use super::State;
 use super::sight::Sight;
 use super::sweep::Sweep;
 use crate::ids::{EntityId, SeatId};
 
-/// The entities inside the radar range of one of a seat's team's entities
-/// and outside its sight. The only query that answers what a seat's radar
-/// reports.
 #[derive(Clone, Debug)]
 pub struct Radar {
     contacts: Vec<EntityId>,
 }
 
 impl Radar {
-    /// What `seat`'s radar reports in the snapshot, over its `sweep` and
-    /// what `sight` already gives it exactly. A seat the match does not
-    /// have reports nothing.
     pub fn beyond(state: &State, seat: SeatId, sweep: &Sweep, sight: &Sight) -> Radar {
         let Some(team) = state.seat(seat).map(|seat| seat.team()) else {
             return Radar {
@@ -34,7 +26,6 @@ impl Radar {
         Radar { contacts }
     }
 
-    /// Every contact, in id order.
     pub fn iter(&self) -> impl Iterator<Item = EntityId> + '_ {
         self.contacts.iter().copied()
     }
@@ -66,7 +57,6 @@ mod tests {
         }
     }
 
-    /// One seat per team, over one rock.
     fn state() -> State {
         let radius = 1.0e7;
         let speed = (MU.mu() / radius).sqrt();
@@ -84,7 +74,6 @@ mod tests {
         )
     }
 
-    /// A scout sees twenty meters and its radar reaches fifty.
     #[test]
     fn radar_reports_only_what_sight_does_not_give() {
         let mut state = state();

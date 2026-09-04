@@ -1,24 +1,16 @@
-//! A row of the roster and its weapons.
-
 use crate::materials::Materials;
 use crate::real::Real;
 
-/// The mass, on the roster's scale, below which radar reports a contact
-/// as light. A hypothesis the display confirms or kills.
 const LIGHT_MASS: f64 = 30.0;
 
-/// The mass, on the roster's scale, below which radar reports a contact as
-/// medium and at or above which it reports heavy. A hypothesis.
 const HEAVY_MASS: f64 = 100.0;
 
-/// Whether a row's copies can move; a structure holds its rock's body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Structure,
     Unit,
 }
 
-/// How much a radar contact weighs, as much as radar can tell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MassClass {
     Light,
@@ -26,65 +18,38 @@ pub enum MassClass {
     Heavy,
 }
 
-/// One row of the roster. An entity is a copy of its row plus position,
-/// velocity, HP and home.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Row {
-    /// The row's name; shipped names are distinct.
     pub name: &'static str,
-    /// What a frame spends to complete one copy.
     pub cost: Materials,
-    /// Mass, on the roster's own scale; radar reports it as a rough class.
     pub mass: Real,
-    /// The movement limit in m/s²: the thrust a burn of a send uses. Zero
-    /// for a structure.
     pub accel: Real,
-    /// The manoeuvring limit in m/s²: the thrust holding position uses,
-    /// far below `accel`. Zero for a structure.
     pub maneuver: Real,
-    /// Hit points of a fresh copy.
     pub hp: Real,
-    /// Damage subtracted from each hit taken.
     pub plating: Real,
-    /// Sight range in meters; exact detection, and the leash.
     pub sight: Real,
-    /// Radar range in meters; detection as a blip.
     pub radar: Real,
-    /// Stockpile capacity one copy contributes, per material.
     pub capacity: Materials,
-    /// Weapons, indexed by position.
     pub weapons: Vec<Weapon>,
 }
 
-/// One weapon of a row; each kind carries its own fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Weapon {
-    /// Hitscan at the highest-threat enemy in range.
     Damage {
-        /// Reach in meters.
         range: Real,
-        /// Shots per second.
         rate: Real,
-        /// Damage per hit at zero distance, before plating.
         damage: Real,
-        /// Fraction of `damage` lost at `range`.
         falloff: Real,
     },
-    /// Spends stockpile toward frames at the home rock, repairs and scraps
-    /// there.
     Build {
-        /// Cost units per second.
         rate: Real,
     },
-    /// Pulls materials from the home rock.
     Extract {
-        /// Units per second of each material, before the rock's cap.
         rate: Real,
     },
 }
 
 impl Row {
-    /// `Structure` exactly when acceleration is zero, else `Unit`.
     pub fn kind(&self) -> Kind {
         if self.accel.0 == 0.0 {
             Kind::Structure
@@ -93,7 +58,6 @@ impl Row {
         }
     }
 
-    /// The class radar reports a copy of this row as.
     pub fn mass_class(&self) -> MassClass {
         if self.mass.0 < LIGHT_MASS {
             MassClass::Light
@@ -104,12 +68,10 @@ impl Row {
         }
     }
 
-    /// Whether any weapon deals damage.
     pub fn is_armed(&self) -> bool {
         self.weapons.iter().any(|weapon| weapon.range().is_some())
     }
 
-    /// The longest damage weapon's reach in meters; zero when unarmed.
     pub fn max_damage_range(&self) -> f64 {
         self.weapons
             .iter()
@@ -117,8 +79,6 @@ impl Row {
             .fold(0.0, f64::max)
     }
 
-    /// Damage per second at zero distance against `plating`, each hit
-    /// floored at zero.
     pub fn dps_through(&self, plating: f64) -> f64 {
         self.weapons
             .iter()
@@ -126,7 +86,6 @@ impl Row {
             .sum()
     }
 
-    /// The index of each damage weapon in this row.
     pub fn damage_weapons(&self) -> impl Iterator<Item = u8> + '_ {
         self.weapons
             .iter()
@@ -135,13 +94,10 @@ impl Row {
             .filter_map(|(at, _)| u8::try_from(at).ok())
     }
 
-    /// The rate of each build weapon, in cost units per second.
     pub fn builds(&self) -> impl Iterator<Item = f64> + '_ {
         self.weapons.iter().filter_map(Weapon::build_rate)
     }
 
-    /// The rate of each extract weapon, in units per second of each
-    /// material.
     pub fn extracts(&self) -> impl Iterator<Item = f64> + '_ {
         self.weapons.iter().filter_map(Weapon::extract_rate)
     }

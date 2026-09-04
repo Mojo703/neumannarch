@@ -1,5 +1,3 @@
-//! The results: the standings over the belt the match ended on.
-
 use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
@@ -12,63 +10,43 @@ use crate::display::camera::BeltCamera;
 use crate::display::glyph::{self, Frame, Glyph, Size};
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
 use crate::display::scene::{Fill, Scene};
-use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
+use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::screens::control::{Controls, Rule};
 use crate::screens::panel::{self, Panel};
 
-/// How wide the standings panel stands, in points.
 const WIDTH: f32 = 520.0;
 
-/// How wide the bottom actions stand, in points.
 const ACTION_WIDTH: f32 = 160.0;
 
-/// A rock held is drawn as the glyph of the thing that holds it, which is a
-/// structure, at the run's own size.
 const ROCK_HELD: Glyph = Glyph {
     frame: Frame::Square,
     marks: Vec::new(),
     size: Size::Medium,
 };
 
-/// How far apart the squares of a team's rocks stand, in points.
 const ROCK_STEP: f32 = 2.5 * glyph::HALF;
 
-/// How far into a team's row its own mark stands, in points, clear of its
-/// name.
 const WINNER_FROM: f32 = 84.0;
 
-/// How far into a team's row its rocks begin, in points, clear of its name
-/// and its own mark.
 const ROCKS_FROM: f32 = 176.0;
 
-/// What the results' own actions ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {
-    /// Set the same shape up again, which only the host of a room is
-    /// offered.
     Rematch,
-    /// Leave for the title.
     Leave,
 }
 
-/// The end of a match: what each team held, the belt it ended on, and the
-/// lobby it came from, which a rematch returns to unchanged.
 pub struct Results {
     lobby: Lobby,
-    /// The belt as the last frame drew it, still.
     scene: Scene,
     camera: BeltCamera,
     standings: Standings,
-    /// Each seat's team, in seat order, so a team takes its lowest seat's
-    /// colour.
     teams: Vec<TeamId>,
 }
 
 impl Results {
-    /// The score of the match `state` has reached, over `scene`, the belt
-    /// its last frame drew, seen from `camera`.
     pub fn of(lobby: Lobby, scene: Scene, camera: BeltCamera, state: &State) -> Results {
         Results {
             lobby,
@@ -79,10 +57,6 @@ impl Results {
         }
     }
 
-    /// Paints the results over the still belt and answers what the player
-    /// picked. `rematch` is whether asking for one works: the host of a
-    /// room asks the room to open its lobby again, and a skirmish opens
-    /// its own.
     pub fn frame<G: crate::screens::Playable>(
         &mut self,
         ctx: &mut FrameCtx<'_, G>,
@@ -94,10 +68,10 @@ impl Results {
         let mut points_per_pixel = 1.0;
         ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
         let size = ctx.window_size();
-        let screen = Screen::of(&self.camera, size, points_per_pixel);
-        belt::draw(&self.scene, &screen, ctx);
+        let viewport = Viewport::of(&self.camera, size, points_per_pixel);
+        belt::draw(&self.scene, &viewport, ctx);
 
-        let pointer = screen.point_at(ctx.pointer());
+        let pointer = viewport.point_at(ctx.pointer());
         let clicked = ctx.pressed(crate::controls::Button::Select);
         let window = panel::window_of(size, points_per_pixel);
         let scene = &self.scene;
@@ -105,21 +79,18 @@ impl Results {
         let teams = &self.teams;
         let mut picked = None;
         ctx.ui(|ui| {
-            hud::paint(scene, &screen, None, ui.painter());
+            hud::paint(scene, &viewport, None, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             picked = paint(&panel, standings, teams, rematch);
         });
         picked
     }
 
-    /// The lobby the match was set up in, which a rematch keeps.
     pub fn lobby(&self) -> &Lobby {
         &self.lobby
     }
 }
 
-/// One team's row: its name in its own colour, a ring glyph per rock it
-/// holds, and its army value; the winning row is marked.
 fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner: bool) {
     let ink = match winner {
         true => panel::INK,
@@ -163,7 +134,6 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
     );
 }
 
-/// The results panel, and what the player picked in it.
 fn paint(
     panel: &Panel<'_>,
     standings: &Standings,

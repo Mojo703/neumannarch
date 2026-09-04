@@ -1,8 +1,3 @@
-//! The standalone match server: one room, on the address given or the
-//! default port on every interface.
-//!
-//! `probe-server [address]`, as `host:port`.
-
 use std::net::SocketAddr;
 
 use probe_protocol::DEFAULT_PORT;

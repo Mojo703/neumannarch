@@ -575,15 +575,15 @@ through flights, weapon intervals and the manoeuvring gains.
 
 `protocol` is every value two machines exchange, serialisable, with no
 io and no engine, so `game`, `server` and the harness's record files all
-speak it.
+carry it directly.
 
 ```rust
 pub struct PlayerId(pub u32);                   // PlayerId::HOST opens a lobby
 pub enum Bot { Turtle, Expand }                 // agents turns it into a Personality
-pub enum Control {
+pub enum Holder {
     Open, Closed, Player { player: PlayerId, ready: bool }, Bot(Bot),
 }
-pub struct SeatSlot { pub team: TeamId, pub control: Control }
+pub struct SeatSlot { pub team: TeamId, pub control: Holder }
 pub struct Lobby {                              // MAX_SLOTS == MAX_SEATS slots
     slots: Vec<SeatSlot>, seed: u64, clock: Tick, host: PlayerId,
 }
@@ -591,24 +591,29 @@ pub enum LobbyEdit {
     SetSlot { slot, control }, Kick(PlayerId), SetTeam { slot, team },
     SetSeed(u64), SetClock(Tick), SetReady { ready },
 }
-pub enum Refused {
+pub enum Refused {                              // why an edit was not applied
     NotHost, NotYours, NotSeated, NoSuchSlot, BadTeam, BadClock,
     AlreadySeated, NotAGuest, HeldByAGuest,
 }
 pub enum NotReady {
     NoSeats, OpenSeat { slot }, Unready { slot }, HostUnseated,
 }
-pub enum Refusal { Edit(Refused), NotReady(NotReady), Full, Version }
-pub enum Holder { Open, Player(PlayerId), Bot(Bot) }  // Control minus Closed
-pub struct Seating { holders: Vec<Holder>, host: PlayerId }
+pub enum Occupant { Player(PlayerId), Bot(Bot) }  // Holder minus Open and Closed
+pub struct Seating { holders: Vec<Occupant>, host: PlayerId }
 pub struct Started { setup: Setup, seating: Seating }  // paired by Started::new
 pub struct Crew { player: PlayerId, watched: SeatId, seats: Vec<SeatId> }
-pub enum Message {
-    Join { version: u32 }, Welcome { player, lobby }, Edit(LobbyEdit),
-    Lobby(Lobby), Refused(Refusal), Start(Started), Rematch,
-    Command(Stamped), Acknowledge { seat, up_to: Tick }, Hash { tick, hash },
-    Desync { tick }, Leave, Removed,
+pub enum Request {                              // a machine's request of a room
+    Join { version: u32 }, Edit(LobbyEdit), Start, Rematch, Leave,
 }
+pub enum Notice {                               // what a room reports to its screen
+    Welcome { player, lobby }, Lobby(Lobby), Started(Started),
+    Refused(Refused), NotReady(NotReady), Full, Version, Left, Removed,
+}
+pub enum Relayed {                              // match traffic, either way
+    Command(Stamped), Acknowledge { seat, up_to: Tick }, Hash { tick, hash },
+    Desync { tick },
+}
+pub enum Message { Request(Request), Notice(Notice), Relayed(Relayed) }  // the wire tag
 pub struct Record { setup: Setup, ticks: BTreeMap<Tick, Batch> }
 
 impl Lobby {                                    // the shape and the numbering
@@ -620,14 +625,14 @@ impl Lobby {                                    // the shape and the numbering
     pub fn slot_of(&self, player: PlayerId) -> Option<usize>;
     pub fn players(&self) -> Vec<PlayerId>;
     pub fn readied(&self, player: PlayerId) -> bool;
-    pub fn admit(&mut self, player: PlayerId) -> Option<SeatId>;
+    pub fn admit(&mut self, player: PlayerId) -> bool;
     pub fn release(&mut self, who: PlayerId) -> bool;
     pub fn next_seed(&self) -> u64;
 }
 impl Seating {                                  // who holds and who runs a seat
     pub fn owner(&self, seat: SeatId) -> Option<PlayerId>;
     pub fn seat(&self, player: PlayerId) -> Option<SeatId>;
-    pub fn seats(&self) -> impl Iterator<Item = (SeatId, Holder)>;
+    pub fn seats(&self) -> impl Iterator<Item = (SeatId, Occupant)>;
     pub fn seats_of(&self, player: PlayerId) -> impl Iterator<Item = SeatId>;
     pub fn players(&self) -> Vec<PlayerId>;
     pub fn peers_of(&self, player: PlayerId) -> usize;
@@ -638,7 +643,7 @@ impl Record {
     pub fn played(setup: Setup, ticks: BTreeMap<Tick, Batch>) -> Record;
     pub fn replay(&self, until: Tick) -> State;
 }
-pub trait Wire { fn encoded(&self) -> Vec<u8>; fn decode(&[u8]) -> Result<Self, Malformed>; }
+pub trait Codec { fn encoded(&self) -> Vec<u8>; fn decode(&[u8]) -> Result<Self, Malformed>; }
 ```
 
 `Lobby::freeze` is the one way a match starts, on every machine, from the
@@ -656,12 +661,12 @@ follow from it, so the room forwarding a command and the machine playing
 it never count the machines differently. `run_by` is a machine's whole
 part of a match: the seats it runs and the one it watches, never empty,
 so a `Crew` is proof that its machine can play. Readiness lives inside
-`Control::Player`, where it means something; a bot and a closed seat have
+`Holder::Player`, where it means something; a bot and a closed seat have
 none to hold. `Bot` names a shipped opponent and `agents`'
 `Personality::of` matches it exhaustively, so a bot the protocol can name
 always has a way of playing.
 
-Every rule a control is enabled by is a function here, evaluated on a
+Every rule a holder is enabled by is a function here, evaluated on a
 copy: `Lobby::edit` for a holder, a team, a kick, the seed, the clock and
 readiness, and `Lobby::freeze` for the start. A player holds one slot at
 most (`Refused::AlreadySeated`), only a guest's slot is kicked
@@ -669,22 +674,28 @@ most (`Refused::AlreadySeated`), only a guest's slot is kicked
 (`Refused::HeldByAGuest`), so the screen offering those values and the
 room applying them cannot disagree. A lobby freezes only where the host
 runs a seat of it (`NotReady::HostUnseated`): every machine in a started
-match holds a `Crew`, which is what makes building one unrefusable.
+match holds a `Crew`, which is what makes building one unrefusable. A
+frozen `Seating`'s `Occupant` holds no `Open` variant: a slot that is
+still open refuses the freeze first, so the type a `Seating` holds never
+represents a seat with nobody in it.
 
-`Message::Refused` is how a room answers what it did not do: a lobby edit
-that was not the sender's, a start of a lobby that is not a match yet, a
-join of a room with nowhere to sit, and a join carrying a version that is
-not `VERSION`, which the room checks before it seats anything.
-`Message::Removed` is what a kicked machine hears, distinct from the
-`Leave` a host's own departure broadcasts, since the two are different
-facts on the title's join field. `Message::Rematch` is the host asking a
-room to open its lobby again, which the room answers with that lobby.
-`Message::Hash` means two things by direction: a machine reports its own
-hash at a settled tick, and the room sends back the hash every machine
-reported the same there, which is the one word that says a tick is
-agreed on every machine.
+Each way a room answers what it did not do is its own `Notice` variant,
+never one shared reason: `Refused` for a lobby edit that was not the
+sender's, `NotReady` for a start of a lobby that is not a match yet,
+`Full` for a join of a room with nowhere to sit, and `Version` for a
+join carrying a version that is not `VERSION`, which the room checks
+before it seats anything. `Notice::Removed` reaches a kicked machine,
+distinct from `Notice::Left`, which a host's own departure broadcasts
+instead — the room's own notice for each, never the `Request::Leave` a
+machine sends to report its own departure, since the three are
+different facts on the title's join field.
+`Request::Rematch` is the host's request that a room open its lobby
+again, which the room answers with a `Notice::Lobby`. `Relayed::Hash`
+means two things by direction: a machine reports its own hash at a
+settled tick, and the room returns the same hash once every machine
+reported it there, which is what marks a tick agreed on every machine.
 
-`Wire` is the one encoding, blanket-implemented for every serialisable
+`Codec` is the one encoding, blanket-implemented for every serialisable
 value: CBOR, the same bytes on native and in the browser. Reading is the
 only place a wire value is checked, and it goes through the constructor:
 `Setup` deserialises through `Setup::new`, so a seat count off the wire
@@ -710,33 +721,36 @@ exists.
   controller yields and the insert cannot be refused.
 - **The machine.** `Machine` is this machine's whole part of one match:
   the session, one controller per seat, the crew it runs and the pace.
-  `Machine::tick` is the lockstep loop — hear, pace, issue, step, tell —
-  and takes the transport as an argument, so nothing about it needs a
-  screen or the engine and two of them run in one process under test.
-  `Machine::of` takes a `Started` and a `Crew` of its seating and refuses
-  nothing: the crew names seats the setup holds, so the session cannot
-  turn it down, and the seat the display follows is the crew's watched
-  one. The seats a machine runs and how many peers it has both come from
-  that seating, so a host running a bot from a closed slot of its own is
-  a peer like any other and its guests wait for the first agreed hash.
-- **Transport.** `Transport` is a trait of five calls — `send`,
-  `acknowledge`, `report`, `received`, `leave` — carrying stamped
-  commands, acknowledgements and hash reports both ways. `Local` returns
-  nothing and exists so the loop has one shape. `Socket` speaks
-  `protocol::Message` over a WebSocket to the room, through one `Link`
-  per target: a runtime on a thread of its own on the desktop, the page's
-  own WebSocket in the browser. `Flow` owns the transport, not the match,
-  so a room outlives the match played in it; a machine takes it as
-  `&mut dyn Transport` and the choice is one runtime value. Received
-  commands are inserted into the session, which rewinds as needed; the
-  loop reads `Rewound` only to reset client-side memories (fights, hover)
-  that may now be stale. Every match calls all five, so the loop has one
-  shape whether or not it has peers, and every match over the messages it
-  hears names every variant rather than catching a rest. A screen reads
-  the same socket as `Word`, which is what a room says to a screen and
-  nothing else, so a message only a room hears or only a machine reads is
-  refused where the bytes are decoded rather than matched away in a
-  screen.
+  `Machine::tick` is the lockstep loop — receive, pace, issue, step,
+  relay — and takes the transport as an argument, so nothing about it
+  needs a screen or the engine and two of them run in one process under
+  test. `Machine::of` takes a `Started` and a `Crew` of its seating and
+  refuses nothing: the crew names seats the setup holds, so the session
+  cannot turn it down, and the seat the display follows is the crew's
+  watched one. The seats a machine runs and how many peers it has both
+  come from that seating, so a host running a bot from a closed slot of
+  its own is a peer like any other and its guests wait for the first
+  agreed hash.
+- **Transport.** `Transport` is a trait of four calls — `send`,
+  `acknowledge`, `report`, `received` — carrying stamped commands,
+  acknowledgements and hash reports both ways, as `protocol::Relayed`.
+  `Local` returns nothing and exists so the loop has one shape.
+  `Connection` is the room this machine has joined and its own transport
+  in one: it sends `protocol::Request` and `Relayed` to the room over
+  one `WebSocket` per target — a runtime on a thread of its own on the
+  desktop, the page's own WebSocket in the browser — and reads `Notice`
+  and `Relayed` back. Each inbound frame is decoded once, off the wire's
+  tagged `Message`, into the inbox its type names, so a room's notice
+  and a match's traffic are never read by the wrong side; a screen calls
+  `notices`, a match calls `received`, and neither drains the other's.
+  `Flow` owns the connection, not the match, so it outlives the match
+  played over it; a machine takes it as `&mut dyn Transport` and the
+  choice is one runtime value. Received commands are inserted into the
+  session, which rewinds as needed; the loop reads `Rewound` only to
+  reset client-side memories (fights, hover) that may now be stale.
+  Every match calls all four, so the loop has one shape whether or not
+  it has peers, and it matches every `Relayed` variant by name, catching
+  none away.
 - **Pacing.** A machine advances no further than the retention window
   ahead of the lowest acknowledged tick among peers, and holds past that;
   a machine ahead of the settled tick by `LEAD_THRESHOLD` drops one step
@@ -747,46 +761,46 @@ exists.
   `ACKNOWLEDGE_INTERVAL` ticks and the settled tick's hash reported every
   `REPORT_INTERVAL` ticks, each settled tick once. The engine's tick
   interval is fixed at boot, so a machine paces its own sim: an engine
-  tick is an opportunity to step, and the pace says whether to take it.
-  A seat whose machine has left the room is acknowledged for the rest of
-  the match by the room on its behalf, so the others settle every tick
-  and the match goes on without it. Every one of these numbers is a
-  constant with units and a hypothesis in its rustdoc.
-- **Screens.** One `Flow` owns one `Stage`, which is the screen showing
-  and the room behind it: `Title { listener, asking }`, and `Lobby`,
-  `Loading`, `Play` and `Results`, each with its screen and its
-  `Authority`. `Pause` is the match's own, since play holds whether it is
-  open. A stage's frame answers the next stage out of its own parts, so
-  every transition is one method named for what it does — `opens`,
-  `starts`, `plays`, `ends`, `rematches`, `leaves`, `removed` — and no
-  screen reaches into another. The title alone asks the flow for
-  something: `Ask::Host` and `Ask::Join(address)` open a socket, which no
-  screen does itself. The title's own screen outlives every stage, since
+  tick is an opportunity to step, and the pace decides whether to take
+  it. A seat whose machine has left the room is acknowledged for the
+  rest of the match by the room on its behalf, so the others settle
+  every tick and the match goes on without it. Every one of these
+  numbers is a constant with units and a hypothesis in its rustdoc.
+- **Screens.** One `Flow` owns one `Screen`, which is the screen showing
+  and the room behind it: `Title { listener, join }`, and `Lobby`,
+  `Loading`, `Play` and `Results`, each with its screen and its `Room`.
+  `Pause` is the match's own, since play holds whether it is open. A
+  screen's frame answers the next screen out of its own parts, so every
+  transition is one method named for what it does — `opens`, `starts`,
+  `plays`, `ends`, `rematches`, `leaves`, `removed` — and no screen
+  reaches into another. The title alone names the flow's connection to
+  open: `Connect::Host` and `Connect::Join(address)`, which no screen
+  opens itself. The title's own screen outlives every `Screen`, since
   DISPLAY.md keeps the address it holds.
-- **The authority.** `Authority` is who owns the lobby a match is set up
-  in and what carries that match: `Local`, where every seat is on this
-  machine and nothing goes on the wire; `Guest`, a room another machine
-  serves, holding the id its welcome gave; and `Host`, a room this machine
-  serves and plays in. It answers `me`, the transport, and the lobby rule
-  itself: `Local` applies an edit to its own copy, and a guest and a host
-  alike send it and take the lobby the room broadcasts, so one rule runs
-  on both paths. Skirmish opens a `Local` lobby; Host serves a room in
-  this process and joins it at the loopback; Join opens a socket to a
-  typed address, and either way the lobby is the one the welcome brings,
-  so the title says it is connecting until then. Start freezes the lobby
-  into a `Started` — the room's own copy where there is a room, which
-  broadcasts it — and every machine builds the initial state from it and
-  reports the tick-zero hash; loading holds until the room says every
-  machine agreed it. A desync and a peer too far behind are the two
-  states play holds in, both over the dimmed HUD, and the belt reads no
-  input under either, nor under the pause screen: the gesture the pointer
-  was in the middle of is dropped with the frame the hold begins.
-  Results holds the score, the belt the match ended on and the lobby it
-  came from, and returns to that lobby for a rematch or to the title.
-  Results is reached when the view's `Standings` arrive, which is the
-  clock: DESIGN.md's fog reveals them then and never before, so a client
-  cannot see another side's elimination, and the end at elimination is
-  the unit that can.
+- **The room.** `Room` is who owns the lobby a match is set up in and
+  what carries that match: `Local`, where every seat is on this machine
+  and nothing goes on the wire; `Guest`, a room another machine serves,
+  holding the id its welcome gave; and `Host`, a room this machine
+  serves and plays in. It answers `me`, the transport, and the lobby
+  rule itself: `Local` applies an edit to its own copy, and a guest and
+  a host alike send it and take the lobby the room broadcasts, so one
+  rule runs on both paths. Skirmish opens a `Local` lobby; Host serves a
+  room in this process and joins it at the loopback; Join opens a
+  connection to a typed address, and either way the lobby is the one
+  the welcome brings, so the title reports it is connecting until then.
+  Start freezes the lobby into a `Started` — the room's own copy where
+  there is a room, which broadcasts it — and every machine builds the
+  initial state from it and reports the tick-zero hash; loading holds
+  until the room reports every machine agreed it. A desync and a peer
+  too far behind are the two states play holds in, both over the dimmed
+  HUD, and the belt reads no input under either, nor under the pause
+  screen: the gesture the pointer was in the middle of is dropped with
+  the frame the hold begins. Results holds the score, the belt the
+  match ended on and the lobby it came from, and returns to that lobby
+  for a rematch or to the title. Results is reached when the view's
+  `Standings` arrive, which is the clock: DESIGN.md's fog reveals them
+  then and never before, so a client cannot see another side's
+  elimination, and the end at elimination is the unit that can.
   The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
   widest view whose rings stand apart, and lays its seats out by team:
   one heading per team that holds a seat, and its seats under it, each a
@@ -794,11 +808,12 @@ exists.
   mark. A closed seat is not drawn, so a team holding none is not drawn
   either, except the one closed seat's row the host is left under the
   last team, which is how a seat and a team are opened.
-- **The title's room.** The title stage holds the listener for the room
-  Host would join, bound when it opens, and hands it to the authority
-  with the welcome. Host is enabled exactly where a listener is held, so
-  a click on it cannot fail, and a title the player leaves for anything
-  else drops the listener with the stage, which releases the port.
+- **The title's room.** The title screen holds the listener for the
+  room Host would join, bound when it opens, and hands it to the room
+  with the welcome. Host is enabled exactly where a listener is held,
+  so a click on it cannot fail, and a title the player leaves for
+  anything else drops the listener with the screen, which releases the
+  port.
 - **The styled register.** Every screen outside the belt is painted and
   hit-tested by hand through one `Panel`, over the engine's UI layer, and
   claims no widget: the HUD's palette, thin lines, no window chrome,
@@ -822,26 +837,27 @@ exists.
 `server` holds rooms. Each room owns one `Lobby` and is the authority on
 it: the host's edits and each guest's own-seat edits are applied in
 arrival order and the result broadcast; any other edit is refused by
-name to its sender. A machine enters a room by asking to join, takes the
-first open slot, and is welcomed with the id it holds and the lobby as it
-stands; a room with nowhere to sit, or a join carrying another version of
-the protocol, refuses it by name. A kick is the host's edit like any
-other: the room opens that slot, tells the machine that held it, and
-drops it. The shape of a lobby is its host's, so a host that leaves one
-ends it: the room reopens and every other machine is sent away.
+name to its sender. A machine enters a room by requesting to join, takes
+the first open slot, and is welcomed with the id it holds and the lobby
+as it stands; a room with nowhere to sit, or a join carrying another
+version of the protocol, refuses it by name. A kick is the host's edit
+like any other: the room opens that slot, notifies the machine that held
+it, and drops it. The shape of a lobby is its host's, so a host that
+leaves one ends it: the room reopens and every other machine is sent
+away.
 
 A room's phase owns the machines in it, so no second list of them can
-disagree with what the room is doing: a room setting a match up holds the
-machines that joined it, in the order they did, and a room forwarding one
-asks the match, which knows the machines its seating gives a seat to and
-which of them have left. The id the next machine takes only rises for the
-life of the room, so a room that reopens hands out no id it has held
-before.
+disagree with what the room is doing: a room setting a match up holds
+the machines that joined it, in the order they did, and a room
+forwarding one holds the `Forwarding` itself, which knows the machines
+its seating gives a seat to and which of them have left. The id the
+next machine takes only rises for the life of the room, so a room that
+reopens hands out no id it has held before.
 
 A room keeps the lobby the match was set up in while it forwards that
-match, so the host's `Rematch` opens it again with its shape kept, the
-slots of machines that have left standing open. Every machine at the
-results follows the lobby the room broadcasts.
+match, so the host's `Request::Rematch` opens it again with its shape
+kept, the slots of machines that have left standing open. Every machine
+at the results follows the lobby the room broadcasts.
 
 Once started, the room forwards every stamped command and acknowledgement
 of a seat to every machine but the one that sent it, and drops one of a
@@ -851,13 +867,14 @@ sends back the hash where every machine reported the same, which is how a
 machine knows a tick is agreed. It keeps the one record it forwarded —
 the log every machine converges on — and holds it in memory when the
 match ends; a per-machine record would need a machine to upload one,
-which no message asks for. It holds no tick clock and steps no sim.
+which no request carries. It holds no tick clock and steps no sim.
 
-`Room` is pure and knows nothing of sockets: it answers `Post`s addressed
-to the sender, to one named machine, to everyone, or to everyone else,
-and `stream.rs` is the only part that touches the network. `game` embeds
-it under the `host` feature so host-by-address needs no separate process;
-the binary serves a room list later.
+`Room` is pure and knows nothing of sockets: it answers `Outbound`s
+addressed by `Recipient` to the sender, to one named machine, to
+everyone, or to everyone else, and `stream.rs` is the only part that
+touches the network. `game` embeds it under the `host` feature so
+host-by-address needs no separate process; the binary serves a room
+list later.
 
 ## Module layout
 
@@ -895,11 +912,12 @@ protocol/src/
   lib.rs            the surface, DEFAULT_PORT, the port a room is served
                     on, and VERSION, the version a room takes a join of
   ids.rs            PlayerId
-  lobby.rs          Lobby, SeatSlot, Control, Bot, LobbyEdit, freeze
-  seating.rs        Seating, Holder, Started, Crew: who runs which seat
-  message.rs        Message
+  lobby.rs          Lobby, SeatSlot, Holder, Bot, LobbyEdit, freeze
+  seating.rs        Seating, Occupant, Started, Crew: who runs which seat
+  message.rs        Request, Notice, Relayed, the wire's Message tag
+                    over them
   record.rs         Record
-  wire.rs           Wire, the one encoding
+  wire.rs           Codec, the one encoding
 agents/src/
   lib.rs            Agent, Seated, DECISION_INTERVAL; the surface
   dice.rs  memory.rs  roles.rs  survey.rs  plan.rs  personality.rs
@@ -909,32 +927,35 @@ game/src/
   lib.rs            the surface
   controls.rs       Controls: the buttons and axes the playable reads
   display/          mod.rs; scene.rs glyph.rs glyph_quad.rs ring.rs
-                    wheel.rs camera.rs screen.rs stencil.rs tint.rs
+                    wheel.rs camera.rs viewport.rs stencil.rs tint.rs
                     fights.rs send.rs belt.rs hud.rs, as before;
                     hue.rs the three materials' colours; label.rs titled
   net/              controller.rs Controller, Human; transport.rs
-                    Transport; local.rs Local; socket.rs Socket;
-                    link/ native.rs and browser.rs, one per target;
-                    room.rs Room, the socket to it, and Word, what it
-                    says to a screen;
-                    hosting/ Hosting, the room this machine serves:
-                    served.rs with the server, nowhere.rs without it;
-                    machine.rs Machine, the lockstep loop; pace.rs pacing
-  screens/          mod.rs Playable; flow.rs Flow, Stage, Authority, Ask
-                    and every transition; panel.rs the styled register;
-                    control.rs the three kinds of control; field.rs the
-                    one typed line; held.rs the two states play holds in;
+                    Transport; local.rs Local; connection.rs Connection,
+                    the room this machine has joined and its own
+                    transport in one; websocket/ native.rs and
+                    browser.rs, one per target; listener/ Listener, the
+                    room this machine serves: served.rs with the
+                    server, nowhere.rs without it; machine.rs Machine,
+                    the lockstep loop; pace.rs pacing
+  screens/          mod.rs Playable; flow.rs Flow, Screen, Room,
+                    Connect and every transition; panel.rs the styled
+                    register; control.rs the three kinds of control;
+                    field.rs the one typed line; held.rs the two states
+                    play holds in;
                     title.rs lobby.rs loading.rs play.rs pause.rs
-                    results.rs, each with the Picked its actions ask for
+                    results.rs, each with the Picked or Action its
+                    controls name
   main.rs           the playable, and its headless drive
   bin/look.rs       behind the `look` feature
 server/src/
   lib.rs            the surface game embeds
   rooms.rs          Room, its phase with the machines in it, and the
-                    posts it answers with; the lobby it is the authority
-                    on is kept across the match a rematch opens it after
-  playing.rs        Playing: its seating, forwarding, hashes, desync
-  records.rs        Ledger, the log being forwarded; Records, the kept ones
+                    outbound posts it answers with; the lobby it is the
+                    authority on is kept across the match a rematch
+                    opens it after
+  forwarding.rs     Forwarding: its seating, hashes, desync
+  records.rs        Log, the log being forwarded; Records, the kept ones
   stream.rs         the accept loop and one task per machine
   main.rs           the standalone binary
 ```
@@ -982,3 +1003,26 @@ and the reason it was chosen over its alternatives.
 - Replay of a log reproduces the live hash.
 - No phase type holds `&mut State`.
 - No `unwrap` or `expect` on data that came from a command.
+
+Tolerated runtime failures, each with the shape change that would delete
+it; a new one is added here in the unit that introduces it:
+
+- `orbit::universal` caps Newton's iteration at sixty steps; reaching the
+  cap means the span was outside the contract. A `Span` type bounded by
+  the body's period would delete the cap.
+- `Burn` holds thrust over at least one whole tick, so an impulse shorter
+  than a tick is spread over one. A thrust type that is already per tick
+  would delete the floor.
+- A frame carrying a machine's request arrives at a machine's own
+  connection only from a room that has broken the protocol, and is dropped
+  as bytes that are not a message are. A wire typed by direction would
+  delete the arm; one tagged union cannot express it.
+- A room drops a notice or a desync sent by a member, since only the room
+  produces them. The same direction-typed wire would delete both arms.
+- `Flow::frame` replaces the screen with a placeholder while the old
+  screen's room moves into the next. Only an `Option` every reader unwraps
+  would delete it, which is worse.
+- The lobby and results screens ignore a welcome, a refusal, and at the
+  results a start, since the lobby the room broadcasts is the truth about
+  what took and a machine is welcomed once. A notice type per screen would
+  delete the arms.

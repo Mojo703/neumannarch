@@ -1,51 +1,40 @@
-//! The belt: rocks and ships, drawn in 3D through the engine.
-
 use mirage_engine::prelude::*;
 
 use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::{EntityView, RockView, Scene};
-use crate::display::screen::Screen;
 use crate::display::tint;
+use crate::display::viewport::Viewport;
 
-/// A rock mesh's density; see [`Sphere::subdivisions`].
 const ROCK_SUBDIVISIONS: u32 = 2;
 
-/// A rock's colour where its three caps are equal: no material leads.
 const ROCK_COLOUR: Color = Color::rgb(0.55, 0.5, 0.45);
 
-/// How far a rock of one material alone is pulled from [`ROCK_COLOUR`]
-/// toward that material's own, in `0..=1`. Below one, so a rock still
-/// reads as rock.
 const TINT_STRENGTH: f32 = 0.7;
 
-/// Where the light comes from, so a rock reads as a sphere: down the belt
-/// plane's `+X`, tilted above it.
 const SUN: Vec3 = Vec3::new(-0.6, -0.7, -0.4);
 
-/// The light's colour and strength.
 const SUN_COLOUR: Color = Color::rgb(1.0, 0.97, 0.9);
 
-/// Draws `scene`'s rocks and ships as `screen` projects them.
-pub fn draw<G: Game>(scene: &Scene, screen: &Screen, ctx: &mut FrameCtx<'_, G>)
+pub fn draw<G: Game>(scene: &Scene, viewport: &Viewport, ctx: &mut FrameCtx<'_, G>)
 where
     G::Meshes: Holds<Sphere> + Holds<GlyphQuad>,
 {
-    ctx.set_camera(screen.camera());
+    ctx.set_camera(viewport.camera());
     ctx.light(Light::directional(SUN, SUN_COLOUR));
 
     for rock in &scene.rocks {
-        ctx.draw(rock_instance::<G>(rock, screen));
+        ctx.draw(rock_instance::<G>(rock, viewport));
     }
 
     for entity in &scene.entities {
-        let Some(meters_per_point) = screen.meters_per_point(entity.pos) else {
+        let Some(meters_per_point) = viewport.meters_per_point(entity.pos) else {
             continue;
         };
-        ctx.draw(ship_instance::<G>(entity, meters_per_point, screen));
+        ctx.draw(ship_instance::<G>(entity, meters_per_point, viewport));
     }
 }
 
-fn rock_instance<G: Game>(rock: &RockView, screen: &Screen) -> Instance<Sphere, G::Styles> {
+fn rock_instance<G: Game>(rock: &RockView, viewport: &Viewport) -> Instance<Sphere, G::Styles> {
     let diameter = (2.0 * rock.radius) as f32;
     Sphere {
         subdivisions: ROCK_SUBDIVISIONS,
@@ -53,7 +42,7 @@ fn rock_instance<G: Game>(rock: &RockView, screen: &Screen) -> Instance<Sphere, 
     .at(Transform::from_scale_rotation_translation(
         Vec3::splat(diameter),
         Quat::IDENTITY,
-        screen.local(rock.pos),
+        viewport.local(rock.pos),
     ))
     .material(Material::lit(tint::toward(
         ROCK_COLOUR,
@@ -62,13 +51,10 @@ fn rock_instance<G: Game>(rock: &RockView, screen: &Screen) -> Instance<Sphere, 
     )))
 }
 
-/// `entity`'s glyph at a fixed screen size: [`crate::display::glyph::HALF`] points
-/// each way, in meters at its own depth, so the belt's ships and the HUD's
-/// runs agree in size.
 fn ship_instance<G: Game>(
     entity: &EntityView,
     meters_per_point: f32,
-    screen: &Screen,
+    viewport: &Viewport,
 ) -> Instance<GlyphQuad, G::Styles> {
     let side = 2.0 * crate::display::glyph::HALF * meters_per_point;
     GlyphQuad {
@@ -78,7 +64,7 @@ fn ship_instance<G: Game>(
     .at(Transform::from_scale_rotation_translation(
         Vec3::splat(side),
         Quat::IDENTITY,
-        screen.local(entity.pos),
+        viewport.local(entity.pos),
     ))
     .billboard()
 }

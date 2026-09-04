@@ -1,6 +1,3 @@
-//! The match as it is played: the live state, the log that reproduces it,
-//! and the rewind that takes a command learned late.
-
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -12,23 +9,17 @@ use crate::state::{Refused, Stamped, State};
 use crate::step::Outcome;
 use crate::time::Tick;
 
-/// What an insert did to the ticks a session had already stepped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rewound {
-    /// The command's tick was not stepped yet, so nothing was re-stepped.
     Nothing,
-    /// This tick's outcome and every later one may now differ, and so may
-    /// every state after it.
     From(Tick),
 }
 
-/// A local seat the setup does not seat, which no frozen lobby produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Unseated {
     pub seat: SeatId,
 }
 
-/// One match in progress: what every frontend drives.
 pub struct Session {
     setup: Setup,
     initial: State,
@@ -36,17 +27,11 @@ pub struct Session {
     snapshots: Snapshots,
     log: Log,
     outcomes: BTreeMap<Tick, Outcome>,
-    /// Per seat, the tick before which none of its commands are unknown.
     acknowledged: Vec<Tick>,
-    /// The seats this machine owns, in id order.
     local: Vec<SeatId>,
 }
 
 impl Session {
-    /// A session over the match `setup` names, keeping the states
-    /// `retention` names and acknowledging the seats `local` names as it
-    /// advances. A local seat the setup does not seat is refused, since a
-    /// match would answer it by never settling.
     pub fn new(setup: Setup, retention: Retention, local: &[SeatId]) -> Result<Session, Unseated> {
         let seats = setup.teams().len();
         if let Some(seat) = local.iter().find(|seat| usize::from(seat.0) >= seats) {
@@ -68,14 +53,10 @@ impl Session {
         })
     }
 
-    /// The state at the tick this session shows.
     pub fn state(&self) -> &State {
         &self.live
     }
 
-    /// One tick on, with the commands logged for the tick it leaves, and
-    /// that tick's outcome. Acknowledges every local seat up to the tick it
-    /// arrives at.
     pub fn advance(&mut self) -> &Outcome {
         let stepped = self.live.tick();
         self.stepped();
@@ -91,8 +72,6 @@ impl Session {
             .expect("the tick just stepped keeps its outcome")
     }
 
-    /// Takes `stamped` into the log at the tick it names, re-stepping from
-    /// there when that tick is already stepped, or refuses it by name.
     pub fn insert(&mut self, stamped: Stamped) -> Result<Rewound, Refused> {
         let latest = self.live.tick();
         if stamped.tick < self.oldest() {
@@ -109,27 +88,16 @@ impl Session {
         Ok(Rewound::From(stamped.tick))
     }
 
-    /// Records that no command of `seat` before `up_to` is unknown. A
-    /// seat's acknowledgement never goes backward, and a seat the match
-    /// does not have holds nothing to record.
     pub fn acknowledge(&mut self, seat: SeatId, up_to: Tick) {
-        // An acknowledgement off the wire names any seat at all; a
-        // `SeatId` bound to a seat of this match would delete the lookup,
-        // and no type can bind an id to one match's seating.
         if let Some(known) = self.acknowledged.get_mut(usize::from(seat.0)) {
             *known = (*known).max(up_to);
         }
     }
 
-    /// How far `seat` is acknowledged: the tick before which none of its
-    /// commands is unknown. `None` for a seat the match does not have.
     pub fn acknowledged(&self, seat: SeatId) -> Option<Tick> {
         self.acknowledged.get(usize::from(seat.0)).copied()
     }
 
-    /// The smallest acknowledgement over the seats: the state at it, and
-    /// every state before it, is final. It can name a tick this session has
-    /// not stepped, when every seat's next command is still ahead.
     pub fn settled(&self) -> Tick {
         self.acknowledged
             .iter()
@@ -138,20 +106,14 @@ impl Session {
             .unwrap_or(Tick::ZERO)
     }
 
-    /// The desync hash at `tick`. `None` past the tick this session shows,
-    /// or further back than it can rewind.
     pub fn hash_at(&self, tick: Tick) -> Option<u64> {
         self.at(tick).map(|state| state.hash())
     }
 
-    /// The outcome of stepping `tick`, whose shots belong to a view of the
-    /// state at the next tick. `None` for a tick this session has not
-    /// stepped or has forgotten.
     pub fn outcome_at(&self, tick: Tick) -> Option<&Outcome> {
         self.outcomes.get(&tick)
     }
 
-    /// The outcome of the step that produced the tick this session shows.
     pub fn outcome(&self) -> Option<&Outcome> {
         self.live
             .tick()
@@ -159,19 +121,14 @@ impl Session {
             .and_then(|at| self.outcome_at(at))
     }
 
-    /// What the match was set up as, the same value on every machine.
     pub fn setup(&self) -> &Setup {
         &self.setup
     }
 
-    /// Every command stamped before the settled tick, in tick then
-    /// `(seat, seq)` order: what a record of this match holds.
     pub fn commands(&self) -> Vec<Stamped> {
         self.log.until(self.settled()).stamped().collect()
     }
 
-    /// One tick from the live state: its snapshot kept if the policy names
-    /// it, its logged commands applied, its outcome recorded.
     fn stepped(&mut self) {
         let tick = self.live.tick();
         self.snapshots.keep(&self.live);
@@ -180,8 +137,6 @@ impl Session {
         self.outcomes.insert(tick, outcome);
     }
 
-    /// The state at `from` restored and re-stepped to the tick the session
-    /// shows, replacing the outcomes on the way.
     fn rewind(&mut self, from: Tick) {
         let restored = self
             .snapshots
@@ -197,8 +152,6 @@ impl Session {
         }
     }
 
-    /// The state at `tick`, borrowed where the session holds it and
-    /// re-stepped from the newest kept state before it where it does not.
     fn at(&self, tick: Tick) -> Option<Cow<'_, State>> {
         if tick > self.live.tick() || tick < self.oldest() {
             return None;
@@ -218,13 +171,10 @@ impl Session {
         Some(Cow::Owned(state))
     }
 
-    /// The oldest tick a command can still be inserted at.
     fn oldest(&self) -> Tick {
         self.live.tick().back(self.snapshots.span())
     }
 
-    /// Drops the states that have left the window and the outcomes of the
-    /// ticks they produced.
     fn forget(&mut self) {
         let oldest = self.oldest();
         self.snapshots.prune(oldest);
@@ -244,26 +194,20 @@ mod tests {
     use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion};
     use crate::step::maneuver::Maneuver;
 
-    /// A clock no test reaches.
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
     const BOTH: [SeatId; 2] = [SeatId(0), SeatId(1)];
 
-    /// How far a test match plays.
     const UNTIL: Tick = Tick(40);
 
     fn setup() -> Setup {
         Setup::new(vec![TeamId(0), TeamId(1)], 11, CLOCK).expect("two seats are a match")
     }
 
-    /// A session of two seats, both this machine's, keeping every tick of
-    /// `span` ticks.
     fn session(span: u32) -> Session {
         Session::new(setup(), window(span, 1), &BOTH).expect("both seats are seated")
     }
 
-    /// A session of the same match with seat one another machine's, so it
-    /// settles only as that seat is acknowledged.
     fn one_local() -> Session {
         Session::new(setup(), Retention::shipped(), &[SeatId(0)]).expect("seat zero is seated")
     }
@@ -297,9 +241,6 @@ mod tests {
         }
     }
 
-    /// The commands a test match plays: both seats place their reserve,
-    /// then seat zero builds a frigate and moves its constructor on. Every
-    /// one of them changes the state it is applied to.
     fn script() -> Vec<Stamped> {
         vec![
             stamped(3, want(0, 0, inner(0), SHIPYARD, 1)),
@@ -312,8 +253,6 @@ mod tests {
         ]
     }
 
-    /// The script played to `until` with every command inserted at the tick
-    /// it takes effect at, as a local frontend's own commands are.
     fn play(session: &mut Session, until: Tick) {
         while session.state().tick() < until {
             let tick = session.state().tick();
@@ -499,7 +438,6 @@ mod tests {
         run(&mut session, u64::from(span) + 1);
         let oldest = session.oldest();
 
-        // The sim has no clock of its own; a cost report needs one.
         #[expect(
             clippy::disallowed_types,
             reason = "a test measuring wall time is not the sim reading a clock"

@@ -1,53 +1,25 @@
-//! The glyph of a row: DISPLAY.md's frame, marks and size rules, drawn
-//! from one table of primitives that reproduces
-//! `art/concepts/hull-gallery.html`'s `icon` table exactly.
-
 use probe_sim::roster::{Kind, Row, Weapon};
 
-/// A glyph's nominal half-width, in points, before its size class scales
-/// it: on a ring, on the wheel, and on a ship's billboard alike, so the
-/// two layers agree in size.
 pub const HALF: f32 = 11.0;
 
-/// Cost total, in cost units, below which a glyph is `Size::Small`.
 pub const SMALL_BELOW: f64 = 50.0;
 
-/// Cost total, in cost units, from which a glyph is `Size::Large`.
 pub const LARGE_FROM: f64 = 150.0;
 
-/// Radar strictly above this multiple of sight earns the arc mark.
 pub const RADAR_ABOVE_DEFAULT: f64 = 2.0;
 
-/// A glyph's scale by its cost class, over whatever size a drawn glyph's
-/// own medium class takes: `0.85` for `Small`, `1.0` for `Medium`, `1.2`
-/// for `Large`. Compressed toward `1.0` from a wider spread so `Small`
-/// still leaves a mark room to read.
 const SIZE_SCALE: [f32; 3] = [0.85, 1.0, 1.2];
 
-/// The widest a glyph is drawn, as a scale over its nominal half-width:
-/// [`Size::Large`]'s step. A run is laid at this width, so a glyph of any
-/// size class stands clear of its neighbours.
 pub const WIDEST_SCALE: f32 = SIZE_SCALE[2];
 
-/// The sheet's reference cell's own centre, in its units:
-/// `art/concepts/hull-gallery.html`'s `viewBox="0 0 60 60"`.
 const CENTRE: (f32, f32) = (30.0, 30.0);
 
-/// The square frame's own half-width in the sheet's cell (`8` to `52`
-/// about [`CENTRE`]): the unit [`HALF`] itself measures, so a glyph's
-/// overall size keeps reading the same as it did before the sheet.
 const REFERENCE_HALF: f32 = 22.0;
 
-/// The frame outline's stroke, in cell units: `.own`'s `stroke-width`.
 pub const OUTLINE_WIDTH: f32 = 2.0;
 
-/// A mark's stroke, in cell units: `.ownmarkline`'s `stroke-width`.
 pub const MARK_WIDTH: f32 = 4.5;
 
-/// `point`, in the sheet's cell, as a fraction of [`REFERENCE_HALF`] from
-/// [`CENTRE`]: what the screen painter multiplies by its own half-width in
-/// points, and what the texture rasterizer reads directly as its own
-/// local unit.
 pub fn unit(point: (f32, f32)) -> (f32, f32) {
     (
         (point.0 - CENTRE.0) / REFERENCE_HALF,
@@ -55,53 +27,34 @@ pub fn unit(point: (f32, f32)) -> (f32, f32) {
     )
 }
 
-/// A length in the sheet's cell, as a fraction of [`REFERENCE_HALF`]: for
-/// a stroke width or a radius, which have no position to offset first.
 pub fn unit_length(length: f32) -> f32 {
     length / REFERENCE_HALF
 }
 
-/// The outline: the row's kind.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Frame {
-    /// A unit.
     Triangle,
-    /// A structure.
     Square,
 }
 
-/// A row's glyph: every glyph is drawn from one of these, none by hand.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Glyph {
     pub frame: Frame,
-    /// The row's earned marks, in the order [`marks_of`] states. Drawn
-    /// through [`primitives_of`], never by hand.
     pub marks: Vec<GlyphMark>,
     pub size: Size,
 }
 
-/// A mark on the frame; what it draws, and where, is
-/// [`primitives_of`]'s alone to say.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GlyphMark {
-    /// Damage with range within the row's sight.
     Dot,
-    /// Damage with range beyond the row's sight.
     Bar,
-    /// Build.
     Plus,
-    /// Extract.
     Chevron,
-    /// Radar above [`RADAR_ABOVE_DEFAULT`] times sight.
     Arc,
-    /// Plating above zero.
     Belt,
-    /// Capacity above zero.
     Ring,
 }
 
-/// The cost class: below `SMALL_BELOW` is small, from `LARGE_FROM` is
-/// large, between is medium.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Size {
     Small,
@@ -109,11 +62,6 @@ pub enum Size {
     Large,
 }
 
-/// One drawn primitive of a glyph, in the sheet's cell, before its size
-/// class scales it: a filled dot (`.ownmark`), an open line
-/// (`.ownmarkline`), a hollow ring (`.ownmarkline`), or a hollow arc
-/// (`.ownmarkline`) over the top of its own circle, from its west point to
-/// its east point.
 #[derive(Clone, Debug)]
 pub enum Primitive {
     Dot { at: (f32, f32), radius: f32 },
@@ -130,8 +78,6 @@ impl Frame {
         }
     }
 
-    /// This frame's outline in the sheet's cell, apex up for a triangle:
-    /// `art/concepts/hull-gallery.html`'s `TRI` and `SQ`.
     pub fn points(&self) -> &'static [(f32, f32)] {
         match self {
             Frame::Triangle => &[(30.0, 6.0), (56.0, 52.0), (4.0, 52.0)],
@@ -141,7 +87,6 @@ impl Frame {
 }
 
 impl Glyph {
-    /// The glyph of `row` by DISPLAY.md's rules.
     pub fn of(row: &Row) -> Glyph {
         Glyph {
             frame: Frame::of(row.kind()),
@@ -151,8 +96,6 @@ impl Glyph {
     }
 }
 
-/// `row`'s earned marks: one per weapon in weapon order, then the arc, the
-/// belt and the ring where the row's fields earn them.
 fn marks_of(row: &Row) -> Vec<GlyphMark> {
     let mut marks: Vec<GlyphMark> = row
         .weapons
@@ -172,8 +115,6 @@ fn marks_of(row: &Row) -> Vec<GlyphMark> {
 }
 
 impl GlyphMark {
-    /// `sight` is the row's, in meters; a damage range at most `sight` is
-    /// within it.
     fn of_weapon(weapon: &Weapon, sight: f64) -> GlyphMark {
         match weapon {
             Weapon::Damage { range, .. } if range.0 <= sight => GlyphMark::Dot,
@@ -184,11 +125,6 @@ impl GlyphMark {
     }
 }
 
-/// Every primitive `marks` draws in the sheet's cell:
-/// `art/concepts/hull-gallery.html`'s `icon` table. A dot sits higher and
-/// smaller where a belt is also drawn, since the belt takes the room below
-/// it; a ring drawn around a plus is wider than one alone, and that plus
-/// sits at the ring's own centre rather than lower in the frame.
 pub fn primitives_of(marks: &[GlyphMark]) -> Vec<Primitive> {
     let paired = marks.contains(&GlyphMark::Ring) && marks.contains(&GlyphMark::Plus);
     let belted = marks.contains(&GlyphMark::Belt);
@@ -230,7 +166,6 @@ fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primi
     }
 }
 
-/// A plus's two strokes, arm's length `arm` from centre `at`.
 fn plus_lines(at: (f32, f32), arm: f32) -> Vec<Primitive> {
     vec![
         Primitive::Line(vec![(at.0 - arm, at.1), (at.0 + arm, at.1)]),
@@ -238,8 +173,6 @@ fn plus_lines(at: (f32, f32), arm: f32) -> Vec<Primitive> {
     ]
 }
 
-/// A chevron pointing down, half-width `a` from centre `at`:
-/// `M(x-a, y-0.7a) L(x, y+0.7a) L(x+a, y-0.7a)`.
 fn chevron_line(at: (f32, f32), a: f32) -> Primitive {
     Primitive::Line(vec![
         (at.0 - a, at.1 - a * 0.7),
@@ -249,7 +182,6 @@ fn chevron_line(at: (f32, f32), a: f32) -> Primitive {
 }
 
 impl Size {
-    /// `cost` is the row's cost total, in cost units.
     fn of(cost: f64) -> Size {
         if cost < SMALL_BELOW {
             Size::Small
@@ -260,8 +192,6 @@ impl Size {
         }
     }
 
-    /// This size's scale over a drawn glyph's medium size; see
-    /// [`SIZE_SCALE`].
     pub fn scale(&self) -> f32 {
         SIZE_SCALE[match self {
             Size::Small => 0,
@@ -278,8 +208,6 @@ mod tests {
 
     use super::*;
 
-    /// `(name, marks)` for every shipped row, from DISPLAY.md's rules read
-    /// off `sim/src/roster/shipped.rs`'s table.
     const SHIPPED_MARKS: [(&str, &[GlyphMark]); 8] = [
         ("constructor", &[GlyphMark::Plus]),
         ("extractor", &[GlyphMark::Chevron]),
@@ -291,8 +219,6 @@ mod tests {
         ("lancer", &[GlyphMark::Bar]),
     ];
 
-    /// A row of `cost` metals, seeing `sight` meters, with `accel` and
-    /// `weapons`; the rest is what no rule reads.
     fn row(cost: f64, accel: f64, sight: f64, weapons: Vec<Weapon>) -> Row {
         Row {
             name: "test",

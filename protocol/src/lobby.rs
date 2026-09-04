@@ -1,123 +1,75 @@
-//! The lobby a match is set up in: who holds each seat, and who may say so.
-
 use core::ops::RangeInclusive;
 
 use probe_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
-use crate::seating::{Holder, Seating, Started};
+use crate::seating::{Occupant, Seating, Started};
 
-/// Clocks a lobby allows, in ticks: a minute to half an hour, around
-/// DESIGN.md's fifteen.
 pub const CLOCK_RANGE: RangeInclusive<Tick> =
     Tick(60 * TICKS_PER_SECOND as u64)..=Tick(30 * 60 * TICKS_PER_SECOND as u64);
 
-/// The clock a lobby opens at: fifteen minutes.
 pub const DEFAULT_CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
-/// The seed a lobby opens at.
 pub const DEFAULT_SEED: u64 = 1;
 
-/// Slots a lobby holds, one per seat a match can have.
 pub const MAX_SLOTS: usize = MAX_SEATS;
 
-/// What [`Lobby::next_seed`] steps the seed by: odd, so the seeds it walks
-/// never repeat.
 const SEED_STEP: u64 = 0x9E37_79B9_7F4A_7C15;
 
-/// A frozen lobby is a match, so its held slots are a setup's seats.
 const _: () = assert!(MAX_SLOTS == MAX_SEATS);
 
-/// A shipped scripted opponent, by the way it plays. The machine that owns
-/// the seat turns it into the agent's own constants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Bot {
-    /// Holds few rocks and keeps a heavy defensive army.
     Turtle,
-    /// Claims rocks fast and commits early.
     Expand,
 }
 
-/// What holds one slot.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
-pub enum Control {
-    /// A player may still take it; the match cannot start while one does.
+pub enum Holder {
     Open,
-    /// Not in the match.
     Closed,
-    /// A person, and whether they have readied. A guest's readiness gates
-    /// the start; the host's does not, since the host starts the match.
     Player { player: PlayerId, ready: bool },
-    /// A scripted opponent, run by the machine that added it.
     Bot(Bot),
 }
 
-/// Why an edit was not applied.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Refused {
-    /// The shape is the host's, and this editor is not the host.
     NotHost,
-    /// A guest edits its own slot and no other.
     NotYours,
-    /// The editor holds no slot to edit.
     NotSeated,
-    /// No slot of that index.
     NoSuchSlot,
-    /// A team no slot could sit on: teams run to [`MAX_SLOTS`].
     BadTeam,
-    /// A clock outside [`CLOCK_RANGE`].
     BadClock,
-    /// That player already holds another slot, and holds one at most.
     AlreadySeated,
-    /// The player named holds no guest's slot, so there is none to open.
     NotAGuest,
-    /// A guest holds that slot, and a guest's slot is opened by a kick,
-    /// which sends the guest away with it.
     HeldByAGuest,
 }
 
-/// Why a lobby is not yet a match.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum NotReady {
-    /// Every slot is closed.
     NoSeats,
-    /// This slot is open, so a player may still take it.
     OpenSeat { slot: usize },
-    /// This slot's guest has not readied.
     Unready { slot: usize },
-    /// The host runs none of the seats, so its own machine has no part in
-    /// the match it would start.
     HostUnseated,
 }
 
-/// One change to a lobby. The host may make any of them; a guest may set
-/// its own slot's team and its own readiness.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum LobbyEdit {
-    /// What holds a slot.
-    SetSlot { slot: usize, control: Control },
-    /// Opens the slot a guest holds, which sends that guest away.
+    SetSlot { slot: usize, control: Holder },
     Kick(PlayerId),
-    /// A slot's team.
     SetTeam { slot: usize, team: TeamId },
-    /// The map's seed.
     SetSeed(u64),
-    /// The tick the match ends at.
     SetClock(Tick),
-    /// The editor's own readiness.
     SetReady { ready: bool },
 }
 
-/// One seat of a lobby.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub struct SeatSlot {
     pub team: TeamId,
-    pub control: Control,
+    pub control: Holder,
 }
 
-/// A match being set up: [`MAX_SLOTS`] slots, the shape the host owns, and
-/// the host. The same value on every machine of the lobby.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub struct Lobby {
     slots: Vec<SeatSlot>,
@@ -127,15 +79,13 @@ pub struct Lobby {
 }
 
 impl Lobby {
-    /// A skirmish: the host in slot zero, a bot in slot one, the rest
-    /// closed, so the one-against-one baseline starts with no edits.
     pub fn skirmish(host: PlayerId) -> Lobby {
         let mut slots = closed_slots();
-        slots[0].control = Control::Player {
+        slots[0].control = Holder::Player {
             player: host,
             ready: true,
         };
-        slots[1].control = Control::Bot(Bot::Expand);
+        slots[1].control = Holder::Bot(Bot::Expand);
         Lobby {
             slots,
             seed: DEFAULT_SEED,
@@ -144,106 +94,86 @@ impl Lobby {
         }
     }
 
-    /// The shape a room opens on: the host in slot zero, one open seat, the
-    /// rest closed, so a guest has somewhere to join.
     pub fn room(host: PlayerId) -> Lobby {
         let mut lobby = Lobby::skirmish(host);
-        lobby.slots[1].control = Control::Open;
+        lobby.slots[1].control = Holder::Open;
         lobby
     }
 
-    /// Every slot, in slot order.
     pub fn slots(&self) -> &[SeatSlot] {
         &self.slots
     }
 
-    /// The map's seed.
     pub fn seed(&self) -> u64 {
         self.seed
     }
 
-    /// The tick a match from this lobby ends at.
     pub fn clock(&self) -> Tick {
         self.clock
     }
 
-    /// The player who owns the shape.
     pub fn host(&self) -> PlayerId {
         self.host
     }
 
-    /// The slot `player` holds, if any.
     pub fn slot_of(&self, player: PlayerId) -> Option<usize> {
         self.slots.iter().position(|slot| slot.holds(player))
     }
 
-    /// The seat a slot becomes once the lobby is frozen: its place among
-    /// the slots that are not closed. `None` for a closed slot, which is
-    /// not in the match, and for no such slot.
     pub fn seat_of(&self, slot: usize) -> Option<SeatId> {
         self.numbered()
             .find(|(_, at, _)| *at == slot)
             .map(|(seat, _, _)| seat)
     }
 
-    /// Every machine with a seat to run once this lobby is frozen, in id
-    /// order, each once.
     pub fn players(&self) -> Vec<PlayerId> {
         self.seating().players()
     }
 
-    /// Whether `player` holds a slot and has readied.
     pub fn readied(&self, player: PlayerId) -> bool {
         self.slot_of(player)
             .map(|slot| self.slots[slot].control)
-            .is_some_and(|control| matches!(control, Control::Player { ready: true, .. }))
+            .is_some_and(|control| matches!(control, Holder::Player { ready: true, .. }))
     }
 
-    /// Opens the slot a guest holds, so another machine may take it. False
-    /// for the host's own slot, which stays its own, and for a player
-    /// holding none.
     pub fn release(&mut self, who: PlayerId) -> bool {
         let Some(slot) = self.slot_of(who).filter(|_| who != self.host) else {
             return false;
         };
-        self.slots[slot].control = Control::Open;
+        self.slots[slot].control = Holder::Open;
         true
     }
 
-    /// Seats `player`: the slot it already holds, else the first open one.
-    /// `None` where no slot is open, which is a lobby with nowhere to sit.
-    pub fn admit(&mut self, player: PlayerId) -> Option<SeatId> {
-        let slot = match self.slot_of(player) {
-            Some(slot) => slot,
-            None => {
-                let open = self
-                    .slots
-                    .iter()
-                    .position(|slot| slot.control == Control::Open)?;
-                self.slots[open].control = Control::Player {
-                    player,
-                    ready: false,
-                };
-                open
-            }
+    pub fn admit(&mut self, player: PlayerId) -> bool {
+        if self.slot_of(player).is_some() {
+            return true;
+        }
+        let Some(open) = self
+            .slots
+            .iter()
+            .position(|slot| slot.control == Holder::Open)
+        else {
+            return false;
         };
-        self.seat_of(slot)
+        self.slots[open].control = Holder::Player {
+            player,
+            ready: false,
+        };
+        true
     }
 
-    /// Applies `edit` as `by`, or refuses it by name: the host owns the
-    /// shape, and a guest owns its own slot's team and its own readiness.
     pub fn edit(&mut self, by: PlayerId, edit: LobbyEdit) -> Result<(), Refused> {
         match edit {
             LobbyEdit::SetSlot { slot, control } => {
                 self.as_host(by)?;
                 let held = self.slots.get(slot).ok_or(Refused::NoSuchSlot)?.control;
-                if let Control::Player { player: guest, .. } = held
+                if let Holder::Player { player: guest, .. } = held
                     && guest != self.host
-                    && !matches!(control, Control::Player { player, .. } if player == guest)
+                    && !matches!(control, Holder::Player { player, .. } if player == guest)
                 {
                     return Err(Refused::HeldByAGuest);
                 }
-                if let Control::Player { player, .. } = control
+                if let Holder::Player { player, .. } = control
                     && self.slot_of(player).is_some_and(|held| held != slot)
                 {
                     return Err(Refused::AlreadySeated);
@@ -275,30 +205,24 @@ impl Lobby {
             }
             LobbyEdit::SetReady { ready } => {
                 let slot = self.slot_of(by).ok_or(Refused::NotSeated)?;
-                self.slots[slot].control = Control::Player { player: by, ready };
+                self.slots[slot].control = Holder::Player { player: by, ready };
             }
         }
         Ok(())
     }
 
-    /// The seed the random_seed action asks for: this one stepped by
-    /// [`SEED_STEP`]. The sim has no clock and no randomness to draw a
-    /// fresh seed from, and a step needs neither.
     pub fn next_seed(&self) -> u64 {
         self.seed.wrapping_add(SEED_STEP)
     }
 
-    /// The match this lobby starts, or why it is not one yet: every slot
-    /// held or closed, every guest ready, at least one seat, and a seat the
-    /// host's own machine runs.
     pub fn freeze(&self) -> Result<Started, NotReady> {
         for (at, slot) in self.slots.iter().enumerate() {
             match slot.control {
-                Control::Open => return Err(NotReady::OpenSeat { slot: at }),
-                Control::Player { player, ready } if !ready && player != self.host => {
+                Holder::Open => return Err(NotReady::OpenSeat { slot: at }),
+                Holder::Player { player, ready } if !ready && player != self.host => {
                     return Err(NotReady::Unready { slot: at });
                 }
-                Control::Closed | Control::Player { .. } | Control::Bot(_) => {}
+                Holder::Closed | Holder::Player { .. } | Holder::Bot(_) => {}
             }
         }
         let seating = self.seating();
@@ -308,40 +232,35 @@ impl Lobby {
         if seating.run_by(self.host).is_none() {
             return Err(NotReady::HostUnseated);
         }
-        // At most `MAX_SLOTS` slots are held and `MAX_SLOTS` is `MAX_SEATS`,
-        // so the only setup a lobby can refuse is the empty one, above.
+
         let setup = Setup::new(self.teams_seated(), self.seed, self.clock)
             .expect("held slots are a match's seats");
         Ok(Started::new(setup, seating).expect("one seat per slot that holds one"))
     }
 
-    /// Every slot that holds a seat, with the seat it becomes and its own
-    /// index, in slot order.
     fn numbered(&self) -> impl Iterator<Item = (SeatId, usize, &SeatSlot)> {
         self.slots
             .iter()
             .enumerate()
-            .filter(|(_, slot)| slot.control.holder().is_some())
+            .filter(|(_, slot)| !matches!(slot.control, Holder::Closed))
             .zip(0u8..)
             .map(|((at, slot), seat)| (SeatId(seat), at, slot))
     }
 
-    /// Who holds each seat this lobby would freeze into.
     fn seating(&self) -> Seating {
         Seating::new(
-            self.numbered()
-                .filter_map(|(_, _, slot)| slot.control.holder())
+            self.slots
+                .iter()
+                .filter_map(|slot| slot.control.occupant())
                 .collect(),
             self.host,
         )
     }
 
-    /// Each seat's team, in seat order, which is a match's seating.
     fn teams_seated(&self) -> Vec<TeamId> {
         self.numbered().map(|(_, _, slot)| slot.team).collect()
     }
 
-    /// `slot` as its holder or as the host, or a refusal.
     fn own_slot(&mut self, by: PlayerId, slot: usize) -> Result<&mut SeatSlot, Refused> {
         let held = self.slots.get(slot).ok_or(Refused::NoSuchSlot)?;
         if by != self.host && !held.holds(by) {
@@ -355,33 +274,27 @@ impl Lobby {
     }
 }
 
-impl Control {
-    /// What it holds as a seat of a match; `None` for a closed slot, which
-    /// holds no seat.
-    pub fn holder(self) -> Option<Holder> {
+impl Holder {
+    fn occupant(self) -> Option<Occupant> {
         match self {
-            Control::Open => Some(Holder::Open),
-            Control::Player { player, .. } => Some(Holder::Player(player)),
-            Control::Bot(bot) => Some(Holder::Bot(bot)),
-            Control::Closed => None,
+            Holder::Player { player, .. } => Some(Occupant::Player(player)),
+            Holder::Bot(bot) => Some(Occupant::Bot(bot)),
+            Holder::Open | Holder::Closed => None,
         }
     }
 }
 
 impl SeatSlot {
-    /// Whether `player` holds this slot.
     pub fn holds(&self, player: PlayerId) -> bool {
-        matches!(self.control, Control::Player { player: held, .. } if held == player)
+        matches!(self.control, Holder::Player { player: held, .. } if held == player)
     }
 }
 
-/// [`MAX_SLOTS`] closed slots, each on its own team, which is the shape a
-/// lobby edits from.
 fn closed_slots() -> Vec<SeatSlot> {
     (0..MAX_SLOTS)
         .map(|at| SeatSlot {
             team: TeamId(at as u8),
-            control: Control::Closed,
+            control: Holder::Closed,
         })
         .collect()
 }
@@ -392,8 +305,6 @@ mod tests {
 
     const GUEST: PlayerId = PlayerId(7);
 
-    /// The skirmish lobby with slot two held by a guest who has not
-    /// readied, which is the shape every rule below is read against.
     fn joined() -> Lobby {
         let mut lobby = Lobby::skirmish(PlayerId::HOST);
         lobby
@@ -401,7 +312,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 2,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: GUEST,
                         ready: false,
                     },
@@ -419,7 +330,7 @@ mod tests {
         for edit in [
             LobbyEdit::SetSlot {
                 slot: 3,
-                control: Control::Open,
+                control: Holder::Open,
             },
             LobbyEdit::SetTeam {
                 slot: 2,
@@ -431,7 +342,7 @@ mod tests {
             assert_eq!(lobby.edit(PlayerId::HOST, edit), Ok(()), "{edit:?}");
         }
 
-        assert_eq!(lobby.slots()[3].control, Control::Open);
+        assert_eq!(lobby.slots()[3].control, Holder::Open);
         assert_eq!(lobby.slots()[2].team, TeamId(0));
         assert_eq!(lobby.seed(), 42);
         assert_eq!(lobby.clock(), clock);
@@ -459,7 +370,7 @@ mod tests {
         assert_eq!(lobby.slots()[2].team, TeamId(0));
         assert_eq!(
             lobby.slots()[2].control,
-            Control::Player {
+            Holder::Player {
                 player: GUEST,
                 ready: true
             }
@@ -476,7 +387,7 @@ mod tests {
                 GUEST,
                 LobbyEdit::SetSlot {
                     slot: 0,
-                    control: Control::Open
+                    control: Holder::Open
                 }
             ),
             Err(Refused::NotHost)
@@ -504,7 +415,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: MAX_SLOTS,
-                    control: Control::Open
+                    control: Holder::Open
                 }
             ),
             Err(Refused::NoSuchSlot)
@@ -536,7 +447,7 @@ mod tests {
 
         assert_eq!(lobby.edit(PlayerId::HOST, LobbyEdit::Kick(GUEST)), Ok(()));
 
-        assert_eq!(lobby.slots()[2].control, Control::Open);
+        assert_eq!(lobby.slots()[2].control, Holder::Open);
         assert_eq!(lobby.slot_of(GUEST), None, "the guest holds no slot now");
         assert_eq!(
             joined().edit(GUEST, LobbyEdit::Kick(PlayerId::HOST)),
@@ -562,7 +473,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 3,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: GUEST,
                         ready: false
                     }
@@ -577,7 +488,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 2,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: GUEST,
                         ready: true
                     }
@@ -608,7 +519,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 3,
-                    control: Control::Open,
+                    control: Holder::Open,
                 },
             )
             .expect("the host opens a seat");
@@ -623,7 +534,7 @@ mod tests {
                     PlayerId::HOST,
                     LobbyEdit::SetSlot {
                         slot,
-                        control: Control::Closed,
+                        control: Holder::Closed,
                     },
                 )
                 .expect("the host closes a seat");
@@ -636,10 +547,10 @@ mod tests {
         let mut lobby = joined();
 
         for control in [
-            Control::Open,
-            Control::Closed,
-            Control::Bot(Bot::Turtle),
-            Control::Player {
+            Holder::Open,
+            Holder::Closed,
+            Holder::Bot(Bot::Turtle),
+            Holder::Player {
                 player: PlayerId::HOST,
                 ready: true,
             },
@@ -653,7 +564,7 @@ mod tests {
 
         assert_eq!(lobby, joined(), "a refused edit changes nothing");
         assert_eq!(lobby.edit(PlayerId::HOST, LobbyEdit::Kick(GUEST)), Ok(()));
-        assert_eq!(lobby.slots()[2].control, Control::Open);
+        assert_eq!(lobby.slots()[2].control, Holder::Open);
     }
 
     #[test]
@@ -668,7 +579,7 @@ mod tests {
                     PlayerId::HOST,
                     LobbyEdit::SetSlot {
                         slot,
-                        control: Control::Closed,
+                        control: Holder::Closed,
                     },
                 )
                 .expect("the host closes a seat");
@@ -681,7 +592,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 1,
-                    control: Control::Bot(Bot::Turtle),
+                    control: Holder::Bot(Bot::Turtle),
                 },
             )
             .expect("the host adds a bot");
@@ -702,7 +613,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 0,
-                    control: Control::Closed,
+                    control: Holder::Closed,
                 },
             )
             .expect("the host closes its own seat");
@@ -738,7 +649,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 0,
-                    control: Control::Closed,
+                    control: Holder::Closed,
                 },
             )
             .expect("the host closes its own seat");
@@ -747,7 +658,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 3,
-                    control: Control::Bot(Bot::Turtle),
+                    control: Holder::Bot(Bot::Turtle),
                 },
             )
             .expect("the host adds a bot");

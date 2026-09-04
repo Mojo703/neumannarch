@@ -1,62 +1,44 @@
-//! One room: the machines in it, the phase it is in, and what it says back.
+use probe_protocol::{Lobby, LobbyEdit, Message, Notice, PlayerId, Refused, Relayed, Request};
 
-use probe_protocol::{Lobby, LobbyEdit, Message, PlayerId, Refusal, Refused};
-
-use crate::playing::Playing;
+use crate::forwarding::Forwarding;
 use crate::records::Records;
 
-/// A machine taken into a room: the id it holds there, and what the room
-/// said about it.
 pub struct Joined {
     pub player: PlayerId,
-    pub posts: Vec<Post>,
+    pub posts: Vec<Outbound>,
 }
 
-/// One message the room sends, and who hears it.
-pub struct Post {
-    pub to: To,
+pub struct Outbound {
+    pub to: Recipient,
     pub message: Message,
 }
 
-/// Who hears one of the room's messages, from the sender it is answering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum To {
-    /// Every machine connected to the room.
+pub enum Recipient {
     Everyone,
-    /// Every machine but the sender.
     EveryoneElse,
-    /// The machine the room is answering.
     Sender,
-    /// One named machine, whatever the room is answering.
     One(PlayerId),
 }
 
-/// One room of a match server: the authority on its lobby, and the
-/// forwarder of the match its members play.
 pub struct Room {
-    /// The id the next machine to join takes. It only rises for the life of
-    /// the room, so a room that reopens hands out no id it has held before.
     next: PlayerId,
     phase: Phase,
     records: Records,
 }
 
-/// What a room is doing, and the machines in it while it does it.
 enum Phase {
-    /// Setting a match up, as the authority on the lobby it is set up in.
-    Seating {
+    Lobby {
         lobby: Lobby,
-        /// The machines in the room, in the order they joined.
         members: Vec<PlayerId>,
     },
-    /// Forwarding one, over the lobby it was set up in, which a rematch
-    /// opens again. The match knows its own machines, so this holds no
-    /// second list of them.
-    Playing { playing: Box<Playing>, lobby: Lobby },
+    Playing {
+        playing: Box<Forwarding>,
+        lobby: Lobby,
+    },
 }
 
 impl Room {
-    /// An empty room, open on the shape a host takes.
     pub fn opened() -> Room {
         Room {
             next: PlayerId::HOST,
@@ -65,84 +47,82 @@ impl Room {
         }
     }
 
-    /// What the room does with `heard` from `from`. A machine the room has
-    /// not taken in is not heard at all.
-    pub fn hears(&mut self, from: PlayerId, heard: Message) -> Vec<Post> {
+    pub fn receive(&mut self, from: PlayerId, message: Message) -> Vec<Outbound> {
         if !self.members().contains(&from) {
             return Vec::new();
         }
-        match heard {
-            Message::Join { .. } => vec![Post::to(To::Sender, Message::Refused(Refusal::Full))],
-            Message::Edit(edit) => self.edits(from, edit),
-            Message::Start(_) => self.starts(from),
-            Message::Rematch => self.rematches(from),
-            Message::Leave => self.leaves(from),
-            Message::Command(stamped) => match self.playing() {
-                Some(playing) => playing.commanded(from, stamped),
+        match message {
+            Message::Request(Request::Join { .. }) => {
+                vec![Outbound::to(
+                    Recipient::Sender,
+                    Message::Notice(Notice::Full),
+                )]
+            }
+            Message::Request(Request::Edit(edit)) => self.edits(from, edit),
+            Message::Request(Request::Start) => self.starts(from),
+            Message::Request(Request::Rematch) => self.rematches(from),
+            Message::Request(Request::Leave) => self.leaves(from),
+            Message::Relayed(relayed) => match self.playing() {
+                Some(playing) => match relayed {
+                    Relayed::Command(stamped) => playing.commanded(from, stamped),
+                    Relayed::Acknowledge { seat, up_to } => playing.acknowledged(from, seat, up_to),
+                    Relayed::Hash { tick, hash } => playing.reported(from, tick, hash),
+                    Relayed::Desync { .. } => Vec::new(),
+                },
                 None => Vec::new(),
             },
-            Message::Acknowledge { seat, up_to } => match self.playing() {
-                Some(playing) => playing.acknowledged(from, seat, up_to),
-                None => Vec::new(),
-            },
-            Message::Hash { tick, hash } => match self.playing() {
-                Some(playing) => playing.reported(from, tick, hash),
-                None => Vec::new(),
-            },
-            // The room's own words, which a member never speaks.
-            Message::Welcome { .. }
-            | Message::Lobby(_)
-            | Message::Refused(_)
-            | Message::Removed
-            | Message::Desync { .. } => Vec::new(),
+            Message::Notice(_) => Vec::new(),
         }
     }
 
-    /// Takes a machine speaking `version` into the room, or answers why it
-    /// is not taken in.
-    pub fn join(&mut self, version: u32) -> Result<Joined, Refusal> {
+    pub fn join(&mut self, version: u32) -> Result<Joined, Notice> {
         if version != probe_protocol::VERSION {
-            return Err(Refusal::Version);
+            return Err(Notice::Version);
         }
         let player = self.next;
-        let Phase::Seating { lobby, members } = &mut self.phase else {
-            return Err(Refusal::Full);
+        let Phase::Lobby { lobby, members } = &mut self.phase else {
+            return Err(Notice::Full);
         };
-        lobby.admit(player).ok_or(Refusal::Full)?;
+        if !lobby.admit(player) {
+            return Err(Notice::Full);
+        }
         let lobby = lobby.clone();
         members.push(player);
         self.next = PlayerId(player.0 + 1);
         Ok(Joined {
             player,
             posts: vec![
-                Post::to(
-                    To::Sender,
-                    Message::Welcome {
+                Outbound::to(
+                    Recipient::Sender,
+                    Message::Notice(Notice::Welcome {
                         player,
                         lobby: lobby.clone(),
-                    },
+                    }),
                 ),
-                Post::to(To::EveryoneElse, Message::Lobby(lobby)),
+                Outbound::to(
+                    Recipient::EveryoneElse,
+                    Message::Notice(Notice::Lobby(lobby)),
+                ),
             ],
         })
     }
 
-    /// Drops `who` from the room and answers what the rest are told: in a
-    /// lobby, the lobby with its slot open again, and in a match, its seats
-    /// acknowledged for the rest of the match.
-    ///
-    /// The shape of a lobby is its host's, so a host that leaves one ends
-    /// it: the room reopens and every other machine is sent away.
-    pub fn leaves(&mut self, who: PlayerId) -> Vec<Post> {
+    pub fn leaves(&mut self, who: PlayerId) -> Vec<Outbound> {
         match &mut self.phase {
-            Phase::Seating { lobby, .. } if lobby.host() == who => {
+            Phase::Lobby { lobby, .. } if lobby.host() == who => {
                 self.phase = Phase::opened();
-                vec![Post::to(To::Everyone, Message::Leave)]
+                vec![Outbound::to(
+                    Recipient::Everyone,
+                    Message::Notice(Notice::Left),
+                )]
             }
-            Phase::Seating { lobby, members } => {
+            Phase::Lobby { lobby, members } => {
                 members.retain(|member| *member != who);
                 match lobby.release(who) {
-                    true => vec![Post::to(To::Everyone, Message::Lobby(lobby.clone()))],
+                    true => vec![Outbound::to(
+                        Recipient::Everyone,
+                        Message::Notice(Notice::Lobby(lobby.clone())),
+                    )],
                     false => Vec::new(),
                 }
             }
@@ -158,24 +138,19 @@ impl Room {
         }
     }
 
-    /// The machines in the room: in a lobby, those that joined it, in the
-    /// order they did; in a match, those still playing it.
     pub fn members(&self) -> Vec<PlayerId> {
         match &self.phase {
-            Phase::Seating { members, .. } => members.clone(),
+            Phase::Lobby { members, .. } => members.clone(),
             Phase::Playing { playing, .. } => playing.members(),
         }
     }
 
-    /// The records of the matches this room has served.
     pub fn records(&self) -> &Records {
         &self.records
     }
 
-    /// Applies `from`'s edit to the lobby, or answers why it did not. A
-    /// kick also drops the machine whose slot it opened and tells it so.
-    fn edits(&mut self, from: PlayerId, edit: LobbyEdit) -> Vec<Post> {
-        let Phase::Seating {
+    fn edits(&mut self, from: PlayerId, edit: LobbyEdit) -> Vec<Outbound> {
+        let Phase::Lobby {
             lobby: held,
             members,
         } = &mut self.phase
@@ -183,39 +158,36 @@ impl Room {
             return Vec::new();
         };
         if let Err(why) = held.edit(from, edit) {
-            return vec![Post::to(To::Sender, Message::Refused(Refusal::Edit(why)))];
+            return vec![Outbound::to(
+                Recipient::Sender,
+                Message::Notice(Notice::Refused(why)),
+            )];
         }
-        let lobby = Message::Lobby(held.clone());
+        let lobby = Message::Notice(Notice::Lobby(held.clone()));
         match edit {
             LobbyEdit::Kick(who) => {
                 members.retain(|member| *member != who);
                 vec![
-                    Post::to(To::One(who), Message::Removed),
-                    Post::to(To::Everyone, lobby),
+                    Outbound::to(Recipient::One(who), Message::Notice(Notice::Removed)),
+                    Outbound::to(Recipient::Everyone, lobby),
                 ]
             }
             LobbyEdit::SetSlot { .. }
             | LobbyEdit::SetTeam { .. }
             | LobbyEdit::SetSeed(_)
             | LobbyEdit::SetClock(_)
-            | LobbyEdit::SetReady { .. } => vec![Post::to(To::Everyone, lobby)],
+            | LobbyEdit::SetReady { .. } => vec![Outbound::to(Recipient::Everyone, lobby)],
         }
     }
 
-    /// Opens the lobby the finished match was set up in, as `from`'s
-    /// rematch, or answers why it did not: only the host asks for one, and
-    /// only of a match this room forwarded.
-    ///
-    /// The slots of machines that have left stand open again, so the shape
-    /// the host starts from is the shape the room can still play.
-    fn rematches(&mut self, from: PlayerId) -> Vec<Post> {
+    fn rematches(&mut self, from: PlayerId) -> Vec<Outbound> {
         let Phase::Playing { lobby, playing } = &self.phase else {
             return Vec::new();
         };
         if lobby.host() != from {
-            return vec![Post::to(
-                To::Sender,
-                Message::Refused(Refusal::Edit(Refused::NotHost)),
+            return vec![Outbound::to(
+                Recipient::Sender,
+                Message::Notice(Notice::Refused(Refused::NotHost)),
             )];
         }
         let members = playing.members();
@@ -226,74 +198,73 @@ impl Room {
             }
         }
         let sent = opened.clone();
-        self.phase = Phase::Seating {
+        self.phase = Phase::Lobby {
             lobby: opened,
             members,
         };
-        vec![Post::to(To::Everyone, Message::Lobby(sent))]
+        vec![Outbound::to(
+            Recipient::Everyone,
+            Message::Notice(Notice::Lobby(sent)),
+        )]
     }
 
-    /// The match this room is forwarding, where it is forwarding one.
-    fn playing(&mut self) -> Option<&mut Playing> {
+    fn playing(&mut self) -> Option<&mut Forwarding> {
         match &mut self.phase {
             Phase::Playing { playing, .. } => Some(playing),
-            Phase::Seating { .. } => None,
+            Phase::Lobby { .. } => None,
         }
     }
 
-    /// Freezes the lobby as `from`'s start, or answers why it did not.
-    ///
-    /// The room is the authority on the lobby, so it freezes its own copy;
-    /// the setup a host sends with its start is not read.
-    fn starts(&mut self, from: PlayerId) -> Vec<Post> {
-        let Phase::Seating { lobby: held, .. } = &self.phase else {
+    fn starts(&mut self, from: PlayerId) -> Vec<Outbound> {
+        let Phase::Lobby { lobby: held, .. } = &self.phase else {
             return Vec::new();
         };
         if held.host() != from {
-            return vec![Post::to(
-                To::Sender,
-                Message::Refused(Refusal::Edit(Refused::NotHost)),
+            return vec![Outbound::to(
+                Recipient::Sender,
+                Message::Notice(Notice::Refused(Refused::NotHost)),
             )];
         }
         let started = match held.freeze() {
             Ok(started) => started,
             Err(why) => {
-                return vec![Post::to(
-                    To::Sender,
-                    Message::Refused(Refusal::NotReady(why)),
+                return vec![Outbound::to(
+                    Recipient::Sender,
+                    Message::Notice(Notice::NotReady(why)),
                 )];
             }
         };
         let lobby = held.clone();
-        let playing = Playing::started(started.clone());
+        let playing = Forwarding::started(started.clone());
         self.phase = Phase::Playing {
             playing: Box::new(playing),
             lobby,
         };
-        vec![Post::to(To::Everyone, Message::Start(started))]
+        vec![Outbound::to(
+            Recipient::Everyone,
+            Message::Notice(Notice::Started(started)),
+        )]
     }
 }
 
 impl Phase {
-    /// A room with nobody in it, open on the shape a host takes.
     fn opened() -> Phase {
-        Phase::Seating {
+        Phase::Lobby {
             lobby: Lobby::room(PlayerId::HOST),
             members: Vec::new(),
         }
     }
 }
 
-impl Post {
-    /// `message`, for `to` to hear.
-    pub fn to(to: To, message: Message) -> Post {
-        Post { to, message }
+impl Outbound {
+    pub fn to(to: Recipient, message: Message) -> Outbound {
+        Outbound { to, message }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Bot, Control, Lobby};
+    use probe_protocol::{Bot, Holder, Lobby};
     use probe_sim::roster::SHIPYARD;
     use probe_sim::state::{Command, Issued};
     use probe_sim::{Band, Place, RockId, SeatId, Stamped, TeamId, Tick};
@@ -302,7 +273,6 @@ mod tests {
 
     const GUEST: PlayerId = PlayerId(1);
 
-    /// A command of `seat`, at `tick`.
     fn command(seat: u8, tick: u64) -> Stamped {
         Stamped {
             tick: Tick(tick),
@@ -321,15 +291,13 @@ mod tests {
         }
     }
 
-    /// The lobby every member of `room` was last sent.
     fn lobby(room: &Room) -> Lobby {
-        let Phase::Seating { lobby, .. } = &room.phase else {
+        let Phase::Lobby { lobby, .. } = &room.phase else {
             panic!("the room is not seating");
         };
         lobby.clone()
     }
 
-    /// A room the host and one guest have joined, the guest ready.
     fn joined() -> Room {
         let mut room = Room::opened();
         assert_eq!(
@@ -343,25 +311,25 @@ mod tests {
                 .map(|joined| joined.player),
             Ok(GUEST)
         );
-        room.hears(GUEST, Message::Edit(LobbyEdit::SetReady { ready: true }));
+        room.receive(
+            GUEST,
+            Message::Request(Request::Edit(LobbyEdit::SetReady { ready: true })),
+        );
         room
     }
 
-    /// The room started, with the host holding seat zero and the guest
-    /// seat one.
     fn started() -> Room {
         let mut room = joined();
         let started = lobby(&room).freeze().expect("both machines are seated");
-        let posts = room.hears(PlayerId::HOST, Message::Start(started.clone()));
+        let posts = room.receive(PlayerId::HOST, Message::Request(Request::Start));
 
         assert_eq!(posts.len(), 1);
-        assert_eq!(posts[0].to, To::Everyone);
-        assert_eq!(posts[0].message, Message::Start(started));
+        assert_eq!(posts[0].to, Recipient::Everyone);
+        assert_eq!(posts[0].message, Message::Notice(Notice::Started(started)));
         room
     }
 
-    /// Every message `posts` carries to `to`.
-    fn to(posts: &[Post], to: To) -> Vec<Message> {
+    fn to(posts: &[Outbound], to: Recipient) -> Vec<Message> {
         posts
             .iter()
             .filter(|post| post.to == to)
@@ -373,73 +341,76 @@ mod tests {
     fn the_room_applies_the_hosts_edits_and_each_guests_own_and_refuses_the_rest_by_name() {
         let mut room = joined();
 
-        let seeded = room.hears(PlayerId::HOST, Message::Edit(LobbyEdit::SetSeed(42)));
-        let moved = room.hears(
+        let seeded = room.receive(
+            PlayerId::HOST,
+            Message::Request(Request::Edit(LobbyEdit::SetSeed(42))),
+        );
+        let moved = room.receive(
             GUEST,
-            Message::Edit(LobbyEdit::SetTeam {
+            Message::Request(Request::Edit(LobbyEdit::SetTeam {
                 slot: 1,
                 team: TeamId(3),
-            }),
+            })),
         );
-        let forged = room.hears(
+        let forged = room.receive(
             GUEST,
-            Message::Edit(LobbyEdit::SetSlot {
+            Message::Request(Request::Edit(LobbyEdit::SetSlot {
                 slot: 0,
-                control: Control::Bot(Bot::Turtle),
-            }),
+                control: Holder::Bot(Bot::Turtle),
+            })),
         );
 
         assert_eq!(lobby(&room).seed(), 42);
         assert_eq!(lobby(&room).slots()[1].team, TeamId(3));
         assert_eq!(
             lobby(&room).slots()[0].control,
-            Control::Player {
+            Holder::Player {
                 player: PlayerId::HOST,
                 ready: true
             }
         );
         assert!(
             matches!(
-                to(&seeded, To::Everyone).as_slice(),
-                [Message::Lobby(sent)] if sent.seed() == 42
+                to(&seeded, Recipient::Everyone).as_slice(),
+                [Message::Notice(Notice::Lobby(sent))] if sent.seed() == 42
             ),
             "an applied edit reaches every member as the lobby it made"
         );
         assert!(matches!(
-            to(&moved, To::Everyone).as_slice(),
-            [Message::Lobby(sent)] if sent.slots()[1].team == TeamId(3)
+            to(&moved, Recipient::Everyone).as_slice(),
+            [Message::Notice(Notice::Lobby(sent))] if sent.slots()[1].team == TeamId(3)
         ));
         assert_eq!(
-            to(&forged, To::Sender),
-            vec![Message::Refused(Refusal::Edit(Refused::NotHost))]
+            to(&forged, Recipient::Sender),
+            vec![Message::Notice(Notice::Refused(Refused::NotHost))]
         );
-        assert!(to(&forged, To::Everyone).is_empty());
+        assert!(to(&forged, Recipient::Everyone).is_empty());
     }
 
     #[test]
-    fn a_started_room_forwards_a_seats_own_words_to_every_machine_but_the_sender() {
+    fn a_started_room_forwards_a_seats_own_traffic_to_every_machine_but_the_sender() {
         let mut room = started();
 
-        let commanded = room.hears(GUEST, Message::Command(command(1, 4)));
-        let acknowledged = room.hears(
+        let commanded = room.receive(GUEST, Message::Relayed(Relayed::Command(command(1, 4))));
+        let acknowledged = room.receive(
             GUEST,
-            Message::Acknowledge {
+            Message::Relayed(Relayed::Acknowledge {
                 seat: SeatId(1),
                 up_to: Tick(4),
-            },
+            }),
         );
-        let forged = room.hears(GUEST, Message::Command(command(0, 4)));
+        let forged = room.receive(GUEST, Message::Relayed(Relayed::Command(command(0, 4))));
 
         assert_eq!(
-            to(&commanded, To::EveryoneElse),
-            vec![Message::Command(command(1, 4))]
+            to(&commanded, Recipient::EveryoneElse),
+            vec![Message::Relayed(Relayed::Command(command(1, 4)))]
         );
         assert_eq!(
-            to(&acknowledged, To::EveryoneElse),
-            vec![Message::Acknowledge {
+            to(&acknowledged, Recipient::EveryoneElse),
+            vec![Message::Relayed(Relayed::Acknowledge {
                 seat: SeatId(1),
                 up_to: Tick(4)
-            }]
+            })]
         );
         assert!(
             forged.is_empty(),
@@ -452,57 +423,57 @@ mod tests {
         let mut room = started();
 
         for tick in 1..4 {
-            let first = room.hears(
+            let first = room.receive(
                 PlayerId::HOST,
-                Message::Hash {
+                Message::Relayed(Relayed::Hash {
                     tick: Tick(tick),
                     hash: tick,
-                },
+                }),
             );
-            let second = room.hears(
+            let second = room.receive(
                 GUEST,
-                Message::Hash {
+                Message::Relayed(Relayed::Hash {
                     tick: Tick(tick),
                     hash: tick,
-                },
+                }),
             );
 
             assert!(first.is_empty(), "one report agrees with nothing yet");
             assert_eq!(
-                to(&second, To::Everyone),
-                vec![Message::Hash {
+                to(&second, Recipient::Everyone),
+                vec![Message::Relayed(Relayed::Hash {
                     tick: Tick(tick),
                     hash: tick
-                }],
+                })],
                 "a tick every machine reported the same is agreed"
             );
         }
-        let host = room.hears(
+        let host = room.receive(
             PlayerId::HOST,
-            Message::Hash {
+            Message::Relayed(Relayed::Hash {
                 tick: Tick(4),
                 hash: 7,
-            },
+            }),
         );
-        let guest = room.hears(
+        let guest = room.receive(
             GUEST,
-            Message::Hash {
+            Message::Relayed(Relayed::Hash {
                 tick: Tick(4),
                 hash: 8,
-            },
+            }),
         );
-        let after = room.hears(
+        let after = room.receive(
             PlayerId::HOST,
-            Message::Hash {
+            Message::Relayed(Relayed::Hash {
                 tick: Tick(5),
                 hash: 9,
-            },
+            }),
         );
 
         assert!(host.is_empty(), "one report has nothing to differ from");
         assert_eq!(
-            to(&guest, To::Everyone),
-            vec![Message::Desync { tick: Tick(4) }]
+            to(&guest, Recipient::Everyone),
+            vec![Message::Relayed(Relayed::Desync { tick: Tick(4) })]
         );
         assert!(after.is_empty(), "a desync is declared once");
     }
@@ -511,20 +482,20 @@ mod tests {
     fn a_machine_that_leaves_a_started_room_has_its_seats_acknowledged_for_the_rest_of_the_match() {
         let mut room = started();
 
-        let posts = room.hears(GUEST, Message::Leave);
+        let posts = room.receive(GUEST, Message::Request(Request::Leave));
 
         assert_eq!(
-            to(&posts, To::Everyone),
-            vec![Message::Acknowledge {
+            to(&posts, Recipient::Everyone),
+            vec![Message::Relayed(Relayed::Acknowledge {
                 seat: SeatId(1),
                 up_to: Tick(u64::MAX)
-            }]
+            })]
         );
         assert_eq!(room.members(), [PlayerId::HOST]);
         assert!(
-            room.hears(GUEST, Message::Command(command(1, 9)))
+            room.receive(GUEST, Message::Relayed(Relayed::Command(command(1, 9))))
                 .is_empty(),
-            "a machine the room has dropped is not heard"
+            "a command from a machine the room has dropped goes nowhere"
         );
     }
 
@@ -534,31 +505,31 @@ mod tests {
 
         assert_eq!(
             room.join(probe_protocol::VERSION).err(),
-            Some(Refusal::Full),
+            Some(Notice::Full),
             "a room opens one seat beside the host's, and both are held"
         );
         assert_eq!(
             to(
-                &room.hears(
+                &room.receive(
                     PlayerId::HOST,
-                    Message::Join {
+                    Message::Request(Request::Join {
                         version: probe_protocol::VERSION
-                    }
+                    })
                 ),
-                To::Sender
+                Recipient::Sender
             ),
-            vec![Message::Refused(Refusal::Full)],
+            vec![Message::Notice(Notice::Full)],
             "a machine already in the room is refused the same way"
         );
     }
 
     #[test]
-    fn a_machine_speaking_another_version_of_the_protocol_is_refused_by_name() {
+    fn a_machine_of_another_version_of_the_protocol_is_refused_by_name() {
         let mut room = Room::opened();
 
         assert_eq!(
             room.join(probe_protocol::VERSION + 1).err(),
-            Some(Refusal::Version)
+            Some(Notice::Version)
         );
         assert!(room.members().is_empty(), "and is not taken in");
     }
@@ -567,21 +538,30 @@ mod tests {
     fn the_host_removes_a_guest_from_the_room_and_the_slot_it_held_opens() {
         let mut room = joined();
 
-        let kicked = room.hears(PlayerId::HOST, Message::Edit(LobbyEdit::Kick(GUEST)));
+        let kicked = room.receive(
+            PlayerId::HOST,
+            Message::Request(Request::Edit(LobbyEdit::Kick(GUEST))),
+        );
 
-        assert_eq!(to(&kicked, To::One(GUEST)), vec![Message::Removed]);
+        assert_eq!(
+            to(&kicked, Recipient::One(GUEST)),
+            vec![Message::Notice(Notice::Removed)]
+        );
         assert!(matches!(
-            to(&kicked, To::Everyone).as_slice(),
-            [Message::Lobby(sent)] if sent.slots()[1].control == Control::Open
+            to(&kicked, Recipient::Everyone).as_slice(),
+            [Message::Notice(Notice::Lobby(sent))] if sent.slots()[1].control == Holder::Open
         ));
         assert_eq!(room.members(), [PlayerId::HOST]);
         assert_eq!(
             to(
-                &room.hears(GUEST, Message::Edit(LobbyEdit::SetReady { ready: true })),
-                To::Everyone
+                &room.receive(
+                    GUEST,
+                    Message::Request(Request::Edit(LobbyEdit::SetReady { ready: true }))
+                ),
+                Recipient::Everyone
             ),
             Vec::new(),
-            "a machine the room has removed is not heard"
+            "a machine the room has removed changes nothing"
         );
         assert_eq!(
             room.join(probe_protocol::VERSION)
@@ -596,19 +576,19 @@ mod tests {
         let mut room = started();
         let shape = match &room.phase {
             Phase::Playing { lobby, .. } => lobby.clone(),
-            Phase::Seating { .. } => panic!("the room is playing"),
+            Phase::Lobby { .. } => panic!("the room is playing"),
         };
 
-        let refused = room.hears(GUEST, Message::Rematch);
-        let again = room.hears(PlayerId::HOST, Message::Rematch);
+        let refused = room.receive(GUEST, Message::Request(Request::Rematch));
+        let again = room.receive(PlayerId::HOST, Message::Request(Request::Rematch));
 
         assert_eq!(
-            to(&refused, To::Sender),
-            vec![Message::Refused(Refusal::Edit(Refused::NotHost))]
+            to(&refused, Recipient::Sender),
+            vec![Message::Notice(Notice::Refused(Refused::NotHost))]
         );
         assert_eq!(
-            to(&again, To::Everyone),
-            vec![Message::Lobby(shape.clone())]
+            to(&again, Recipient::Everyone),
+            vec![Message::Notice(Notice::Lobby(shape.clone()))]
         );
         assert_eq!(lobby(&room), shape, "the shape is kept");
     }
@@ -616,14 +596,14 @@ mod tests {
     #[test]
     fn a_rematch_opens_the_slots_of_the_machines_that_have_left() {
         let mut room = started();
-        room.hears(GUEST, Message::Leave);
+        room.receive(GUEST, Message::Request(Request::Leave));
 
-        room.hears(PlayerId::HOST, Message::Rematch);
+        room.receive(PlayerId::HOST, Message::Request(Request::Rematch));
 
-        assert_eq!(lobby(&room).slots()[1].control, Control::Open);
+        assert_eq!(lobby(&room).slots()[1].control, Holder::Open);
         assert_eq!(
             lobby(&room).slots()[0].control,
-            Control::Player {
+            Holder::Player {
                 player: PlayerId::HOST,
                 ready: true
             },

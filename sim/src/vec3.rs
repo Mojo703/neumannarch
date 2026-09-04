@@ -1,10 +1,6 @@
-//! The sim's vector, with a closed set of operations.
-
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
-/// A vector in the inertial frame, in meters or meters per second. Equal
-/// and hashed by bit pattern.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Vec3 {
     pub x: f64,
@@ -31,23 +27,19 @@ impl Vec3 {
         )
     }
 
-    /// Squared length, which needs no root.
     pub fn length_squared(self) -> f64 {
         self.dot(self)
     }
 
-    /// Length; `sqrt` is exact under IEEE 754 on every target.
     pub fn length(self) -> f64 {
         self.length_squared().sqrt()
     }
 
-    /// The unit vector along `self`, or `None` for the zero vector.
     pub fn normalized(self) -> Option<Vec3> {
         let length = self.length();
         (length > 0.0).then(|| self * (1.0 / length))
     }
 
-    /// Distance to `other`, in meters.
     pub fn distance(self, other: Vec3) -> f64 {
         (self - other).length()
     }

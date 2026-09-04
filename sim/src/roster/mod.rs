@@ -1,5 +1,3 @@
-//! The unit table: rows, weapons, and the shipped roster.
-
 use core::ops::Index;
 
 pub use row::{Kind, MassClass, Row, Weapon};
@@ -7,54 +5,41 @@ pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SCOUT, SHIPYA
 
 use crate::ids::RowId;
 
-/// The rows of a match, indexed by `RowId` in the order they were added.
-/// The only place a row lives; entities refer to theirs by id.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Roster {
     rows: Vec<Row>,
 }
 
 impl Roster {
-    /// The eight shipped rows, at the ids of the shipped constants.
     pub fn shipped() -> Roster {
         Roster {
             rows: shipped::rows(),
         }
     }
 
-    /// Appends `row` and returns its id, the next after the last.
     pub fn add(&mut self, row: Row) -> RowId {
-        // Rows come from code, never from a command, so a roster past
-        // `RowId`'s range is a programming error the type of `rows` cannot
-        // rule out.
         let id = RowId(u16::try_from(self.rows.len()).expect("a roster holds at most 65536 rows"));
         self.rows.push(row);
         id
     }
 
-    /// The row at `id`, or `None` when no such row was added.
     pub fn get(&self, id: RowId) -> Option<&Row> {
         self.rows.get(usize::from(id.0))
     }
 
-    /// Every row with its id, in id order.
     pub fn iter(&self) -> impl Iterator<Item = (RowId, &Row)> {
         (0..=u16::MAX).map(RowId).zip(&self.rows)
     }
 
-    /// The number of rows.
     pub fn len(&self) -> usize {
         self.rows.len()
     }
 
-    /// Whether no row was added.
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
 }
 
-/// Panics when `id` is not a row; a command's row is checked by `get` before
-/// a rule reads it.
 impl Index<RowId> for Roster {
     type Output = Row;
 

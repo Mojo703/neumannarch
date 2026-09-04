@@ -1,6 +1,3 @@
-//! One send: the solved transfer between two anchors, and the burns that
-//! fly it.
-
 use std::collections::BTreeMap;
 
 use super::State;
@@ -13,17 +10,10 @@ use crate::place::Place;
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
-/// Ticks between the arrival ticks a plan tries: one second. Every ship of
-/// a send shares the tick, so a finer grain buys nothing.
 const SEARCH_STEP: u64 = TICKS_PER_SECOND as u64;
 
-/// The longest flight a plan will consider, in ticks: ten minutes, past
-/// which no send inside one match is worth flying.
 const SEARCH_BOUND: u64 = 600 * TICKS_PER_SECOND as u64;
 
-/// One send in progress: the transfer from the source anchor to the
-/// destination anchor, and the burn pair each row flies it with. Equal and
-/// hashed field by field.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Flight {
     from: Body,
@@ -35,8 +25,6 @@ pub struct Flight {
     burns: BTreeMap<RowId, [Burn; 2]>,
 }
 
-/// A constant thrust over a span of ticks. Its magnitude is at most the
-/// limit it was built with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Burn {
     from: Tick,
@@ -45,15 +33,8 @@ pub struct Burn {
 }
 
 impl Flight {
-    /// How near its destination anchor a ship must be for its flight to
-    /// end, in meters. A hypothesis the harness and the display confirm or
-    /// kill.
     pub const ARRIVAL_DISTANCE: f64 = 3.0;
 
-    /// The send carrying `rows` from `from` to `to`, departing this tick.
-    /// The arrival tick is the first, a second at a time, at which every
-    /// row's two burns fit inside the flight without overlapping; `None`
-    /// once the search passes ten minutes.
     pub fn plan(
         state: &State,
         from: Place,
@@ -87,42 +68,32 @@ impl Flight {
         None
     }
 
-    /// The tick the send departed.
     pub fn depart(&self) -> Tick {
         self.depart
     }
 
-    /// The tick every ship of the send is due at its destination anchor.
     pub fn arrive(&self) -> Tick {
         self.arrive
     }
 
-    /// The place the send left.
     pub fn source(&self) -> Place {
         self.source
     }
 
-    /// The place the send is bound for.
     pub fn destination(&self) -> Place {
         self.destination
     }
 
-    /// The flight's anchor at `tick`: the departure state under the first
-    /// impulse, propagated. Every ship of the send manoeuvres about it.
     pub fn anchor(&self, tick: Tick, gravity: Gravity) -> Body {
         let departed = Body::new(self.from.pos, self.from.vel + self.impulses[0]);
         propagate(departed, gravity, tick.seconds() - self.depart.seconds())
     }
 
-    /// Whether a ship at `body` at `tick` has reached this send's
-    /// destination anchor, which ends its flight.
     pub fn arrived(&self, state: &State, body: Body, tick: Tick) -> bool {
         let anchor = state.anchor(self.destination).at(tick, state.gravity());
         tick >= self.arrive && body.pos.distance(anchor.pos) <= Flight::ARRIVAL_DISTANCE
     }
 
-    /// What `row`'s burn thrusts at `tick`, in m/s²; zero when no burn of
-    /// that row covers the tick.
     pub fn thrust(&self, row: RowId, tick: Tick) -> Vec3 {
         self.burns
             .get(&row)
@@ -130,13 +101,10 @@ impl Flight {
             .map_or(Vec3::ZERO, Burn::accel)
     }
 
-    /// The burn pair `row` flies this send with, if the send carries it.
     pub fn burns(&self, row: RowId) -> Option<&[Burn; 2]> {
         self.burns.get(&row)
     }
 
-    /// One burn pair per row, or `None` when a row cannot fit both burns
-    /// inside the flight without overlapping.
     fn spread(
         state: &State,
         rows: &[RowId],
@@ -159,10 +127,6 @@ impl Flight {
 }
 
 impl Burn {
-    /// The burn delivering `impulse`, in m/s, at no more than `limit`, in
-    /// m/s²: as many whole ticks as that needs, centred on `centre` and
-    /// moved to lie inside `from..to`. `None` when the span does not fit
-    /// inside that window or the row cannot thrust.
     pub(crate) fn spread(
         impulse: Vec3,
         limit: f64,
@@ -182,8 +146,7 @@ impl Burn {
             .0
             .saturating_sub(ticks / 2)
             .clamp(from.0, to.0 - ticks);
-        // A whole number of ticks holds the thrust, so it is the impulse
-        // spread over them, which is the limit only when the span divides.
+
         let accel = impulse * (1.0 / Tick(ticks).seconds());
         Some(Burn {
             from: Tick(start),
@@ -192,32 +155,26 @@ impl Burn {
         })
     }
 
-    /// The first tick of the burn.
     pub fn from(&self) -> Tick {
         self.from
     }
 
-    /// The tick after the burn's last.
     pub fn to(&self) -> Tick {
         self.to
     }
 
-    /// The thrust while the burn runs, in m/s².
     pub fn accel(&self) -> Vec3 {
         self.accel
     }
 
-    /// Whether the burn thrusts through `tick`.
     pub fn covers(&self, tick: Tick) -> bool {
         self.from <= tick && tick < self.to
     }
 
-    /// Whether the two burns thrust through a tick in common.
     pub fn overlaps(&self, other: Burn) -> bool {
         self.from < other.to && other.from < self.to
     }
 
-    /// The whole ticks covering `seconds` of thrust, at least one.
     fn ticks(seconds: f64) -> u64 {
         let ticks = libm::ceil(seconds * f64::from(TICKS_PER_SECOND));
         (ticks as u64).max(1)
@@ -239,11 +196,8 @@ mod tests {
     use crate::state::seat::Seat;
     use crate::{RockId, Vec3};
 
-    /// A central mass whose belt orbit at [`RADIUS`] takes five minutes, so
-    /// a test spans a whole rock period in a few thousand ticks.
     const MU: Gravity = Gravity::new(4.4e17);
 
-    /// The fixture rock's orbit radius, in meters.
     const RADIUS: f64 = 1.0e7;
 
     fn inner() -> Place {

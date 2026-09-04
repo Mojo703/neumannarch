@@ -1,34 +1,17 @@
-//! Lambert's problem in universal variables: the two impulses that move a
-//! body from one position to another in a given span. Vallado's
-//! formulation, bisected on the universal variable ψ.
-
 use core::f64::consts::TAU;
 
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::stumpff::{c2, c3};
 use crate::vec3::Vec3;
 
-/// Bisection steps on ψ. The bracket is 8π² wide and each step halves it,
-/// so eighty steps take it below the width of an `f64`.
 const BISECTIONS: u32 = 80;
 
-/// The span the bisection brackets, one revolution either way.
 const PSI_BOUND: f64 = TAU * TAU;
 
-/// How far `1 + cos` of the transfer angle must stay above zero. At half a
-/// turn the transfer plane is undefined and the impulses are unbounded, so
-/// such a pair counts as collinear.
 const COLLINEAR_BOUND: f64 = 1e-9;
 
-/// Fraction of the span the bisected transfer may miss by. Above it the
-/// span is outside the single-revolution solution and there is no answer.
 const SPAN_TOLERANCE: f64 = 1e-9;
 
-/// The two velocity deltas, in meters per second, moving `from` to `to` in
-/// `dt` seconds: the first applied at `from`, the second on arrival.
-/// Prograde in the belt plane and one revolution at most. `None` when the
-/// two positions are collinear with the central mass, when `dt` is not
-/// positive, or when no single-revolution transfer takes that span.
 pub fn solve(from: Body, to: Body, dt: f64, gravity: Gravity) -> Option<[Vec3; 2]> {
     if dt <= 0.0 || dt.is_nan() {
         return None;
@@ -42,21 +25,15 @@ pub fn solve(from: Body, to: Body, dt: f64, gravity: Gravity) -> Option<[Vec3; 2
     ((chord - dt).abs() <= SPAN_TOLERANCE * dt).then_some([start - from.vel, to.vel - end])
 }
 
-/// The invariants of one Lambert solution, read by every bisection step.
 struct Problem {
     mu: f64,
     from_radius: f64,
     to_radius: f64,
-    /// The chord term A, in meters: negative when the transfer takes the
-    /// long way round.
     chord_coefficient: f64,
-    /// The span asked for, in seconds.
     span: f64,
 }
 
 impl Problem {
-    /// `None` when the positions are collinear with the central mass, which
-    /// leaves the transfer plane undefined.
     fn new(from: Body, to: Body, dt: f64, gravity: Gravity) -> Option<Problem> {
         let sense = from.pos.cross(to.pos).normalized()?;
         let (from_radius, to_radius) = (from.radius(), to.radius());
@@ -74,8 +51,6 @@ impl Problem {
         })
     }
 
-    /// The radius term y and the span the transfer at `psi` takes, in
-    /// seconds; `None` where the term is negative, which is no transfer.
     fn chord(&self, psi: f64) -> Option<(f64, f64)> {
         let (c2, c3) = (c2(psi), c3(psi));
         let radius = self.from_radius
@@ -89,9 +64,6 @@ impl Problem {
         Some((radius, span))
     }
 
-    /// The ψ whose transfer takes `span` seconds. The span rises with ψ, so
-    /// bisection converges on the one solution or runs to the bracket's
-    /// edge, which the caller rejects by span.
     fn bisect(&self) -> f64 {
         let (mut low, mut high) = (-PSI_BOUND, PSI_BOUND);
         let mut psi = 0.0;
@@ -100,7 +72,6 @@ impl Problem {
             match self.chord(psi) {
                 Some((_, span)) if span.is_finite() && span <= self.span => low = psi,
                 Some(_) => high = psi,
-                // The radius term is negative only below the solution.
                 None => low = psi,
             }
         }
@@ -113,10 +84,8 @@ mod tests {
     use super::*;
     use crate::orbit::universal::propagate;
 
-    /// A belt-scale central mass, in m³/s².
     const MU: Gravity = Gravity::new(4.0e13);
 
-    /// A belt-scale orbit radius, in meters.
     const RADIUS: f64 = 1.0e7;
 
     fn circular(radius: f64, turn: f64) -> Body {
@@ -157,8 +126,6 @@ mod tests {
 
     #[test]
     fn a_near_half_turn_transfer_matches_the_hohmann_impulses() {
-        // Exactly half a turn is the degenerate case, so the test asks for
-        // the turn either side of it and holds the closed form to a percent.
         let (inner, outer) = (RADIUS, RADIUS * 2.0);
         let semi_major = 0.5 * (inner + outer);
         let period = TAU * (semi_major * semi_major * semi_major / MU.mu()).sqrt();

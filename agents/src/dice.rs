@@ -1,21 +1,13 @@
-//! The one source of variation an agent has: a seed it steps itself.
-
-/// The odd increment SplitMix64 walks its state by.
 const GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 
-/// A deterministic generator over a seed, so two agents built alike but
-/// seeded differently break ties differently. SplitMix64: every step is
-/// integer arithmetic, identical on every target.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Dice(u64);
 
 impl Dice {
-    /// A generator seeded with `seed`.
     pub fn new(seed: u64) -> Dice {
         Dice(seed)
     }
 
-    /// The next value, stepping the seed.
     pub fn roll(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(GAMMA);
         let mut z = self.0;
@@ -24,7 +16,6 @@ impl Dice {
         z ^ (z >> 31)
     }
 
-    /// The next value below `bound`, or `None` when `bound` is zero.
     pub fn below(&mut self, bound: usize) -> Option<usize> {
         let bound = u64::try_from(bound).ok().filter(|bound| *bound > 0)?;
         usize::try_from(self.roll() % bound).ok()

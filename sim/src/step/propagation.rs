@@ -1,6 +1,3 @@
-//! The propagation phase: every free unit thrusts once and moves one tick
-//! of two-body motion, and a flight ends for a ship that has arrived.
-
 use crate::ids::{EntityId, FlightId};
 use crate::orbit::body::Body;
 use crate::orbit::universal::propagate;
@@ -9,32 +6,26 @@ use crate::step::maneuver::Thrusts;
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
-/// One free unit's motion one tick on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Move {
     pub entity: EntityId,
     pub body: Body,
-    /// The send it is still flying, if it has not arrived.
     pub flight: Option<FlightId>,
 }
 
-/// Every free unit's motion one tick on, in id order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Moved(Vec<Move>);
 
-/// One tick of motion, computed from the snapshot and the tick's thrusts.
 pub struct Propagation<'a> {
     state: &'a State,
     thrusts: &'a Thrusts,
 }
 
 impl<'a> Propagation<'a> {
-    /// Reads `state` and the manoeuvring thrusts of the same tick.
     pub fn of(state: &'a State, thrusts: &'a Thrusts) -> Propagation<'a> {
         Propagation { state, thrusts }
     }
 
-    /// One move per free unit, in id order.
     pub fn run(self) -> Moved {
         Moved(
             self.state
@@ -44,7 +35,6 @@ impl<'a> Propagation<'a> {
         )
     }
 
-    /// `entity` one tick on, or `None` for a structure.
     fn moved(&self, entity: &Entity) -> Option<Move> {
         let Motion::Free { body, flight } = entity.motion() else {
             return None;
@@ -62,15 +52,12 @@ impl<'a> Propagation<'a> {
         })
     }
 
-    /// What `entity`'s flight has its row thrust at `tick`, in m/s².
     fn burn(&self, entity: &Entity, flight: Option<FlightId>, tick: Tick) -> Vec3 {
         flight
             .and_then(|id| self.state.flight(id))
             .map_or(Vec3::ZERO, |flight| flight.thrust(entity.row(), tick))
     }
 
-    /// Whether a ship at `body` at `tick` has reached the send's
-    /// destination anchor. A send the state has lost counts as arrived.
     fn arrived(&self, flight: FlightId, body: Body, tick: Tick) -> bool {
         self.state
             .flight(flight)
@@ -79,7 +66,6 @@ impl<'a> Propagation<'a> {
 }
 
 impl Moved {
-    /// Every move, in id order.
     pub fn iter(&self) -> impl Iterator<Item = Move> + '_ {
         self.0.iter().copied()
     }
@@ -99,18 +85,12 @@ mod tests {
     use crate::state::{Flight, Rock, Seat};
     use crate::step::maneuver::Maneuver;
 
-    /// A central mass whose belt orbit at [`RADIUS`] takes five minutes, so
-    /// a test spans a whole rock period in a few thousand ticks.
     const MU: Gravity = Gravity::new(4.4e17);
 
-    /// A central mass whose belt orbit at [`RADIUS`] takes nine hours, the
-    /// scale a match is played at.
     const SLOW: Gravity = Gravity::new(4.0e13);
 
-    /// The near rock's orbit radius, in meters.
     const RADIUS: f64 = 1.0e7;
 
-    /// A match of one seat per team over two rocks a kilometer apart.
     struct World {
         state: State,
         gravity: Gravity,
@@ -136,8 +116,6 @@ mod tests {
             }
         }
 
-        /// A unit of `row` for `seat`, homed at `place`, `offset` meters
-        /// along the rock's radial direction from the place's anchor.
         fn spawn(&mut self, seat: SeatId, row: RowId, place: Place, offset: f64) -> EntityId {
             let anchor = self.state.anchor(place).at(self.state.tick(), self.gravity);
             let radial = anchor.pos.normalized().expect("a radius");
@@ -148,8 +126,6 @@ mod tests {
             self.state.spawn(seat, row, place, motion)
         }
 
-        /// Puts the entity on `flight` at its source anchor, as a send
-        /// does.
         fn send(&mut self, entity: EntityId, flight: FlightId, from: Place) {
             let motion = Motion::Free {
                 body: self.anchor(from),
@@ -158,7 +134,6 @@ mod tests {
             self.state.set_motion(entity, motion);
         }
 
-        /// Runs the manoeuvring and propagation phases for `ticks` ticks.
         fn run(&mut self, ticks: u64) {
             for _ in 0..ticks {
                 let thrusts = Maneuver::of(&self.state).run();
@@ -184,7 +159,6 @@ mod tests {
             self.state.anchor(place).at(self.state.tick(), self.gravity)
         }
 
-        /// How far `entity` is from the anchor of `place`, in meters.
         fn off_anchor(&self, entity: EntityId, place: Place) -> f64 {
             self.body(entity).pos.distance(self.anchor(place).pos)
         }
@@ -211,7 +185,6 @@ mod tests {
         }
     }
 
-    /// One rock period, in ticks.
     fn period() -> u64 {
         let seconds = rock(RADIUS, MU).orbit().period(MU);
         (seconds * f64::from(crate::TICKS_PER_SECOND)) as u64
@@ -293,9 +266,6 @@ mod tests {
             })
             .collect();
 
-        // A heavy row falls far behind the flight's impulsive anchor and
-        // overshoots it before settling; five minutes covers that for the
-        // shipped rows at this scale.
         let slack = 300 * u64::from(crate::TICKS_PER_SECOND);
         world.run(arrive.0 - world.state.tick().0 + slack);
 

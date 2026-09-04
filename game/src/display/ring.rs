@@ -1,70 +1,43 @@
-//! The ring: the angle and stacking of every mark on one ring, laid by
-//! DISPLAY.md's rules for runs and glyph runs.
-
 use core::f32::consts::TAU;
 
 use crate::display::scene::Run;
 
-/// One ring's screen measures.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geometry {
-    /// The ring's screen radius, in px.
     pub radius: f32,
-    /// A glyph's nominal width along the arc, in px.
     pub glyph: f32,
 }
 
-/// One run's share of the ring, in rad clockwise from twelve o'clock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
     pub start: f32,
     pub end: f32,
 }
 
-/// One ring's runs laid out: where every mark goes, and the share each run
-/// owns.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Layout {
     placements: Vec<Placement>,
     runs: usize,
 }
 
-/// Where one mark sits on its ring.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
-    /// The index of the mark's run among the runs laid out.
     pub run: usize,
-    /// The index of the mark within its run.
     pub mark: usize,
-    /// The mark's leading edge, in rad clockwise from twelve o'clock.
     pub angle: f32,
-    /// The mark's place in its card stack: 0 when it has its own arc,
-    /// rising along a compressed run.
     pub depth: u8,
-    /// The run's share over its uncompressed length: 1.0 when the run fits,
-    /// below 1.0 when it is compressed and consecutive marks sit `scale`
-    /// glyph widths apart.
     pub scale: f32,
 }
 
-/// How a run's marks share its arc.
 #[derive(Clone, Copy)]
 enum Fit {
-    /// Every mark has its own arc.
     Loose,
-    /// The marks overlap uniformly and stack like cards.
-    Stacked {
-        /// The run's share over its uncompressed length, below 1.0.
-        scale: f32,
-    },
+    Stacked { scale: f32 },
 }
 
-/// One run's spacing along the ring.
 #[derive(Clone, Copy)]
 struct Spacing {
-    /// The run's start, in rad clockwise from twelve o'clock.
     start: f32,
-    /// From one mark's leading edge to the next, in rad.
     pitch: f32,
     fit: Fit,
 }
@@ -73,8 +46,6 @@ impl Fit {
     fn depth(self, mark: usize) -> u8 {
         match self {
             Fit::Loose => 0,
-            // Saturates: cards past the 256th lift no further. A wider
-            // `Placement::depth` would delete this.
             Fit::Stacked { .. } => u8::try_from(mark).unwrap_or(u8::MAX),
         }
     }
@@ -88,8 +59,6 @@ impl Fit {
 }
 
 impl Spacing {
-    /// The spacing of `marks` marks, each `glyph` rad wide, in a share of
-    /// `share` rad beginning at `start` rad.
     fn of(start: f32, share: f32, glyph: f32, marks: usize) -> Spacing {
         let natural = glyph * marks as f32;
         if natural <= share {
@@ -122,14 +91,6 @@ impl Spacing {
 }
 
 impl Layout {
-    /// Lays out every mark of a ring's runs.
-    ///
-    /// Runs start at twelve o'clock and follow clockwise in the order
-    /// given, each taking an equal share of the circumference, an empty run
-    /// included. A run's marks sit consecutively from its start in the
-    /// order given, one glyph width apart; a run longer than its share is
-    /// compressed so its marks overlap uniformly and fill the share
-    /// exactly.
     pub fn of(runs: &[Run], geometry: Geometry) -> Layout {
         let share = TAU / runs.len() as f32;
         let glyph = geometry.glyph / geometry.radius;
@@ -146,13 +107,10 @@ impl Layout {
         }
     }
 
-    /// Every mark's place, in `(run, mark)` order.
     pub fn placements(&self) -> &[Placement] {
         &self.placements
     }
 
-    /// The share the run at `index` owns, which is what its fight arc is
-    /// drawn over. `index` is a run's index among those laid out.
     pub fn span(&self, index: usize) -> Span {
         let share = TAU / self.runs as f32;
         Span {
@@ -163,7 +121,6 @@ impl Layout {
 }
 
 impl Span {
-    /// The angle `fraction` of the way along this share, in rad.
     pub fn at(self, fraction: f32) -> f32 {
         self.start + (self.end - self.start) * fraction.clamp(0.0, 1.0)
     }
@@ -179,13 +136,11 @@ mod tests {
     use crate::display::glyph::{Frame, Glyph, Size};
     use crate::display::scene::{Fill, Mark, Reason, Run};
 
-    /// A 100 px ring with 16 px glyphs: a lone run holds thirty-nine.
     const RING: Geometry = Geometry {
         radius: 100.0,
         glyph: 16.0,
     };
 
-    /// A glyph no test reads the content of.
     fn any_glyph() -> Glyph {
         Glyph {
             frame: Frame::Triangle,
@@ -194,7 +149,6 @@ mod tests {
         }
     }
 
-    /// The placements of `runs` on `geometry`, which every test reads.
     fn laid(runs: &[Run], geometry: Geometry) -> Vec<super::Placement> {
         Layout::of(runs, geometry).placements().to_vec()
     }

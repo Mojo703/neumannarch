@@ -1,66 +1,39 @@
-//! The constants one scripted agent plays by, and the two the game ships.
-
 use probe_protocol::Bot;
 use probe_sim::RowId;
 use probe_sim::roster::Roster;
 
 use crate::roles::Roles;
 
-/// How many hit points a point of plating is worth when a personality
-/// weighs durability, in HP per point. A hypothesis.
 const PLATING_WORTH: f64 = 20.0;
 
-/// How an agent chooses its army mix.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mix {
-    /// The mix the roster's own ratios pick against what the enemy fields.
     Counters,
-    /// A weight per row, fixed: what the harness's matrix plays.
     Pinned(Vec<(RowId, f64)>),
 }
 
-/// One way of playing: every number an agent decides by, with the unit it
-/// is in. Each is a hypothesis the harness confirms or kills.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Personality {
-    /// What the harness prints it as.
     pub name: &'static str,
-    /// The seed its dice start from, so two alike agents differ.
     pub seed: u64,
-    /// Rocks it tries to hold.
     pub rocks: usize,
-    /// Extractors it wants per rock, before the rock's caps cut it.
     pub extractors_per_rock: u32,
-    /// Stores it wants at its home rock.
     pub stores: u32,
-    /// Rocks that get a fast builder, its home first.
     pub yards: usize,
-    /// Mobile builders it keeps.
     pub masons: u32,
-    /// Scouts it keeps walking unseen rocks.
     pub scouts: u32,
-    /// Expansions it will have in flight at once.
     pub claims: usize,
-    /// Army value it wants, as a multiple of the enemy value it estimates.
     pub army_ratio: f64,
-    /// Army value it wants regardless of the enemy, in cost units.
     pub army_floor: f64,
-    /// Army value it posts at a threatened rock, per cost unit of threat.
     pub defence_ratio: f64,
-    /// Its army value over the enemy estimate before it stages an attack.
     pub attack_ratio: f64,
-    /// Staged value over the target's threat before the force moves in.
     pub commit_ratio: f64,
-    /// How its army mix is chosen.
     pub mix: Mix,
-    /// How much it pays for reach past the enemy's, per unit of edge.
     pub range_taste: f64,
-    /// How much it pays for durability, per hit point of cost unit.
     pub armour_taste: f64,
 }
 
 impl Personality {
-    /// Holds few rocks, saturates them, and keeps a heavy defensive army.
     pub fn turtle() -> Personality {
         Personality {
             name: "turtle",
@@ -83,7 +56,6 @@ impl Personality {
         }
     }
 
-    /// Claims rocks fast, spreads its economy thin, and commits early.
     pub fn expand() -> Personality {
         Personality {
             name: "expand",
@@ -106,8 +78,6 @@ impl Personality {
         }
     }
 
-    /// The constants a lobby's `bot` plays by. Exhaustive, so a scripted
-    /// opponent the protocol can name always has a way of playing.
     pub fn of(bot: Bot) -> Personality {
         match bot {
             Bot::Turtle => Personality::turtle(),
@@ -115,17 +85,12 @@ impl Personality {
         }
     }
 
-    /// The personality of that name, or `None`: what a command line takes.
     pub fn named(name: &str) -> Option<Personality> {
         [Personality::turtle(), Personality::expand()]
             .into_iter()
             .find(|personality| personality.name == name)
     }
 
-    /// The share of army value each armed row is worth having against an
-    /// enemy of `plating` damage reduction and `range` meters of reach, in
-    /// row order, the shares summing to one. Empty only when no row is
-    /// armed.
     pub fn weights(
         &self,
         roster: &Roster,
@@ -144,10 +109,6 @@ impl Personality {
         share(scored)
     }
 
-    /// Each armed row rated by damage through `plating` per cost unit,
-    /// skewed by this personality's taste for reach and for durability. A
-    /// row that cannot hurt `plating` at all is rated as if it were
-    /// unplated, since an army of nothing is worse than a poor answer.
     fn counters(
         &self,
         roster: &Roster,
@@ -183,8 +144,6 @@ impl Personality {
     }
 }
 
-/// `scored` scaled to sum to one, or every entry at an equal share when
-/// nothing scored above zero.
 fn share(scored: Vec<(RowId, f64)>) -> Vec<(RowId, f64)> {
     let total: f64 = scored.iter().map(|(_, weight)| weight).sum();
     let count = scored.len() as f64;

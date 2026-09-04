@@ -1,6 +1,3 @@
-//! The fight memory: what successive views say about the shots at a band.
-//! The client keeps it, because no field of the state records a shot.
-
 use std::collections::BTreeMap;
 
 use probe_sim::state::view::View;
@@ -8,39 +5,24 @@ use probe_sim::{Place, SeatId, TICKS_PER_SECOND, Tick};
 
 use crate::display::scene::Arc;
 
-/// How long damage trails the arc's drain as a red segment: a second and a
-/// half, in ticks.
 const RECENT: u64 = 3 * TICKS_PER_SECOND as u64 / 2;
 
-/// How long after the last shot an arc stands: ten seconds, in ticks.
 const FORGET: u64 = 10 * TICKS_PER_SECOND as u64;
 
-/// Every fight the seat has seen and not yet forgotten, by the place and
-/// seat whose run carries the arc.
 #[derive(Clone, Debug, Default)]
 pub struct Fights {
     fights: BTreeMap<(Place, SeatId), Fight>,
 }
 
-/// One seat's fight at one place: the HP the arc is full at, the HP it
-/// drains to, and the damage that trails it.
 #[derive(Clone, Debug)]
 struct Fight {
-    /// Total HP at the place when the fight began, in hit points; raised
-    /// again whenever the seat has more there than the arc was full at.
     started: f64,
-    /// Total HP at the place now, in hit points.
     hp: f64,
-    /// Damage of the last [`RECENT`] ticks, with the tick it landed at, in
-    /// hit points.
     recent: Vec<(Tick, f64)>,
     last_shot: Tick,
 }
 
 impl Fights {
-    /// Reads one tick: starts an arc wherever shots were exchanged, drains
-    /// the arcs that stand, and forgets those quiet for ten seconds. Call
-    /// it once per tick, since damage is counted between the views it sees.
     pub fn observe(&mut self, view: &View) {
         let totals = totals(view);
         let hp_at = |key: &(Place, SeatId)| totals.get(key).copied().unwrap_or(0.0);
@@ -58,8 +40,6 @@ impl Fights {
             .retain(|_, fight| view.tick.0.saturating_sub(fight.last_shot.0) <= FORGET);
     }
 
-    /// Every arc that stands, with the ring it draws on, in place then seat
-    /// order.
     pub fn arcs(&self) -> impl Iterator<Item = (Place, Arc)> + '_ {
         self.fights
             .iter()
@@ -77,8 +57,6 @@ impl Fight {
         }
     }
 
-    /// The arc this fight draws; none while the seat has never had HP
-    /// there, which is nothing to drain.
     fn arc(&self, seat: SeatId) -> Option<Arc> {
         (self.started > 0.0).then(|| {
             let share = |hp: f64| (hp / self.started).clamp(0.0, 1.0) as f32;
@@ -90,8 +68,6 @@ impl Fight {
         })
     }
 
-    /// Takes the seat's total HP at the place at `tick`: what it lost since
-    /// the last tick is the damage that trails the drain.
     fn drain(&mut self, hp: f64, tick: Tick) {
         let damage = self.hp - hp;
         if damage > 0.0 {
@@ -104,8 +80,6 @@ impl Fight {
     }
 }
 
-/// Every seat's total HP at every place the view sees it holding, in hit
-/// points. A flying unit fights nowhere, so it counts toward none.
 fn totals(view: &View) -> BTreeMap<(Place, SeatId), f64> {
     let mut totals: BTreeMap<(Place, SeatId), f64> = BTreeMap::new();
     for seen in view.seen.iter().filter(|seen| !seen.flying) {
@@ -133,8 +107,6 @@ mod tests {
 
     const SEAT: SeatId = SeatId(0);
 
-    /// A view of one seat holding `hp` hit points at [`PLACE`] at `tick`,
-    /// with shots exchanged there where `shooting`.
     fn view(tick: u64, hp: f64, shooting: bool) -> View {
         View {
             seat: SEAT,

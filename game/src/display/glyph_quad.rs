@@ -1,8 +1,3 @@
-//! The ship glyph: a mesh value per `(Glyph, SeatId)`, its own texture
-//! rasterized in the seat's colour with a white outline, for the belt.
-//! Frame and marks are the sheet's own primitives (`glyph::Frame::points`,
-//! `glyph::primitives_of`), the same table the screen painter reads.
-
 use mirage_engine::egui::Color32;
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::{Mesh, MeshData, Quad};
@@ -12,11 +7,8 @@ use probe_sim::{MAX_SEATS, SeatId};
 
 use crate::display::glyph::{self, Frame, Glyph, Primitive, Size};
 
-/// A glyph texture's side, in texels.
 pub const CELL_PIXELS: u32 = 48;
 
-/// The seat palette: one colour per seat a match can hold, indexed by
-/// [`SeatId`].
 const PALETTE: [Color; MAX_SEATS] = [
     Color::rgb(0.90, 0.25, 0.25),
     Color::rgb(0.25, 0.55, 0.95),
@@ -24,29 +16,19 @@ const PALETTE: [Color; MAX_SEATS] = [
     Color::rgb(0.95, 0.80, 0.20),
 ];
 
-/// A glyph's fraction of the cell its frame fills by cost class, `Large`
-/// reaching the cell's own edge; the size class over
-/// [`crate::display::glyph::WIDEST_SCALE`].
 fn cell_fraction(size: &Size) -> f32 {
     size.scale() / crate::display::glyph::WIDEST_SCALE
 }
 
-/// `seat`'s colour. Every seat of a match has one, since the palette is
-/// [`MAX_SEATS`] long.
 pub fn seat_colour(seat: SeatId) -> Color {
     PALETTE[usize::from(seat.0)]
 }
 
-/// `seat`'s colour as the HUD's painter takes it, fully opaque.
 pub fn seat_color32(seat: SeatId) -> Color32 {
     let [red, green, blue, alpha] = encode(seat_colour(seat));
     Color32::from_rgba_unmultiplied(red, green, blue, alpha)
 }
 
-/// A ship's billboarded quad: `glyph`, of the row it stands for, rasterized
-/// in `seat`'s colour with a white outline. Equal values build the same
-/// texture, so the shipped roster's glyphs across the seat palette are the
-/// whole catalog.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GlyphQuad {
     pub glyph: Glyph,
@@ -75,7 +57,6 @@ impl Mesh for GlyphQuad {
     }
 }
 
-/// A pixel's coverage: what `rasterize` paints there.
 enum Coverage {
     Outside,
     Outline,
@@ -83,8 +64,6 @@ enum Coverage {
     Mark,
 }
 
-/// `glyph` rasterized at [`CELL_PIXELS`] square: the frame filled in
-/// `colour` with a white outline and white marks, nearest-sampled.
 pub fn rasterize(glyph: &Glyph, colour: Color) -> TextureData {
     rasterize_primitives(
         &glyph.frame,
@@ -94,10 +73,6 @@ pub fn rasterize(glyph: &Glyph, colour: Color) -> TextureData {
     )
 }
 
-/// `frame` and `primitives`, at `size`'s class, rasterized at
-/// [`CELL_PIXELS`] square exactly as [`rasterize`] would from the glyph
-/// they belong to; the seam a test drives with the sheet's own primitives
-/// to check they agree.
 fn rasterize_primitives(
     frame: &Frame,
     primitives: &[Primitive],
@@ -121,22 +96,15 @@ fn rasterize_primitives(
     TextureData::rgba8(UVec2::new(side, side), pixels).pixelated()
 }
 
-/// `col`, `row` of a `side`-square grid as `(x, y)` in `-1.0..=1.0`, `y`
-/// increasing downward with the texture's own rows.
 fn to_local(col: u32, row: u32, side: u32) -> (f32, f32) {
     let to = |value: u32| ((value as f32 + 0.5) / side as f32) * 2.0 - 1.0;
     (to(col), to(row))
 }
 
-/// What point `(x, y)` of the cell paints, for `frame` and `primitives` at
-/// `size`'s class.
 fn coverage(frame: &Frame, primitives: &[Primitive], size: &Size, x: f32, y: f32) -> Coverage {
-    // Shrinks the point toward the centre before testing the unit shape, so
-    // a smaller size class draws a smaller frame within the same cell.
     let extent = cell_fraction(size);
     let (x, y) = (x / extent, y / extent);
-    // Checked before the frame itself: the arc mark reads over the apex,
-    // outside the frame's own silhouette.
+
     if primitives
         .iter()
         .any(|primitive| primitive_covers(primitive, x, y))
@@ -153,8 +121,6 @@ fn coverage(frame: &Frame, primitives: &[Primitive], size: &Size, x: f32, y: f32
     }
 }
 
-/// The distance from `(x, y)` to the nearest edge of `frame`'s outline,
-/// positive inside, negative outside.
 fn frame_depth(frame: &Frame, x: f32, y: f32) -> f32 {
     let points: Vec<(f32, f32)> = frame
         .points()
@@ -164,9 +130,6 @@ fn frame_depth(frame: &Frame, x: f32, y: f32) -> f32 {
     polygon_depth(&points, x, y)
 }
 
-/// The distance from `(x, y)` to the nearest edge of the closed convex
-/// polygon `points`, listed apex or corner first as [`Frame::points`]
-/// does; positive inside, negative outside.
 fn polygon_depth(points: &[(f32, f32)], x: f32, y: f32) -> f32 {
     let count = points.len();
     (0..count)
@@ -181,7 +144,6 @@ fn polygon_depth(points: &[(f32, f32)], x: f32, y: f32) -> f32 {
         .fold(f32::INFINITY, f32::min)
 }
 
-/// Whether `primitive` covers the point `(x, y)`.
 fn primitive_covers(primitive: &Primitive, x: f32, y: f32) -> bool {
     let half_stroke = glyph::unit_length(glyph::MARK_WIDTH) / 2.0;
     match primitive {
@@ -204,13 +166,12 @@ fn primitive_covers(primitive: &Primitive, x: f32, y: f32) -> bool {
             let (ax, ay) = glyph::unit(*at);
             let (dx, dy) = (x - ax, y - ay);
             let on_ring = (dx.hypot(dy) - glyph::unit_length(*radius)).abs() <= half_stroke;
-            // `0` is straight up, matching the screen painter's own arc.
+
             on_ring && dx.atan2(-dy).abs() <= core::f32::consts::FRAC_PI_2
         }
     }
 }
 
-/// The distance from `point` to the segment from `a` to `b`.
 fn distance_to_segment(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     let (px, py) = point;
     let (ax, ay) = a;
@@ -226,7 +187,6 @@ fn distance_to_segment(point: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
     (px - cx).hypot(py - cy)
 }
 
-/// `colour`'s channels as sRGB-encoded bytes, fully opaque.
 pub(crate) fn encode(colour: Color) -> [u8; 4] {
     let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
     [byte(colour.red), byte(colour.green), byte(colour.blue), 255]
@@ -238,22 +198,12 @@ mod tests {
 
     use super::*;
 
-    /// The most texels the rasterised cell of a shipped row may differ
-    /// from the sheet's own drawing of it, at the same size: zero, since
-    /// both read the identical, deterministic primitive table.
     const MAX_SHEET_DIFFERENCE: usize = 0;
 
-    /// The least texels a row's marks must change in its cell at the small
-    /// size class, so a mark reads there and not only at medium or large.
     const MIN_MARK_TEXELS: usize = 20;
 
-    /// The least texels a bare frame (no marks) must fill in its own
-    /// colour, so the frame's own coverage — not only its marks — is
-    /// checked, independent of whatever `frame_depth` computes.
     const MIN_FILL_TEXELS: usize = 100;
 
-    /// The least white texels a bare frame (no marks) must carry as its
-    /// outline, by the same independent check.
     const MIN_OUTLINE_TEXELS: usize = 20;
 
     fn glyphs() -> Vec<Glyph> {
@@ -263,10 +213,6 @@ mod tests {
             .collect()
     }
 
-    /// `name`'s primitives transcribed straight from
-    /// `art/concepts/hull-gallery.html`'s `icon` table, independent of
-    /// `glyph::primitives_of`, so the sheet's-drawing test is not
-    /// circular.
     fn sheet_primitives(name: &str) -> Vec<Primitive> {
         let plus = |at: (f32, f32), arm: f32| {
             vec![
@@ -345,10 +291,6 @@ mod tests {
         }
     }
 
-    /// A bare frame (no marks, so every white texel is the outline, not a
-    /// mark) rasterises to a filled body in its own colour and a white
-    /// outline around it — checked by counting the two colours in the
-    /// output directly, never by calling `frame_depth` or `polygon_depth`.
     #[test]
     fn every_shipped_rows_bare_frame_fills_and_outlines() {
         let colour = Color::rgb(0.1, 0.2, 0.9);

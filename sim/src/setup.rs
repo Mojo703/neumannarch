@@ -1,18 +1,10 @@
-//! What a match starts from, the same value on every machine.
-
 use serde::{Deserialize, Serialize};
 
 use crate::ids::TeamId;
 use crate::time::Tick;
 
-/// The most seats a match holds.
 pub const MAX_SEATS: usize = 4;
 
-/// What every machine of a match builds its initial state from: who sits
-/// where, the map's seed, and the tick the match ends at.
-///
-/// Deserialising goes through [`Setup::new`], so a setup off the wire is
-/// checked for its seat count once, wherever it came from.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[serde(try_from = "Fields")]
 pub struct Setup {
@@ -21,16 +13,12 @@ pub struct Setup {
     clock: Tick,
 }
 
-/// Why a setup is not a match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BadSetup {
-    /// No seats at all.
     NoSeats,
-    /// More seats than [`MAX_SEATS`].
     TooManySeats,
 }
 
-/// A [`Setup`]'s fields as they travel, before the seat count is checked.
 #[derive(Deserialize)]
 struct Fields {
     teams: Vec<TeamId>,
@@ -39,8 +27,6 @@ struct Fields {
 }
 
 impl Setup {
-    /// A match of one seat per entry of `teams`, in seat order, ending at
-    /// `clock`.
     pub fn new(teams: Vec<TeamId>, seed: u64, clock: Tick) -> Result<Setup, BadSetup> {
         match teams.len() {
             0 => Err(BadSetup::NoSeats),
@@ -49,17 +35,14 @@ impl Setup {
         }
     }
 
-    /// Each seat's team, in seat order; never empty.
     pub fn teams(&self) -> &[TeamId] {
         &self.teams
     }
 
-    /// The map's seed.
     pub fn seed(&self) -> u64 {
         self.seed
     }
 
-    /// The tick the match ends at.
     pub fn clock(&self) -> Tick {
         self.clock
     }

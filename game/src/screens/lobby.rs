@@ -1,11 +1,8 @@
-//! The lobby: the belt the match will be played on, behind the table of
-//! seats and the match's settings.
-
 use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use probe_agents::Personality;
-use probe_protocol::{Bot, Control, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
+use probe_protocol::{Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
 use probe_sim::belt::Belt;
 use probe_sim::{TICKS_PER_SECOND, TeamId, Tick};
 
@@ -14,7 +11,7 @@ use crate::display::camera::BeltCamera;
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
 use crate::display::label::titled;
 use crate::display::scene::Scene;
-use crate::display::screen::Screen;
+use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::screens::Playable;
 use crate::screens::control::{Chose, Controls, Rule, Value, Valued};
@@ -22,15 +19,8 @@ use crate::screens::field::{Allow, Field, MAX_SEED, Typed};
 use crate::screens::panel::{self, Panel};
 use crate::screens::panning::Panning;
 
-/// The eye-to-focus distance the lobby and loading screens show the belt
-/// from, in meters.
-///
-/// A ring holds a fixed screen radius at every zoom, so this is the widest
-/// view whose rings stand apart, which is a region of the belt and not all
-/// of it.
 pub const PREVIEW_ZOOM: f64 = 12_000.0;
 
-/// The clocks the lobby's clock choice offers, in ticks.
 const CLOCKS: [Tick; 4] = [
     Tick(60 * TICKS_PER_SECOND as u64),
     Tick(5 * 60 * TICKS_PER_SECOND as u64),
@@ -38,60 +28,40 @@ const CLOCKS: [Tick; 4] = [
     Tick(30 * 60 * TICKS_PER_SECOND as u64),
 ];
 
-/// Every personality a seat's holder can be, in the order the choice
-/// offers them.
 const BOTS: [Bot; 2] = [Bot::Turtle, Bot::Expand];
 
-/// How wide the seat table's own column of numbers stands, in points:
-/// wide enough that its label clears the holder's.
 const SEAT_WIDTH: f32 = 52.0;
 
-/// How wide the match's settings stand, in points.
 const SETTINGS_WIDTH: f32 = 320.0;
 
-/// How much of a settings row its label takes, the rest being its
-/// control.
 const LABEL_SHARE: f32 = 0.3;
 
-/// How wide a seat's holder choice stands, in points.
 const HOLDER_WIDTH: f32 = 150.0;
 
-/// How wide a seat's Kick action stands, in points.
 const KICK_WIDTH: f32 = 60.0;
 
-/// How wide a seat's team choice stands, in points.
 const TEAM_WIDTH: f32 = 104.0;
 
-/// How wide a seat's readiness mark stands, in points.
 const READY_WIDTH: f32 = 62.0;
 
-/// How far apart the cells of a seat row stand, in points.
 const CELL_GAP: f32 = 8.0;
 
-/// How wide a bottom action stands, in points.
 const ACTION_WIDTH: f32 = 150.0;
 
-/// How wide the seat table stands, in points: every cell and the gaps
-/// between them.
 const TABLE_WIDTH: f32 =
     SEAT_WIDTH + HOLDER_WIDTH + KICK_WIDTH + TEAM_WIDTH + READY_WIDTH + 4.0 * CELL_GAP;
 
-/// The lobby screen: the lobby itself, the belt its seed lays, and which
-/// choice has its list open.
 pub struct LobbyScreen {
     lobby: Lobby,
     me: PlayerId,
     scene: Scene,
     camera: BeltCamera,
-    /// The seed the belt was laid from, so the belt is rebuilt the instant
-    /// the seed changes.
     laid: u64,
     seed: Field,
     open: Option<Open>,
     panning: Panning,
 }
 
-/// The choice whose list is open, where one is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Open {
     Holder(usize),
@@ -99,54 +69,37 @@ enum Open {
     Clock,
 }
 
-/// What the lobby's viewer asked for this frame.
 #[derive(Default)]
 pub struct Asked {
-    /// Edits to apply in order; every one is the viewer's to make.
     pub edits: Vec<LobbyEdit>,
-    /// The action across the bottom the viewer picked.
     pub picked: Option<Picked>,
 }
 
-/// What the lobby's own actions ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {
-    /// Leave the lobby for the title.
     Leave,
-    /// Start the match, which only the host is offered.
     Start,
 }
 
-/// Where the lobby's controls stand, which its paint, its hit test and the
-/// headless drive all read.
 pub struct Places {
-    /// The table's column labels, which no control stands in.
     pub head: Row,
-    /// One row per slot the match can hold, in slot order.
     pub rows: Vec<Row>,
-    /// The seed, with Random Seed inside its right edge, where
-    /// [`crate::screens::control::inside_rect`] puts it.
     pub seed: Rect,
     pub clock: Rect,
-    /// Start for the host, Ready for a guest.
     pub act: Rect,
     pub leave: Rect,
 }
 
-/// Where one row of the seat table stands, cell by cell.
 pub struct Row {
     pub slot: usize,
-    /// The seat's number in a square of its colour.
     pub seat: Rect,
     pub holder: Rect,
-    /// Kick, drawn only for a seat a guest holds.
     pub kick: Rect,
     pub team: Rect,
     pub ready: Rect,
 }
 
 impl LobbyScreen {
-    /// `lobby` as `me` sees it.
     pub fn of(lobby: Lobby, me: PlayerId) -> LobbyScreen {
         let laid = lobby.seed();
         let scene = belt_from(laid);
@@ -163,11 +116,6 @@ impl LobbyScreen {
         }
     }
 
-    /// Paints the belt, the seats and the shape, and answers what the
-    /// viewer asked for and the edits it asked of the lobby.
-    ///
-    /// It applies no edit itself: the room a multiplayer lobby is in is the
-    /// authority on it, and a skirmish's own flow stands in for one.
     pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Asked
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
@@ -182,31 +130,28 @@ impl LobbyScreen {
         let size = ctx.window_size();
         let window = panel::window_of(size, points_per_pixel);
         self.panning.drag(ctx, &mut self.camera, size, true);
-        let screen = Screen::of(&self.camera, size, points_per_pixel);
-        belt::draw(&self.scene, &screen, ctx);
+        let viewport = Viewport::of(&self.camera, size, points_per_pixel);
+        belt::draw(&self.scene, &viewport, ctx);
 
-        let pointer = screen.point_at(ctx.pointer());
+        let pointer = viewport.point_at(ctx.pointer());
         let clicked = ctx.pressed(Button::Select);
         let mut asked = Asked::default();
         ctx.ui(|ui| {
-            hud::paint(&self.scene, &screen, None, ui.painter());
+            hud::paint(&self.scene, &viewport, None, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             asked = self.paint(&panel, &Typed::this_frame(ui.ctx()));
         });
         asked
     }
 
-    /// The lobby as it stands, which a match is frozen from.
     pub fn lobby(&self) -> &Lobby {
         &self.lobby
     }
 
-    /// Takes the lobby the room says stands now.
     pub fn takes(&mut self, lobby: Lobby) {
         self.lobby = lobby;
     }
 
-    /// The whole screen, and what its viewer asked for.
     fn paint(&mut self, panel: &Panel<'_>, typed: &Typed) -> Asked {
         let places = Places::over(panel.window());
         let mut controls = Controls::over(panel);
@@ -236,9 +181,6 @@ impl LobbyScreen {
         asked
     }
 
-    /// One row of the table: the seat's number in its colour, who holds
-    /// it, the Kick beside a guest, its team, and its readiness mark. A
-    /// closed seat's team and ready cells stand empty.
     fn paint_row(
         &mut self,
         panel: &Panel<'_>,
@@ -292,14 +234,14 @@ impl LobbyScreen {
             None => {}
         }
 
-        if let Control::Player { player, .. } = slot.control
+        if let Holder::Player { player, .. } = slot.control
             && player != self.lobby.host()
             && controls.action(row.kick, "Kick", &self.rule(LobbyEdit::Kick(player)))
         {
             edits.push(LobbyEdit::Kick(player));
         }
 
-        if slot.control == Control::Closed {
+        if slot.control == Holder::Closed {
             return;
         }
 
@@ -328,17 +270,15 @@ impl LobbyScreen {
 
         panel.label(
             match slot.control {
-                Control::Player { ready: true, .. } => "Ready",
-                Control::Player { ready: false, .. } => "Waiting",
-                Control::Open | Control::Closed | Control::Bot(_) => "",
+                Holder::Player { ready: true, .. } => "Ready",
+                Holder::Player { ready: false, .. } => "Waiting",
+                Holder::Open | Holder::Closed | Holder::Bot(_) => "",
             },
             Pos2::new(row.ready.left(), row.ready.center().y),
             panel::DIM_INK,
         );
     }
 
-    /// The host's shape down the right: the seed with Random Seed inside
-    /// it, and the clock.
     fn paint_shape(
         &mut self,
         panel: &Panel<'_>,
@@ -395,8 +335,6 @@ impl LobbyScreen {
         }
     }
 
-    /// Across the bottom: Start for the host, Ready for a guest, and
-    /// Leave.
     fn paint_bottom(&self, controls: &mut Controls<'_>, places: &Places, asked: &mut Asked) {
         match self.lobby.host() == self.me {
             true => {
@@ -421,11 +359,6 @@ impl LobbyScreen {
         }
     }
 
-    /// Whether `edit` would be taken from this viewer, and the sentence to
-    /// show while it would not.
-    ///
-    /// It asks the lobby itself, on a copy, so a control is enabled
-    /// exactly when the room would accept what it does.
     fn rule(&self, edit: LobbyEdit) -> Rule {
         Rule::unless(
             self.lobby
@@ -436,7 +369,6 @@ impl LobbyScreen {
         )
     }
 
-    /// The sentence Start shows while the lobby is not a match yet.
     fn start_reason(&self, why: probe_protocol::NotReady) -> String {
         let team = |slot: usize| {
             self.lobby
@@ -456,7 +388,6 @@ impl LobbyScreen {
         }
     }
 
-    /// Opens `choice`'s list, or closes it where it is the open one.
     fn toggle(&mut self, choice: Open) {
         self.open = match self.open == Some(choice) {
             true => None,
@@ -464,19 +395,17 @@ impl LobbyScreen {
         };
     }
 
-    /// What a slot's holder can be set to: this viewer, open, closed, or a
-    /// bot by personality.
-    fn holder_choices(&self, slot: usize) -> Vec<Value<Control>> {
+    fn holder_choices(&self, slot: usize) -> Vec<Value<Holder>> {
         [
-            Control::Player {
+            Holder::Player {
                 player: self.me,
                 ready: false,
             },
-            Control::Open,
-            Control::Closed,
+            Holder::Open,
+            Holder::Closed,
         ]
         .into_iter()
-        .chain(BOTS.map(Control::Bot))
+        .chain(BOTS.map(Holder::Bot))
         .map(|control| Value {
             value: control,
             label: self.holder_name(control),
@@ -485,7 +414,6 @@ impl LobbyScreen {
         .collect()
     }
 
-    /// Every team a slot can sit on.
     fn team_choices(&self, slot: usize) -> Vec<Value<TeamId>> {
         (0..MAX_SLOTS as u8)
             .map(TeamId)
@@ -497,7 +425,6 @@ impl LobbyScreen {
             .collect()
     }
 
-    /// Every clock the lobby offers.
     fn clock_choices(&self) -> Vec<Value<Tick>> {
         CLOCKS
             .map(|clock| Value {
@@ -509,22 +436,18 @@ impl LobbyScreen {
             .collect()
     }
 
-    /// What `control` holds a slot as, as this viewer reads it.
-    fn holder_name(&self, control: Control) -> String {
+    fn holder_name(&self, control: Holder) -> String {
         match control {
-            Control::Open => "Open".to_string(),
-            Control::Closed => "Closed".to_string(),
-            Control::Bot(bot) => titled(Personality::of(bot).name),
-            Control::Player { player, .. } if player == self.me => "You".to_string(),
-            Control::Player { player, .. } => player_name(player),
+            Holder::Open => "Open".to_string(),
+            Holder::Closed => "Closed".to_string(),
+            Holder::Bot(bot) => titled(Personality::of(bot).name),
+            Holder::Player { player, .. } if player == self.me => "You".to_string(),
+            Holder::Player { player, .. } => player_name(player),
         }
     }
 }
 
 impl Places {
-    /// Where each control stands over `window`, in points: the table's
-    /// column labels, one row per slot the match can hold, the settings
-    /// down the right, and the actions across the bottom.
     pub fn over(window: Rect) -> Places {
         let top = Pos2::new(
             window.left() + panel::MARGIN,
@@ -563,7 +486,6 @@ impl Places {
 }
 
 impl Row {
-    /// One table row's cells, left to right, over `rect`.
     fn over(rect: Rect, slot: usize) -> Row {
         let cell = |left: f32, width: f32| {
             Rect::from_min_size(Pos2::new(left, rect.top()), Vec2::new(width, rect.height()))
@@ -583,8 +505,6 @@ impl Row {
     }
 }
 
-/// Where a settings row's control stands: its right share, the label
-/// taking the left.
 fn settings_control(row: Rect) -> Rect {
     Rect::from_min_max(
         Pos2::new(row.left() + row.width() * LABEL_SHARE, row.top()),
@@ -592,17 +512,14 @@ fn settings_control(row: Rect) -> Rect {
     )
 }
 
-/// `team` as the player reads it, numbered from one.
 fn team_name(team: TeamId) -> String {
     format!("Team {}", team.0 as u16 + 1)
 }
 
-/// Another person as this machine reads them, numbered from one.
 fn player_name(player: PlayerId) -> String {
     format!("Player {}", player.0 as u64 + 1)
 }
 
-/// `clock` as the player reads it, in whole minutes.
 fn clock_name(clock: Tick) -> String {
     match clock.seconds() as u64 / 60 {
         1 => "1 minute".to_string(),
@@ -610,7 +527,6 @@ fn clock_name(clock: Tick) -> String {
     }
 }
 
-/// The sentence a refused `edit` shows, naming what the control changes.
 fn refusal_sentence(why: Refused, edit: LobbyEdit) -> String {
     match why {
         Refused::NotHost => format!("Only the host changes {}", subject(edit)),
@@ -625,7 +541,6 @@ fn refusal_sentence(why: Refused, edit: LobbyEdit) -> String {
     }
 }
 
-/// What an edit changes, as the host-only sentence names it.
 fn subject(edit: LobbyEdit) -> &'static str {
     match edit {
         LobbyEdit::SetSlot { .. } => "who holds a seat",
@@ -637,10 +552,6 @@ fn subject(edit: LobbyEdit) -> &'static str {
     }
 }
 
-/// The belt `seed` lays, at the start of the match.
-///
-/// Map generation is a later unit, so every seed lays the same rocks; the
-/// seed changes nothing the screen draws until it lands.
 fn belt_from(_seed: u64) -> Scene {
     Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO)
 }
@@ -649,12 +560,10 @@ fn belt_from(_seed: u64) -> Scene {
 mod tests {
     use super::*;
 
-    /// The skirmish lobby: the host on team one, a bot on team two.
     fn skirmish() -> Lobby {
         Lobby::skirmish(PlayerId::HOST)
     }
 
-    /// A window the size the game opens at, in points.
     fn window() -> Rect {
         Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0))
     }
@@ -693,7 +602,7 @@ mod tests {
         let closed = lobby
             .slots()
             .iter()
-            .position(|slot| slot.control == Control::Closed)
+            .position(|slot| slot.control == Holder::Closed)
             .expect("a skirmish closes the seats it does not use");
         let screen = LobbyScreen::of(lobby, PlayerId::HOST);
 
@@ -776,7 +685,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 1,
-                    control: Control::Player {
+                    control: Holder::Player {
                         player: guest,
                         ready: false,
                     },

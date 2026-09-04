@@ -36,8 +36,9 @@ depends on nothing in this repo and never on the engine.
   command carries has a stated cap.
 - No blocking calls (`block_on`, `std::thread::sleep`, sync file IO) in
   `game` or `sim`; the rule exists for wasm safety.
-- Prefer compile-time enforcement; a runtime check requires a comment
-  explaining why the type system could not express it.
+- Prefer compile-time enforcement; a runtime check the type system
+  could not express is listed in ARCHITECTURE.md's Invariants with the
+  shape change that would delete it.
 
 ## Code quality bar
 
@@ -52,29 +53,28 @@ off on without comments.
   method. A free function stays only where no argument is the subject
   (min/swap-shaped peers). The counterweight: a type that gains methods
   from every module is also a missing type.
-- Concise rustdoc on every public item, stating contracts (defaults, units,
-  when things run), never restating signatures. One line unless a contract
-  genuinely needs more: what it is, then when you need it, plain
-  subject-verb-object, one fact per sentence. Design rationale lives in the
-  design docs, never in rustdoc; no worked examples on ordinary items.
-- Comments are a last resort: if you reach for one, factor instead —
-  extract a named function or type until it is unnecessary. Survivors
-  state only what code cannot (safety contracts, platform quirks, why not
-  the obvious way), one line preferred, two at most. Module docs are a
-  couple of lines.
-- Literal register: docs and comments state what the code does in literal
-  verbs, no figurative phrasing. The game's own vocabulary (chase, leash,
-  fire, spot, home, want) is literal here.
+- No comments of any kind: no `//`, no rustdoc, no module docs (owner,
+  2026-09-05). A contract is carried by the type, the name and the test
+  that pins it; a unit, a default or a `None` case lives in a newtype, a
+  constant's name or the return type. Anything a comment would have said
+  belongs in the design docs or in a name, or is not worth saying.
+- A confused agent is a naming defect (owner, 2026-09-05): when an agent
+  misreads a type, a function or a field, the fix is a more descriptive
+  name, or a new type so the thing can be named at all; never a comment,
+  never a note in a brief.
+- Literal register: names and the design docs state what the code does in
+  literal verbs, no figurative phrasing. The game's own vocabulary (chase,
+  leash, fire, spot, home, want) is literal here.
 - The fix is the structural fix: when a defect admits a type-level answer,
   that is the one to implement; a workaround is never the recommendation,
   and churn is no counterargument. Every place a failure is tolerated at
   runtime — a fallback, a silently ignored input, a cap — gets one of
   three verdicts: made unrepresentable by an API shape, moved to a
-  boot-time failure, or justified in a comment that answers "what shape
-  change would delete this?" A documented hole is still a hole.
+  boot-time failure, or listed in ARCHITECTURE.md's Invariants with the
+  shape change that would delete it. A documented hole is still a hole.
 - No dead code, no placeholder stubs (an architecture-required item may
   land before its driver, but with a real body and documented contract),
-  no `#[allow]` without a justifying comment, no commented-out code.
+  no `#[allow]`, no commented-out code.
 - Small single-purpose modules; `pub(crate)` by default, `pub` only for the
   documented surface.
 - A test is written from the guarantee, never from the fix's own geometry,

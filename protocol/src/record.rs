@@ -1,25 +1,15 @@
-//! A match as a value: what it started from, and the commands that
-//! reproduce it.
-
 use std::collections::BTreeMap;
 
 use probe_sim::state::State;
 use probe_sim::{Batch, Refused, Session, Setup, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
-/// Why bytes are not a record: a command the tick's batch would not take.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BadRecord {
     pub tick: Tick,
     pub reason: Refused,
 }
 
-/// A match's settled history: the setup every machine built it from, and
-/// every command up to the settled tick, one batch per tick.
-///
-/// It travels as the setup and a flat list of commands; reading one folds
-/// that list into its ticks, so a record that replays is the only one that
-/// exists.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(into = "Fields", try_from = "Fields")]
 pub struct Record {
@@ -27,7 +17,6 @@ pub struct Record {
     ticks: BTreeMap<Tick, Batch>,
 }
 
-/// A [`Record`] as it travels.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct Fields {
     setup: Setup,
@@ -35,34 +24,25 @@ struct Fields {
 }
 
 impl Record {
-    /// What `session` has played up to its settled tick.
     pub fn of(session: &Session) -> Record {
-        // A session's own log is already one batch per tick, so the fold
-        // refuses nothing it hands out.
         Record {
             setup: session.setup().clone(),
             ticks: folded(session.commands()).expect("a session's own log is a record"),
         }
     }
 
-    /// A record of `setup` over `ticks`: what a room's forwarded log is,
-    /// which is one batch per tick already.
     pub fn played(setup: Setup, ticks: BTreeMap<Tick, Batch>) -> Record {
         Record { setup, ticks }
     }
 
-    /// What the match was set up as.
     pub fn setup(&self) -> &Setup {
         &self.setup
     }
 
-    /// How many commands it holds.
     pub fn commands(&self) -> usize {
         self.ticks.values().map(|batch| batch.iter().count()).sum()
     }
 
-    /// The state at `until`, from the setup's initial state stepped over
-    /// the log.
     pub fn replay(&self, until: Tick) -> State {
         let mut state = State::start(&self.setup);
         let nothing = Batch::new();
@@ -110,8 +90,6 @@ impl core::fmt::Display for BadRecord {
     }
 }
 
-/// `log` as one batch per tick, or the first command a batch would not
-/// take: a repeated `(tick, seat, seq)`, or a seat past the tick's cap.
 fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
     let mut ticks: BTreeMap<Tick, Batch> = BTreeMap::new();
     for stamped in log {
@@ -134,9 +112,8 @@ mod tests {
     use probe_sim::{Band, Place, Retention, RockId, RowId, SeatId, TeamId};
 
     use super::*;
-    use crate::wire::Wire;
+    use crate::wire::Codec;
 
-    /// A clock no test reaches.
     const CLOCK: Tick = Tick(10_000);
 
     fn setup() -> Setup {
@@ -158,8 +135,6 @@ mod tests {
         }
     }
 
-    /// A match of a few ticks with both seats this machine's, so every tick
-    /// it plays is settled.
     fn played() -> Session {
         let mut session = Session::new(setup(), Retention::shipped(), &[SeatId(0), SeatId(1)])
             .expect("both seats are seated");

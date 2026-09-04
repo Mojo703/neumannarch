@@ -1,22 +1,13 @@
-//! A rock's colour from its caps, which the belt paints its mesh with and
-//! the HUD strokes its ring with, so a region reads as one hue on both
-//! layers.
-
 use mirage_engine::Color;
 use mirage_engine::egui::Color32;
 use probe_sim::Materials;
 
-/// What each material pulls a colour toward, in the order `Materials`
-/// names them: metals, volatiles, energy.
 const MATERIAL_COLOURS: [Color; 3] = [
     Color::rgb(0.62, 0.64, 0.70),
     Color::rgb(0.35, 0.62, 0.55),
     Color::rgb(0.72, 0.60, 0.30),
 ];
 
-/// `base` pulled toward each material's colour by that material's share of
-/// `caps` above an even third, and by `strength` at a rock of one material
-/// alone. Even and bare caps come back as `base`.
 pub fn toward(base: Color, caps: Materials, strength: f32) -> Color {
     let total = caps.total();
     if total <= 0.0 {
@@ -37,7 +28,6 @@ pub fn toward(base: Color, caps: Materials, strength: f32) -> Color {
     colour
 }
 
-/// [`toward`] over a painted colour, fully opaque.
 pub fn painted(base: Color32, caps: Materials, strength: f32) -> Color32 {
     let of = |channel: u8| f32::from(channel) / 255.0;
     let tinted = toward(
@@ -55,7 +45,6 @@ mod tests {
 
     const BASE: Color = Color::rgb(0.55, 0.5, 0.45);
 
-    /// How far `colour` stands from `toward` in RGB.
     fn apart(colour: Color, toward: Color) -> f32 {
         (colour.red - toward.red).abs()
             + (colour.green - toward.green).abs()

@@ -1,6 +1,3 @@
-//! Probe Game on the Mirage engine: every tick and frame is the live
-//! screen's.
-
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
@@ -10,7 +7,6 @@ use probe_game::screens::flow::Flow;
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
-/// The window's size, in logical pixels.
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
 fn main() {
@@ -22,7 +18,6 @@ fn main() {
     );
 }
 
-/// The playable: one flow of screens, over the sim's own tick.
 struct Probe {
     flow: Flow,
 }
@@ -44,7 +39,6 @@ impl Game for Probe {
 }
 
 impl Probe {
-    /// The game as it opens, at the title.
     fn new() -> Probe {
         Probe {
             flow: Flow::opening(),
@@ -52,11 +46,6 @@ impl Probe {
     }
 }
 
-/// The playable driven headlessly: input through the engine's offscreen
-/// `Session`, and the screenshots the display is judged on.
-///
-/// Behind the `look` feature, which turns the engine's offscreen target on:
-/// `xvfb-run -a cargo test -p probe-game --features look --bin probe-game`.
 #[cfg(all(test, feature = "look"))]
 mod tests {
     use std::path::PathBuf;
@@ -66,40 +55,31 @@ mod tests {
     use mirage_engine::math::Vec2;
     use probe_game::display::hud;
     use probe_game::display::scene::{Fill, Scene, WheelBand};
-    use probe_game::display::screen::Screen;
+    use probe_game::display::viewport::Viewport;
     use probe_game::display::wheel::Wheel;
-    use probe_game::net::room::Word;
-    use probe_game::screens::flow::Stage;
+    use probe_game::screens::flow::Screen;
     use probe_game::screens::play::Play;
     use probe_game::screens::{control, lobby, title};
+    use probe_protocol::Notice;
     use probe_sim::RockId;
     use probe_sim::roster::SHIPYARD;
 
     use super::*;
 
-    /// The offscreen target's size, in physical pixels.
     const TARGET: UVec2 = UVec2::new(1280, 720);
 
-    /// How many frames the drive steps waiting on a room before it gives
-    /// up.
     const PATIENCE: usize = 600;
 
-    /// The title serves a room on one port, so one drive holds it at a
-    /// time.
     static ONE_DRIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// Holds the port every title serves its room on until the test ends.
     fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
         ONE_DRIVE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The rock the drive plays on: near the belt's centre, where the
-    /// camera opens.
     const ROCK: RockId = RockId(10);
 
-    /// A headless run of the playable.
     fn game() -> Offscreen<Probe> {
         Offscreen::new(
             Config::new("probe-play").with_tick_interval(probe_sim::TICK),
@@ -109,8 +89,6 @@ mod tests {
         .expect("the offscreen session starts")
     }
 
-    /// The whole target as a screen's own measure: the offscreen layer
-    /// paints one point per pixel.
     fn window() -> egui::Rect {
         egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -118,28 +96,24 @@ mod tests {
         )
     }
 
-    /// The match on screen.
     fn play(session: &Offscreen<Probe>) -> &Play {
         match session.game().flow.stage() {
-            Stage::Play { play, .. } => play,
+            Screen::Play { play, .. } => play,
             _ => panic!("the match is on screen"),
         }
     }
 
-    /// The lobby on screen, where the lobby is the screen on.
     fn lobby(session: &Offscreen<Probe>) -> Option<&probe_protocol::Lobby> {
         match session.game().flow.stage() {
-            Stage::Lobby { screen, .. } => Some(screen.lobby()),
+            Screen::Lobby { screen, .. } => Some(screen.lobby()),
             _ => None,
         }
     }
 
-    /// The frame's projection, as the match builds it.
-    fn screen(session: &Offscreen<Probe>) -> Screen {
-        Screen::of(play(session).camera(), TARGET, 1.0)
+    fn viewport(session: &Offscreen<Probe>) -> Viewport {
+        Viewport::of(play(session).camera(), TARGET, 1.0)
     }
 
-    /// One click of the left button where the pointer stands.
     fn click(session: &mut Offscreen<Probe>) {
         session.press(MouseButton::Left);
         session.step();
@@ -147,14 +121,12 @@ mod tests {
         session.step();
     }
 
-    /// One click of the left button at `at`, in points.
     fn click_at(session: &mut Offscreen<Probe>, at: egui::Pos2) {
         session.set_pointer(Vec2::new(at.x, at.y));
         session.step();
         click(session);
     }
 
-    /// One press and release of `key`.
     fn tap(session: &mut Offscreen<Probe>, key: Key) {
         session.press(key);
         session.step();
@@ -162,15 +134,12 @@ mod tests {
         session.step();
     }
 
-    /// `ticks` sim ticks.
     fn advance(session: &mut Offscreen<Probe>, ticks: u64) {
         for _ in 0..ticks {
             session.tick();
         }
     }
 
-    /// The point of `wheel` that names `row`'s plus band, found through the
-    /// wheel's own hit test.
     fn plus_band(wheel: &Wheel, centre: egui::Pos2, row: probe_sim::RowId) -> egui::Pos2 {
         (0..3_600)
             .map(|step| {
@@ -184,7 +153,6 @@ mod tests {
             .expect("the row has a slot")
     }
 
-    /// Writes the target's pixels to `game/look/<name>.png`.
     fn save(session: &Offscreen<Probe>, name: &str) -> PathBuf {
         let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("look");
         std::fs::create_dir_all(&out).expect("game/look is writable");
@@ -197,14 +165,11 @@ mod tests {
         path
     }
 
-    /// Where the lobby's controls stand, with the lobby on screen.
     fn lobby_places(session: &Offscreen<Probe>) -> lobby::Places {
         lobby(session).expect("the lobby is on screen");
         lobby::Places::over(window())
     }
 
-    /// Steps frames until `ready`, which is how the drive waits on a
-    /// socket. Panics on a room that never answers.
     fn stepped_until(session: &mut Offscreen<Probe>, ready: impl Fn(&Offscreen<Probe>) -> bool) {
         for _ in 0..PATIENCE {
             if ready(session) {
@@ -233,7 +198,7 @@ mod tests {
         session.step();
 
         assert!(
-            matches!(session.game().flow.stage(), Stage::Play { .. }),
+            matches!(session.game().flow.stage(), Screen::Play { .. }),
             "Start was not enabled on the lobby the game opens"
         );
     }
@@ -260,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_is_disabled_and_says_why_while_the_pointer_is_over_it() {
+    fn quit_is_disabled_and_shows_why_while_the_pointer_is_over_it() {
         let _one = one_at_a_time();
         let mut session = game();
         session.step();
@@ -271,7 +236,7 @@ mod tests {
         click(&mut session);
 
         assert!(
-            matches!(session.game().flow.stage(), Stage::Title { .. }),
+            matches!(session.game().flow.stage(), Screen::Title { .. }),
             "a disabled Quit opens nothing"
         );
         save(&session, "title_quit_reason");
@@ -285,7 +250,7 @@ mod tests {
         click_at(&mut session, title::Places::over(window()).host.center());
         stepped_until(&mut session, |session| lobby(session).is_some());
 
-        let mut guest = probe_game::net::room::Room::joining(&format!(
+        let mut guest = probe_game::net::connection::Connection::joining(&format!(
             "127.0.0.1:{}",
             probe_protocol::DEFAULT_PORT
         ));
@@ -298,18 +263,18 @@ mod tests {
         click_at(&mut session, kick.center());
         stepped_until(&mut session, |session| {
             lobby(session)
-                .is_some_and(|lobby| lobby.slots()[1].control == probe_protocol::Control::Open)
+                .is_some_and(|lobby| lobby.slots()[1].control == probe_protocol::Holder::Open)
         });
 
-        let mut heard = Vec::new();
+        let mut notices = Vec::new();
         for _ in 0..PATIENCE {
-            heard.extend(guest.heard());
-            if heard.contains(&Word::Removed) {
+            notices.extend(guest.notices());
+            if notices.contains(&Notice::Removed) {
                 return;
             }
             session.step();
         }
-        panic!("the kicked machine was never told: {heard:?}");
+        panic!("the kicked machine was never told: {notices:?}");
     }
 
     #[test]
@@ -325,13 +290,11 @@ mod tests {
         );
         let opened = lobby(&session).expect("Skirmish opens a lobby").clone();
         assert!(
-            matches!(opened.slots()[1].control, probe_protocol::Control::Bot(_)),
+            matches!(opened.slots()[1].control, probe_protocol::Holder::Bot(_)),
             "a skirmish seats a bot in seat one"
         );
         assert_eq!(opened.seat_of(1), Some(probe_sim::SeatId(1)));
 
-        // The shortest clock the lobby offers, so the drive reaches the
-        // standings: the first value of the clock's own list.
         let clock = lobby_places(&session).clock;
         click_at(&mut session, clock.center());
         save(&session, "lobby");
@@ -350,23 +313,21 @@ mod tests {
         placed(&mut session);
         paused(&mut session);
 
-        while matches!(session.game().flow.stage(), Stage::Play { play, .. } if !play.over()) {
+        while matches!(session.game().flow.stage(), Screen::Play { play, .. } if !play.over()) {
             advance(&mut session, 1);
         }
         session.step();
         assert!(
-            matches!(session.game().flow.stage(), Stage::Results { .. }),
+            matches!(session.game().flow.stage(), Screen::Results { .. }),
             "the clock runs out into the results"
         );
-        // The step that hands over still draws the match; the next one is
-        // the first the results paint in.
+
         session.step();
         save(&session, "results");
     }
 
-    /// A click on a ring and one on the wheel place a shipyard.
     fn placed(session: &mut Offscreen<Probe>) {
-        let at = screen(session)
+        let at = viewport(session)
             .point_of(
                 play(session)
                     .rock_pos(ROCK)
@@ -377,11 +338,11 @@ mod tests {
         let place = play(session).selection().expect("the ring was selected");
         assert_eq!(place.rock, ROCK);
 
-        let centre = screen(session)
+        let centre = viewport(session)
             .point_of(play(session).rock_pos(ROCK).expect("the rock"))
             .expect("the rock is in front of the eye");
         let wheel = play(session)
-            .wheel(&screen(session))
+            .wheel(&viewport(session))
             .expect("the wheel is open on the selection");
         click_at(session, plus_band(&wheel, centre, SHIPYARD));
         advance(session, 2);
@@ -402,7 +363,7 @@ mod tests {
 
         let glyph = egui::pos2(centre.x, centre.y - hud::INNER_RADIUS);
         let scene = scene_of(session);
-        let (_, mark) = hud::glyph_at(&scene, &screen(session), glyph)
+        let (_, mark) = hud::glyph_at(&scene, &viewport(session), glyph)
             .expect("the glyph on the ring is under the pointer");
         assert_eq!(
             mark.reason
@@ -414,7 +375,6 @@ mod tests {
         save(session, "glyph_reason");
     }
 
-    /// Escape opens the pause screen and closes it again.
     fn paused(session: &mut Offscreen<Probe>) {
         let before = play(session).session().state().tick();
         tap(session, Key::Escape);
@@ -432,7 +392,6 @@ mod tests {
         assert!(play(session).session().state().tick() > before);
     }
 
-    /// The scene the match's frame draws, as the drive reads it back.
     fn scene_of(session: &Offscreen<Probe>) -> Scene {
         let play = play(session);
         Scene::from_view(
@@ -446,7 +405,6 @@ mod tests {
         )
     }
 
-    /// Whether the run at `place` holds a glyph of something present.
     fn has_a_solid_glyph(session: &Offscreen<Probe>, place: probe_sim::Place) -> bool {
         scene_of(session)
             .rings
@@ -476,8 +434,8 @@ mod tests {
         session.step();
 
         let play = play(&session);
-        let screen = screen(&session);
-        let focus = screen
+        let viewport = viewport(&session);
+        let focus = viewport
             .point_of(play.camera().focus())
             .expect("the focus is in front of the eye");
         assert!(
@@ -489,7 +447,7 @@ mod tests {
             .view()
             .terrain
             .iter()
-            .filter_map(|terrain| screen.point_of(play.rock_pos(terrain.rock)?))
+            .filter_map(|terrain| viewport.point_of(play.rock_pos(terrain.rock)?))
             .filter(|at| {
                 (0.0..TARGET.x as f32).contains(&at.x) && (0.0..TARGET.y as f32).contains(&at.y)
             })
@@ -525,9 +483,6 @@ mod tests {
         session.set_pointer(Vec2::new(from.x + dragged.x, from.y + dragged.y));
         session.step();
 
-        // The pan is scaled at the focus's depth, and the drag itself moves
-        // the plane to a slightly different depth, so a drag across a wide
-        // view lands a fraction of itself off.
         let now = rock_at(&session);
         assert!(
             (now - was - dragged).length() <= 0.06 * dragged.length(),
@@ -535,9 +490,8 @@ mod tests {
         );
     }
 
-    /// Where [`ROCK`] draws, in points.
     fn rock_at(session: &Offscreen<Probe>) -> egui::Pos2 {
-        screen(session)
+        viewport(session)
             .point_of(
                 play(session)
                     .rock_pos(ROCK)

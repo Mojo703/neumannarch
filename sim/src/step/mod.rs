@@ -1,6 +1,3 @@
-//! The phases of a step, each a type over the snapshot, and the step that
-//! runs them.
-
 use crate::ids::{EntityId, FlightId, SeatId};
 use crate::materials::Materials;
 use crate::roster::Kind;
@@ -12,22 +9,13 @@ use crate::step::fulfilment::{Assigned, Fulfilment};
 use crate::step::maneuver::Maneuver;
 use crate::step::propagation::{Moved, Propagation};
 
-/// What one step reports beside the next state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
-    /// Every command that changed nothing, each with why, in the order
-    /// they were applied in.
     pub rejected: Vec<(Issued, Rejected)>,
-    /// The shots the tick resolved. A display reads it beside the state;
-    /// nothing in the state itself records a shot.
     pub shots: Shots,
 }
 
 impl State {
-    /// One tick: the commands applied to a copy, every phase over that
-    /// copy as an immutable snapshot, the effects applied in phase order,
-    /// and the tick advanced. A rejected command changes nothing and comes
-    /// back by name.
     pub fn step(&self, issued: &Batch) -> (State, Outcome) {
         let mut applied = self.clone();
         let rejected = issued
@@ -45,8 +33,6 @@ impl State {
         (next, Outcome { rejected, shots })
     }
 
-    /// The state after the tick's effects: motion, fulfilment, income,
-    /// building, shots, then the dead removed and the tick advanced.
     fn next(
         snap: &State,
         moved: &Moved,
@@ -70,7 +56,6 @@ impl State {
     }
 }
 
-/// Every free unit's body and flight, one tick on.
 fn move_bodies(next: &mut State, moved: &Moved) {
     for step in moved.iter() {
         next.set_motion(
@@ -83,8 +68,6 @@ fn move_bodies(next: &mut State, moved: &Moved) {
     }
 }
 
-/// The reserve placed, the sends joined, the surplus marked, and the frames
-/// opened or cancelled.
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
     for placement in &filled.placements {
         let taken = next
@@ -124,15 +107,12 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
     }
 }
 
-/// What the extractors pulled.
 fn earn(next: &mut State, income: &Income) {
     for (seat, materials) in income.iter() {
         refund(next, seat, materials);
     }
 }
 
-/// The frames built and completed, the surplus scrapped, the damaged
-/// repaired.
 fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usize>) {
     for spend in &work.spends {
         let frame = &snap.frames()[spend.frame];
@@ -174,7 +154,6 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
     }
 }
 
-/// The tick's damage and the new ready moments.
 fn resolve(next: &mut State, shots: &Shots) {
     for (target, damage) in shots.damage() {
         if let Some(entity) = next.entity_mut(target) {
@@ -186,9 +165,6 @@ fn resolve(next: &mut State, shots: &Shots) {
     }
 }
 
-/// The dead removed, the empty sends closed, and the seats with nothing
-/// left put out of the match. A composition with no want does not exist by
-/// construction, so nothing closes posts here.
 fn reap(next: &mut State) {
     let dead: Vec<EntityId> = next
         .entities()
@@ -234,9 +210,6 @@ fn reap(next: &mut State) {
     }
 }
 
-/// A completed entity of `row` at `post`: a structure at its rock, a unit
-/// at the place's anchor for the tick it first exists in, clear of the
-/// units already there.
 fn spawn(next: &mut State, post: crate::place::Post, row: crate::ids::RowId) {
     let motion = if next[row].kind() == Kind::Structure {
         Motion::Fixed
@@ -249,8 +222,6 @@ fn spawn(next: &mut State, post: crate::place::Post, row: crate::ids::RowId) {
     next.spawn(post.seat, row, post.place, motion);
 }
 
-/// Joins `entity` to `flight`, which re-homes it to the send's
-/// destination.
 fn join(next: &mut State, entity: EntityId, flight: FlightId, destination: crate::place::Place) {
     let Some(target) = next.entity_mut(entity) else {
         return;
@@ -265,14 +236,12 @@ fn join(next: &mut State, entity: EntityId, flight: FlightId, destination: crate
     });
 }
 
-/// Adds `materials` to a seat's stockpile, losing what exceeds capacity.
 fn refund(next: &mut State, seat: SeatId, materials: Materials) {
     if let Some(seat) = next.seat_mut(seat) {
         seat.stockpile_mut().add(materials);
     }
 }
 
-/// The part of `cost` that `progress` cost units of work paid for.
 fn share(cost: Materials, progress: f64) -> Materials {
     let total = cost.total();
     if total > 0.0 {
@@ -307,10 +276,8 @@ mod tests {
     use crate::time::Tick;
     use crate::{Materials, TICKS_PER_SECOND};
 
-    /// The clock a test match ends at: fifteen minutes.
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
-    /// A match of one seat per team over the shipped belt.
     fn start(teams: &[TeamId]) -> State {
         let setup = Setup::new(teams.to_vec(), 0, CLOCK).expect("a match of these teams");
         State::start(&setup)
@@ -330,13 +297,10 @@ mod tests {
         }
     }
 
-    /// A want of `count` of `row` at `place`, as the seat's first command.
     fn want(seat: u8, place: Place, row: RowId, count: u32) -> Issued {
         numbered(seat, 0, place, row, count)
     }
 
-    /// A want as `seat`'s `seq`th command, for a tick that carries more
-    /// than one of a seat's.
     fn numbered(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
@@ -345,7 +309,6 @@ mod tests {
         }
     }
 
-    /// `issued` as one tick's batch, which must hold every one of them.
     fn batch(issued: &[Issued]) -> Batch {
         let mut batch = Batch::new();
         for issued in issued {
@@ -354,20 +317,17 @@ mod tests {
         batch
     }
 
-    /// One tick with `issued`, which must all be accepted.
     fn tick(state: State, issued: &[Issued]) -> State {
         let (next, outcome) = state.step(&batch(issued));
         assert_eq!(outcome.rejected, Vec::new(), "the commands were rejected");
         next
     }
 
-    /// Why `issued` changed nothing, applied to `state` on its own.
     fn refusal(state: &State, issued: Issued) -> Option<Rejected> {
         let (_, outcome) = state.step(&batch(&[issued]));
         outcome.rejected.first().map(|(_, why)| *why)
     }
 
-    /// `ticks` ticks with no commands.
     fn run(mut state: State, ticks: u64) -> State {
         for _ in 0..ticks {
             state = tick(state, &[]);
@@ -375,14 +335,10 @@ mod tests {
         state
     }
 
-    /// How many of `row` the seat has at `place`, holding or flying in.
     fn count(state: &State, seat: u8, place: Place, row: RowId) -> u32 {
         state.count(post(seat, place), row)
     }
 
-    /// The first shot to land on `target` within `ticks` ticks, if one
-    /// does. A weapon fires once an interval, so a test must watch a whole
-    /// interval before concluding it holds its fire.
     fn shot_at(state: &State, target: EntityId, ticks: u64) -> Option<Hit> {
         let mut state = state.clone();
         for _ in 0..ticks {
@@ -413,7 +369,7 @@ mod tests {
         let shipyard = state.entities().next().expect("the shipyard");
         assert_eq!(shipyard.motion(), Motion::Fixed);
         assert_eq!(state.body_of(shipyard), state.rock_body(RockId(0)));
-        // Its capacity is its own plus what the seat started with.
+
         let state = run(state, seconds);
         assert_eq!(
             state[SeatId(0)].stockpile().capacity(),
@@ -433,8 +389,7 @@ mod tests {
                 vec![Seat::new(TeamId(0), stock, BTreeMap::from([(SHIPYARD, 1)]))],
             )
         };
-        // A lancer costs all three materials and takes several seconds to
-        // build, so its frame is still open a second in.
+
         let a_second_in = |stock| {
             let state = tick(stocked(stock), &[want(0, inner(0), SHIPYARD, 1)]);
             let state = tick(state, &[want(0, inner(0), LANCER, 1)]);
@@ -463,15 +418,12 @@ mod tests {
         let state = tick(state, &[want(0, inner(0), SHIPYARD, 1)]);
         let stock = state[SeatId(0)].stockpile().stock();
 
-        // Storage earns nothing, so what leaves the stockpile is the
-        // frame's spend and nothing else.
         let state = tick(state, &[want(0, inner(0), STORAGE, 1)]);
         assert_eq!(state.frames().len(), 1);
         let state = run(state, 10);
         assert_eq!(state.frames().len(), 1, "a shortfall opens one frame only");
         assert!(state.frames()[0].progress() > 0.0);
 
-        // The shipyard builds fifteen cost units a second.
         let cost = state[STORAGE].cost;
         let seconds = cost.total() / 15.0;
         let state = run(
@@ -509,9 +461,6 @@ mod tests {
         let unit = state.entities().next().expect("the constructor").id();
         assert!(state[unit].is_flying());
 
-        // A ship spreads the transfer's impulses over its burns while the
-        // flight's anchor takes them at once, so it lands behind the anchor
-        // and closes the gap by manoeuvring.
         let state = run(state, 600 * u64::from(TICKS_PER_SECOND));
 
         assert!(!state[unit].is_flying(), "it never arrived");
@@ -541,7 +490,6 @@ mod tests {
         let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 0)]);
         assert!(state[unit].is_surplus(), "it was not marked");
 
-        // Fifty cost units of scrapping at the shipyard's fifteen a second.
         let state = run(state, 4 * u64::from(TICKS_PER_SECOND));
 
         assert_eq!(state.entity(unit), None, "it was not scrapped");
@@ -569,8 +517,7 @@ mod tests {
     #[test]
     fn an_armed_unit_kills_an_unarmed_enemy_at_its_rock() {
         let mut state = start(&[TeamId(0), TeamId(1)]);
-        // Storage neither shoots back nor repairs itself, so the shots are
-        // all that acts on it.
+
         let prey = state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
         let state = tick(
             state,
@@ -579,9 +526,7 @@ mod tests {
                 numbered(0, 1, inner(0), FRIGATE, 1),
             ],
         );
-        // The frigate costs a hundred and twenty cost units at fifteen a
-        // second, then deals six damage twice a second to three hundred
-        // hit points.
+
         let building = state[FRIGATE].cost.total() / 15.0;
         let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
         assert_eq!(count(&state, 0, inner(0), FRIGATE), 1);
@@ -590,8 +535,6 @@ mod tests {
         let hit = shot_at(&state, prey, interval + 1).expect("the frigate fired");
         assert_eq!(hit.damage, 6.0, "six damage through no plating");
 
-        // Fifty shots of six damage kill three hundred hit points, at two
-        // shots a second.
         let shots = (state[prey].hp() / hit.damage).ceil();
         let early = run(
             state,
@@ -692,8 +635,7 @@ mod tests {
     #[test]
     fn a_tick_lands_the_same_state_and_hash_however_its_commands_arrived() {
         let state = start(&[TeamId(0), TeamId(1)]);
-        // Two wants of one row at one post from one seat: the later `seq`
-        // is the count that stands, so the order is the whole answer.
+
         let issued = [
             numbered(0, 0, inner(0), FRIGATE, 3),
             numbered(0, 1, inner(0), FRIGATE, 7),
@@ -734,7 +676,6 @@ mod tests {
         let rocks = state.rocks().len();
         let over = 200;
 
-        // The sim has no clock of its own; a cost report needs one.
         #[expect(
             clippy::disallowed_types,
             reason = "a test measuring wall time is not the sim reading a clock"

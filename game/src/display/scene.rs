@@ -1,6 +1,3 @@
-//! Everything one frame draws, in sim units. Plain data: the draw converts
-//! to the engine's `f32` and nothing here decides what is drawn.
-
 use std::collections::BTreeMap;
 
 use probe_sim::orbit::{Body, Gravity};
@@ -15,159 +12,103 @@ use crate::display::glyph::Glyph;
 use crate::display::label::titled;
 use crate::display::send::Sending;
 
-/// How a glyph on a ring is drawn: the state of the unit it stands for.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Fill {
-    /// A unit present.
     Solid,
-    /// A unit wanted but absent.
     Hollow,
-    /// A frame in progress, filled from the bottom to this fraction of its
-    /// work, in `0..=1`.
     Filling(f32),
-    /// A shortfall with no builder at the rock.
     Dashed,
 }
 
-/// The band of a wheel slot under the cursor.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WheelBand {
-    /// The slot's outer band: a click adds one want.
     Plus,
-    /// The slot's inner band: a click removes one want.
     Minus,
 }
 
-/// What the pointer previews, drawn dim until the click lands it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hover {
-    /// A wheel band, previewing the one want it edits.
     Wheel {
         place: Place,
         row: RowId,
         band: WheelBand,
     },
-    /// A drag from one ring to another, previewing the units it moves.
     Send(Sending),
 }
 
-/// One seat's fight arc on a ring, drawn just inside its run.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Arc {
     pub seat: SeatId,
-    /// The arc still filled: the seat's HP at the rock over its HP when the
-    /// fight began, in `0..=1`.
     pub fraction: f32,
-    /// The upper end of the red segment trailing the drain, in `0..=1`; at
-    /// `fraction` when no damage landed in the last second and a half.
     pub trailing: f32,
 }
 
-/// One radar contact: a dot with the velocity streak of a body the seat
-/// cannot see.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Blip {
-    /// In meters, in the inertial frame.
     pub pos: Vec3,
-    /// Velocity relative to the nearest rock, in meters per second, which
-    /// is the motion the belt's own turn does not account for.
     pub drift: Vec3,
     pub mass: MassClass,
 }
 
-/// One entity drawn where the sim has it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityView {
     pub seat: SeatId,
-    /// The row it is a copy of, by the three rules; computed once when the
-    /// scene is built.
     pub glyph: Glyph,
-    /// In meters, in the inertial frame.
     pub pos: Vec3,
 }
 
-/// The line ahead of a ship in flight to its destination rock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlightLine {
-    /// The ship's position, in meters, in the inertial frame.
     pub from: Vec3,
     pub to: RockId,
 }
 
-/// One glyph of a run.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mark {
-    /// The row it stands for, by the three rules; computed once when the
-    /// scene is built.
     pub glyph: Glyph,
     pub fill: Fill,
-    /// Drawn dim: a hover preview, or a unit the pointer says is leaving.
     pub dim: bool,
-    /// What the glyph is and why it is in this state, which hovering it
-    /// shows.
     pub reason: Reason,
 }
 
-/// Why a glyph is in the state it is drawn in: one sentence, shown while
-/// the pointer is over it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Reason {
-    /// A unit of this row is at the place.
     Here(RowId),
-    /// A unit of this row is wanted and absent, with no frame open for it.
     Wanted(RowId),
-    /// A frame of this row is being built, and the material it has spent
-    /// nothing on this second for want of.
     Building(RowId, Option<Material>),
-    /// A frame of this row waits on a builder at the rock.
     NoBuilder(RowId),
-    /// A unit of this row is flying in from this rock.
     Arriving(RowId, RockId),
-    /// A unit of this row is flying out to this rock.
     Leaving(RowId, RockId),
 }
 
-/// One ring: a place's runs in seat order and the fight arcs on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RingView {
     pub place: Place,
-    /// Its rock's caps, which its stroke is tinted by.
     pub caps: Materials,
     pub runs: Vec<Run>,
     pub arcs: Vec<Arc>,
 }
 
-/// One rock drawn where the sim has it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RockView {
     pub id: RockId,
-    /// In meters, in the inertial frame.
     pub pos: Vec3,
-    /// In meters.
     pub radius: f64,
-    /// The most of each material extractable per second, which is what the
-    /// rock is tinted by.
     pub caps: Materials,
 }
 
-/// One seat's glyphs on a ring, in run order: rows by cost descending, a
-/// row's glyphs consecutive.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Run {
     pub seat: SeatId,
     pub marks: Vec<Mark>,
 }
 
-/// What the client, not the sim, decides about a frame.
 pub struct Client<'a> {
-    /// The ring the wheel is open on.
     pub selection: Option<Place>,
     pub hover: Option<Hover>,
     pub fights: &'a Fights,
 }
 
-/// One frame's drawing. Rings and flights are listed only where they draw
-/// something; the selection and hover are the client's own state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub rocks: Vec<RockView>,
@@ -175,17 +116,11 @@ pub struct Scene {
     pub rings: Vec<RingView>,
     pub flights: Vec<FlightLine>,
     pub blips: Vec<Blip>,
-    /// The ring the wheel is open on.
     pub selection: Option<Place>,
     pub hover: Option<Hover>,
 }
 
 impl Scene {
-    /// The belt alone at `tick`: every rock where its orbit puts it, tinted
-    /// by its caps, with its inner ring and nothing on it.
-    ///
-    /// What the lobby and the loading screen draw, before a match exists to
-    /// have a view of.
     pub fn of_belt(rocks: &[Rock], gravity: Gravity, tick: Tick) -> Scene {
         Scene {
             rocks: rocks
@@ -219,12 +154,6 @@ impl Scene {
         }
     }
 
-    /// The middle of the rocks this scene draws, in meters: where a camera
-    /// looks to frame the whole belt.
-    ///
-    /// A belt with no rock has no middle, and this answers the origin,
-    /// where the central mass is. A non-empty belt type in `sim` would
-    /// delete the case; `Belt::fixed` returns a plain `Vec<Rock>` today.
     pub fn centre(&self) -> Vec3 {
         let rocks = self.rocks.len().max(1) as f64;
         self.rocks
@@ -233,13 +162,6 @@ impl Scene {
             * (1.0 / rocks)
     }
 
-    /// What `view`'s tick draws, over `roster`, the match's own, with what
-    /// `client` says the pointer is doing.
-    ///
-    /// Every rock draws its inner ring; an outer ring draws only where
-    /// that band holds something or its rock is selected. A flying unit of
-    /// the seat's carries a flight line to its destination rock and no
-    /// glyph on a ring; a seen enemy in flight carries neither.
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene {
         let bodies: Vec<(RockId, Body)> = view
             .terrain
@@ -314,8 +236,6 @@ impl Scene {
 }
 
 impl RingView {
-    /// `place`'s ring in `rings`, empty until something is put on it, its
-    /// stroke tinted by what `caps` holds for its rock.
     fn at<'a>(
         rings: &'a mut BTreeMap<Place, RingView>,
         caps: &Caps,
@@ -323,7 +243,6 @@ impl RingView {
     ) -> &'a mut RingView {
         rings.entry(place).or_insert_with(|| RingView {
             place,
-            // No caps is no material leading, which is a plain stroke.
             caps: caps.get(&place.rock).copied().unwrap_or(Materials::ZERO),
             runs: Vec::new(),
             arcs: Vec::new(),
@@ -331,23 +250,15 @@ impl RingView {
     }
 }
 
-/// Every rock's caps, by rock: what a ring's stroke is tinted by.
 type Caps = BTreeMap<RockId, Materials>;
 
-/// The rows of one seat's run at one place, before the run is laid in cost
-/// order.
 type Rows = BTreeMap<RowId, Vec<Mark>>;
 
-/// Every ring's runs, keyed so a place and seat is found once.
 struct Runs {
     rows: BTreeMap<(Place, SeatId), Rows>,
 }
 
 impl Runs {
-    /// The runs `view` states: one solid glyph per unit present, then, for
-    /// the seat's own compositions, a filling glyph per frame, a dashed one
-    /// where the rock has no builder, and a hollow one per unit wanted and
-    /// absent.
     fn of(view: &View, roster: &Roster) -> Runs {
         let mut rows: BTreeMap<(Place, SeatId), Rows> = BTreeMap::new();
         let mut push = |place: Place, seat: SeatId, row: RowId, mark: Mark| {
@@ -369,8 +280,7 @@ impl Runs {
                 mark(roster, seen.row, Fill::Solid, reason),
             );
         }
-        // A unit in flight stands on both runs: dimmed where it left, and
-        // hollow where it is arriving.
+
         for seen in view
             .seen
             .iter()
@@ -440,8 +350,6 @@ impl Runs {
         Runs { rows }
     }
 
-    /// Dims what the pointer says is leaving and appends what it says is
-    /// coming, at half alpha, by the same rules as everything else.
     fn preview(&mut self, view: &View, roster: &Roster, hover: Option<&Hover>) {
         match hover {
             None => {}
@@ -498,10 +406,6 @@ impl Runs {
         }
     }
 
-    /// The rings, in place order, each seat's rows flattened into a run by
-    /// cost descending, with the fight arcs `fights` remembers. `drawn`
-    /// names the rings that draw whether or not a seat is on them, so a
-    /// rock holding nothing can still be aimed at and selected.
     fn rings(
         self,
         roster: &Roster,
@@ -540,8 +444,6 @@ impl Runs {
 }
 
 impl Reason {
-    /// The material the frame this glyph stands for has spent nothing on
-    /// this second for want of, where it is a starved frame.
     pub fn starved(self) -> Option<Material> {
         match self {
             Reason::Building(_, starved) => starved,
@@ -553,9 +455,6 @@ impl Reason {
         }
     }
 
-    /// The one plain sentence hovering the glyph shows, naming the row and
-    /// the state it is in. Rocks are numbered from one, as every number
-    /// the player reads is.
     pub fn sentence(self, roster: &Roster) -> String {
         let row = |row: RowId| titled(roster[row].name);
         let rock = |rock: RockId| format!("Rock {}", rock.0 as u64 + 1);
@@ -573,7 +472,6 @@ impl Reason {
     }
 }
 
-/// A material as a sentence names it.
 fn short_of(material: Material) -> &'static str {
     match material {
         Material::Metals => "metals",
@@ -582,8 +480,6 @@ fn short_of(material: Material) -> &'static str {
     }
 }
 
-/// The rocks where the seat has a builder, sorted: a shortfall at any other
-/// rock is dashed, since a build weapon reaches only its own rock.
 fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
     let mut rocks: Vec<RockId> = view
         .seen
@@ -597,7 +493,6 @@ fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
     rocks
 }
 
-/// One mark of `row`, its glyph by the three rules.
 fn mark(roster: &Roster, row: RowId, fill: Fill, reason: Reason) -> Mark {
     Mark {
         glyph: Glyph::of(&roster[row]),
@@ -607,7 +502,6 @@ fn mark(roster: &Roster, row: RowId, fill: Fill, reason: Reason) -> Mark {
     }
 }
 
-/// The body of the rock nearest `pos`, of a belt that has one.
 fn nearest_body(bodies: &[(RockId, Body)], pos: Vec3) -> Option<Body> {
     bodies
         .iter()
@@ -637,7 +531,6 @@ mod tests {
         }
     }
 
-    /// The scene of the match's tick, with nothing selected or hovered.
     fn scene(local: &Local, fights: &Fights) -> Scene {
         drawn(local, fights, None, None)
     }
@@ -659,7 +552,6 @@ mod tests {
         )
     }
 
-    /// The player's run at `place`, or none where the ring draws nothing.
     fn run_at(scene: &Scene, place: Place) -> Option<Vec<Mark>> {
         scene
             .rings

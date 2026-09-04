@@ -1,6 +1,3 @@
-//! The roster wheel: one slot per roster row of a band, as screen-space
-//! sectors editing that band's wants.
-
 use core::f32::consts::{PI, TAU};
 
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
@@ -13,42 +10,24 @@ use crate::display::glyph_quad::seat_color32;
 use crate::display::scene::{Fill, WheelBand};
 use crate::display::stencil::Stencil;
 
-/// A band's radial half-width around [`RADIUS`], in points: the span
-/// [`Wheel::slot_at`] answers, split at the radius into plus (outer) and
-/// minus (inner).
 pub const BAND_WIDTH: f32 = 22.0;
 
-/// How far the wheel's inner edge clears the outer ring, in points, so the
-/// annulus reads as its own control and not a third ring.
 pub const GAP: f32 = 55.0;
 
-/// The wheel's own screen radius, in points: its annulus's mid radius,
-/// [`GAP`] beyond the outer ring.
 pub const RADIUS: f32 = crate::display::hud::OUTER_RADIUS + GAP + BAND_WIDTH;
 
-/// The annulus's inner edge stands [`GAP`] clear of the outer ring.
 const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::display::hud::OUTER_RADIUS + GAP);
 
-/// A slot's glyph half-width, in points, before its size class steps it.
-/// Wider than a ring's, since a slot is a control and not a unit.
 const GLYPH_HALF: f32 = 14.0;
 
-/// The annulus's own stroke width, in points.
 const EDGE_WIDTH: f32 = 1.0;
 
-/// The annulus's own stroke colour.
 const EDGE_COLOUR: Color32 = Color32::from_gray(120);
 
-/// A hovered band's colour, which brightens that band's own segment of the
-/// annulus and nothing else.
 const HOVER_COLOUR: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 255, 46);
 
-/// The straight segments one band of a slot is drawn with.
 const SECTOR_SEGMENTS: usize = 12;
 
-/// The roster wheel open on one band: a sector per row, structures in the
-/// left half and units in the right, each half ordered by cost from the
-/// top down.
 pub struct Wheel {
     place: Place,
     seat: SeatId,
@@ -56,20 +35,14 @@ pub struct Wheel {
     slots: Vec<Slot>,
 }
 
-/// One row's sector of the wheel.
 struct Slot {
     row: RowId,
     glyph: Glyph,
-    /// The sector's centre, in rad clockwise from twelve o'clock.
     angle: f32,
-    /// Half the sector's angular width, in rad.
     half_share: f32,
 }
 
 impl Wheel {
-    /// Opens a wheel over `roster`'s rows for `place`'s band, centred at
-    /// `centre`, [`RADIUS`] points out, drawn in `seat`'s colour. The outer
-    /// band excludes structures, since DESIGN.md forbids one there.
     pub fn open(place: Place, seat: SeatId, roster: &Roster, centre: Pos2) -> Wheel {
         let mut structures = Vec::new();
         let mut units = Vec::new();
@@ -96,12 +69,10 @@ impl Wheel {
         }
     }
 
-    /// The band this wheel edits.
     pub fn place(&self) -> Place {
         self.place
     }
 
-    /// The row and band the point `pixel` names, or `None` off every slot.
     pub fn slot_at(&self, pixel: Pos2) -> Option<(RowId, WheelBand)> {
         let offset = pixel - self.centre;
         let length = offset.length();
@@ -120,9 +91,6 @@ impl Wheel {
         Some((slot.row, band))
     }
 
-    /// Paints the annulus, its sector boundaries, and every slot's glyph,
-    /// brightening `hover`'s own band where it names one of this wheel's
-    /// slots.
     pub fn paint(&self, painter: &egui::Painter, hover: Option<(RowId, WheelBand)>) {
         for radius in [RADIUS - BAND_WIDTH, RADIUS + BAND_WIDTH] {
             painter.circle_stroke(self.centre, radius, Stroke::new(EDGE_WIDTH, EDGE_COLOUR));
@@ -158,15 +126,11 @@ impl Wheel {
         }
     }
 
-    /// The point `radius` points out from the centre at `angle`, in rad
-    /// clockwise from twelve o'clock.
     fn at(&self, radius: f32, angle: f32) -> Pos2 {
         let (sin, cos) = angle.sin_cos();
         egui::pos2(self.centre.x + radius * sin, self.centre.y - radius * cos)
     }
 
-    /// Brightens one band of one slot: the half of the annulus that band
-    /// owns, over that slot's own sector, as one stroked arc.
     fn brighten(&self, painter: &egui::Painter, slot: &Slot, band: WheelBand) {
         let radius = match band {
             WheelBand::Plus => RADIUS + BAND_WIDTH / 2.0,
@@ -182,9 +146,6 @@ impl Wheel {
 }
 
 impl WheelBand {
-    /// The want a click on this band lands: `current` plus one for
-    /// [`WheelBand::Plus`], minus one for [`WheelBand::Minus`] and never
-    /// below zero.
     pub fn edit(self, place: Place, row: RowId, current: u32) -> Command {
         let count = match self {
             WheelBand::Plus => current + 1,
@@ -194,19 +155,16 @@ impl WheelBand {
     }
 }
 
-/// Which half of the wheel a row's slot sits in.
 #[derive(Clone, Copy)]
 enum Side {
     Left,
     Right,
 }
 
-/// Orders `rows` by cost from the top of the wheel down.
 fn by_cost_descending(rows: &mut [(RowId, &Row)]) {
     rows.sort_by(|(_, a), (_, b)| b.cost.total().total_cmp(&a.cost.total()));
 }
 
-/// `rows`, ordered top to bottom, as slots over `side`'s half of the wheel.
 fn half_slots<'a>(rows: &'a [(RowId, &'a Row)], side: Side) -> impl Iterator<Item = Slot> + 'a {
     let share = PI / rows.len().max(1) as f32;
     rows.iter().enumerate().map(move |(index, (row, data))| {
@@ -224,18 +182,14 @@ fn half_slots<'a>(rows: &'a [(RowId, &'a Row)], side: Side) -> impl Iterator<Ite
     })
 }
 
-/// `offset`'s angle, in rad clockwise from twelve o'clock, in `0..TAU`.
 fn angle_of(offset: egui::Vec2) -> f32 {
     normalize(offset.x.atan2(-offset.y))
 }
 
-/// `angle` wrapped into `0..TAU`.
 fn normalize(angle: f32) -> f32 {
     angle.rem_euclid(TAU)
 }
 
-/// The absolute angular gap between `a` and `b`, both in `0..TAU`, taking
-/// the shorter way round.
 fn angular_distance(a: f32, b: f32) -> f32 {
     let raw = (a - b).abs() % TAU;
     raw.min(TAU - raw)

@@ -1,43 +1,29 @@
-//! Two machines of one match in one process, over real sockets to a room
-//! this test serves, each seat played by a scripted agent.
-
 #![cfg(feature = "host")]
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 use probe_agents::{Personality, Scripted, Seated};
-use probe_game::net::hosting::Hosting;
+use probe_game::net::connection::Connection;
+use probe_game::net::listener::Listener;
 use probe_game::net::machine::Machine;
-use probe_game::net::room::{Room, Word};
 use probe_game::net::transport::Transport;
-use probe_protocol::{Bot, CLOCK_RANGE, Lobby, LobbyEdit, Message, PlayerId, Started};
-use probe_sim::{SeatId, Stamped, Tick};
+use probe_protocol::{
+    Bot, CLOCK_RANGE, Lobby, LobbyEdit, Notice, PlayerId, Relayed, Request, Started,
+};
+use probe_sim::roster::SHIPYARD;
+use probe_sim::state::{Command, Issued};
+use probe_sim::{Band, Place, RockId, SeatId, Stamped, Tick};
 
-/// How long the two machines play, in ticks: three seconds, which is
-/// several acknowledgement and report cadences and more than one settling
-/// window.
 const TICKS: u64 = 360;
 
-/// How long a withheld command is kept from the machine it was sent to, in
-/// ticks: a fifth of a second, well inside the retention window and well
-/// past the tick it was stamped at.
 const WITHHELD: u64 = 24;
 
-/// How many rounds of yielding the test waits on the room or the other
-/// machine before it gives up.
 const PATIENCE: usize = 100_000;
 
-/// One machine's transport, holding everything it hears back by `withheld`
-/// ticks so the commands in it are learned late.
-///
-/// It holds messages in the order they arrived, as a slow link does: a
-/// seat's acknowledgement never overtakes the commands it covers.
 struct Delaying<'a> {
     inner: &'a mut dyn Transport,
-    /// Messages not yet handed over, with the tick they were heard at.
-    holding: Vec<(Tick, Message)>,
-    /// The tick the machine reading it is at.
+    holding: Vec<(Tick, Relayed)>,
     at: Tick,
     withheld: u64,
 }
@@ -47,18 +33,14 @@ impl Transport for Delaying<'_> {
         self.inner.acknowledge(seat, up_to);
     }
 
-    fn leave(&mut self) {
-        self.inner.leave();
-    }
-
-    fn received(&mut self) -> Vec<Message> {
+    fn received(&mut self) -> Vec<Relayed> {
         let at = self.at;
-        let heard = self.inner.received();
+        let received = self.inner.received();
         if self.withheld == 0 {
-            return heard;
+            return received;
         }
         self.holding
-            .extend(heard.into_iter().map(|message| (at, message)));
+            .extend(received.into_iter().map(|message| (at, message)));
         let due = at.back(self.withheld as u32);
         let ready = self.holding.partition_point(|(held, _)| *held <= due);
         self.holding
@@ -76,11 +58,8 @@ impl Transport for Delaying<'_> {
     }
 }
 
-/// The hash each machine held at every settled tick it passed.
 type Hashes = BTreeMap<Tick, u64>;
 
-/// Runs one machine's tick and records the hash of every tick that settled,
-/// which is the tick machines are compared at.
 fn advance(machine: &mut Machine, transport: &mut dyn Transport, hashes: &mut Hashes) -> bool {
     let before = machine.session().settled();
     let ticked = machine.tick(transport);
@@ -93,72 +72,68 @@ fn advance(machine: &mut Machine, transport: &mut dyn Transport, hashes: &mut Ha
     ticked.rewound
 }
 
-/// Reads `room` until what it has said holds `ready`, and answers
-/// everything it said. Panics on a room that never answers.
-fn heard_until(room: &mut Room, ready: impl Fn(&[Word]) -> bool) -> Vec<Word> {
-    let mut heard = Vec::new();
+fn notices_until(room: &mut Connection, ready: impl Fn(&[Notice]) -> bool) -> Vec<Notice> {
+    let mut notices = Vec::new();
     for _ in 0..PATIENCE {
-        heard.extend(room.heard());
-        if ready(&heard) {
-            return heard;
+        notices.extend(room.notices());
+        if ready(&notices) {
+            return notices;
         }
-        assert!(!room.closed(), "the room closed: {heard:?}");
+        assert!(!room.closed(), "the room closed: {notices:?}");
         std::thread::yield_now();
     }
-    panic!("the room never answered: {heard:?}");
+    panic!("the room never answered: {notices:?}");
 }
 
-/// The match a word starts, where one of them is a start.
-fn started(heard: &[Word]) -> Option<Started> {
-    heard.iter().find_map(|word| match word {
-        Word::Started(started) => Some(started.clone()),
+fn started(notices: &[Notice]) -> Option<Started> {
+    notices.iter().find_map(|notice| match notice {
+        Notice::Started(started) => Some(started.clone()),
         _ => None,
     })
 }
 
-/// Plays a match of two machines over a room this test serves, holding the
-/// guest's incoming commands back by `withheld` ticks.
-///
-/// Answers each machine's hash at every settled tick, and how many ticks
-/// the guest rewound.
 fn played(withheld: u64) -> (Hashes, Hashes, usize) {
-    let hosted = Hosting::serving(SocketAddr::from(([127, 0, 0, 1], 0)))
+    let hosted = Listener::serving(SocketAddr::from(([127, 0, 0, 1], 0)))
         .expect("a room binds on the loopback");
-    let mut host = Room::joining(&hosted.address());
-    let me = welcomed(&heard_until(&mut host, |heard| welcomed(heard).is_some()))
-        .expect("the room welcomed the machine that opened it");
-    let mut guest = Room::joining(&hosted.address());
-    let other = welcomed(&heard_until(&mut guest, |heard| welcomed(heard).is_some()))
-        .expect("the room welcomed the machine that joined it");
+    let mut host = Connection::joining(&hosted.address());
+    let me = welcomed(&notices_until(&mut host, |notices| {
+        welcomed(notices).is_some()
+    }))
+    .expect("the room welcomed the machine that opened it");
+    let mut guest = Connection::joining(&hosted.address());
+    let other = welcomed(&notices_until(&mut guest, |notices| {
+        welcomed(notices).is_some()
+    }))
+    .expect("the room welcomed the machine that joined it");
     assert_eq!((me, other), (PlayerId::HOST, PlayerId(1)));
 
-    guest.say(Message::Edit(LobbyEdit::SetReady { ready: true }));
-    let lobby = heard_until(&mut host, |heard| {
-        heard.iter().any(|message| ready_lobby(message).is_some())
+    guest.request(Request::Edit(LobbyEdit::SetReady { ready: true }));
+    let lobby = notices_until(&mut host, |notices| {
+        notices.iter().any(|message| ready_lobby(message).is_some())
     })
     .iter()
     .rev()
     .find_map(ready_lobby)
     .expect("the room sent the readied lobby");
-    host.say(Message::Start(
-        lobby.freeze().expect("both seats are held and ready"),
-    ));
+    lobby.freeze().expect("both seats are held and ready");
+    host.request(Request::Start);
 
-    // The room is the authority: both machines play the match it sent.
-    let frozen = started(&heard_until(&mut host, |heard| started(heard).is_some()))
-        .expect("the room started the match");
-    heard_until(&mut guest, |heard| started(heard).is_some());
+    let frozen = started(&notices_until(&mut host, |notices| {
+        started(notices).is_some()
+    }))
+    .expect("the room started the match");
+    notices_until(&mut guest, |notices| started(notices).is_some());
 
     let mine = frozen.seating().run_by(me).expect("the host holds a seat");
     let theirs = frozen
         .seating()
         .run_by(other)
         .expect("the guest holds a seat");
-    let mut playing = Machine::of(frozen.clone(), &mine, host.transport());
-    let mut joined = Machine::of(frozen, &theirs, guest.transport());
+    let mut playing = Machine::of(frozen.clone(), &mine, &mut host);
+    let mut joined = Machine::of(frozen, &theirs, &mut guest);
     for _ in 0..PATIENCE {
-        joined.listen(guest.transport());
-        playing.listen(host.transport());
+        joined.receive(&mut guest);
+        playing.receive(&mut host);
         if playing.agreed() && joined.agreed() {
             break;
         }
@@ -175,7 +150,7 @@ fn played(withheld: u64) -> (Hashes, Hashes, usize) {
     ];
     let (mut theirs, mut ours) = (Hashes::new(), Hashes::new());
     let mut delaying = Delaying {
-        inner: guest.transport(),
+        inner: &mut guest,
         holding: Vec::new(),
         at: Tick::ZERO,
         withheld,
@@ -184,17 +159,16 @@ fn played(withheld: u64) -> (Hashes, Hashes, usize) {
     while playing.session().state().tick().0 < TICKS {
         decide(&mut playing, &mut agents[0]);
         decide(&mut joined, &mut agents[1]);
-        advance(&mut playing, host.transport(), &mut theirs);
+        advance(&mut playing, &mut host, &mut theirs);
         delaying.at = joined.session().state().tick();
         rewinds += usize::from(advance(&mut joined, &mut delaying, &mut ours));
         std::thread::yield_now();
     }
-    // The guest is behind by whatever the sockets and the hold cost, so the
-    // ticks it has yet to settle are not yet its answer.
+
     for _ in 0..PATIENCE {
         delaying.at = joined.session().state().tick();
         advance(&mut joined, &mut delaying, &mut ours);
-        advance(&mut playing, host.transport(), &mut theirs);
+        advance(&mut playing, &mut host, &mut theirs);
         if joined.session().state().tick().0 >= TICKS {
             break;
         }
@@ -203,24 +177,20 @@ fn played(withheld: u64) -> (Hashes, Hashes, usize) {
     (theirs, ours, rewinds)
 }
 
-/// The id a word carries, where one of them is a welcome.
-fn welcomed(heard: &[Word]) -> Option<PlayerId> {
-    heard.iter().find_map(|word| match word {
-        Word::Welcome { player, .. } => Some(*player),
+fn welcomed(notices: &[Notice]) -> Option<PlayerId> {
+    notices.iter().find_map(|notice| match notice {
+        Notice::Welcome { player, .. } => Some(*player),
         _ => None,
     })
 }
 
-/// The lobby a word carries, where every seat of it is ready.
-fn ready_lobby(word: &Word) -> Option<Lobby> {
-    match word {
-        Word::Lobby(lobby) if lobby.freeze().is_ok() => Some(lobby.clone()),
+fn ready_lobby(notice: &Notice) -> Option<Lobby> {
+    match notice {
+        Notice::Lobby(lobby) if lobby.freeze().is_ok() => Some(lobby.clone()),
         _ => None,
     }
 }
 
-/// Asks `agent` for this tick's commands and gives them to the machine's
-/// own seat, which is what a person's hands do.
 fn decide(machine: &mut Machine, agent: &mut Seated) {
     let commands = agent.issue(machine.session());
     let Some(human) = machine.human() else {
@@ -231,7 +201,6 @@ fn decide(machine: &mut Machine, agent: &mut Seated) {
     }
 }
 
-/// A scripted agent playing `seat` the way `bot` plays.
 fn seated(seat: SeatId, bot: Bot) -> Seated {
     Seated::new(
         seat,
@@ -242,7 +211,6 @@ fn seated(seat: SeatId, bot: Bot) -> Seated {
     )
 }
 
-/// Every tick both machines settled, and the hash each held there.
 fn agreed(theirs: &Hashes, ours: &Hashes) -> Vec<Tick> {
     let both: Vec<Tick> = theirs
         .keys()
@@ -292,4 +260,54 @@ fn a_machine_that_learns_a_command_late_reaches_the_history_the_others_have() {
         "only {} ticks settled on both machines, so nothing was compared",
         both.len()
     );
+}
+
+fn sent() -> Stamped {
+    Stamped {
+        tick: Tick::ZERO,
+        issued: Issued {
+            seat: SeatId(0),
+            seq: 0,
+            command: Command::Want {
+                place: Place {
+                    rock: RockId(0),
+                    band: Band::Inner,
+                },
+                row: SHIPYARD,
+                count: 1,
+            },
+        },
+    }
+}
+
+#[test]
+fn a_match_message_that_arrives_while_a_screen_reads_the_room_reaches_the_machine() {
+    let hosted = Listener::serving(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .expect("a room binds on the loopback");
+    let mut host = Connection::joining(&hosted.address());
+    notices_until(&mut host, |notices| welcomed(notices).is_some());
+    let mut guest = Connection::joining(&hosted.address());
+    notices_until(&mut guest, |notices| welcomed(notices).is_some());
+
+    guest.request(Request::Edit(LobbyEdit::SetReady { ready: true }));
+    notices_until(&mut host, |notices| {
+        notices.iter().any(|notice| ready_lobby(notice).is_some())
+    });
+    host.request(Request::Start);
+    notices_until(&mut host, |notices| started(notices).is_some());
+    notices_until(&mut guest, |notices| started(notices).is_some());
+
+    host.send(sent());
+
+    let mut relayed = Vec::new();
+    for _ in 0..PATIENCE {
+        guest.notices();
+        relayed.extend(guest.received());
+        if !relayed.is_empty() {
+            break;
+        }
+        assert!(!guest.closed(), "the room closed: {relayed:?}");
+        std::thread::yield_now();
+    }
+    assert_eq!(relayed, vec![Relayed::Command(sent())]);
 }

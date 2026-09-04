@@ -1,6 +1,3 @@
-//! The HUD: rings, runs, fight arcs, flight lines, radar contacts and the
-//! wheel, painted in screen space over the belt's projection.
-
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use probe_sim::roster::MassClass;
 use probe_sim::{Band, RowId, SeatId};
@@ -9,99 +6,65 @@ use crate::display::glyph;
 use crate::display::glyph_quad::seat_color32;
 use crate::display::ring::{Geometry, Layout, Span};
 use crate::display::scene::{Arc, Blip, Hover, Mark, RingView, Scene, WheelBand};
-use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
 use crate::display::tint;
+use crate::display::viewport::Viewport;
 use crate::display::wheel::Wheel;
 
-/// The inner ring's screen radius, in points.
 pub const INNER_RADIUS: f32 = 56.0;
 
-/// The outer ring's screen radius, in points.
 pub const OUTER_RADIUS: f32 = 88.0;
 
-/// The wheel stands clear of both rings, so a click on one of its bands is
-/// never a click on a ring.
 const _: () = assert!(
     crate::display::wheel::RADIUS - crate::display::wheel::BAND_WIDTH > OUTER_RADIUS
         && OUTER_RADIUS > INNER_RADIUS
 );
 
-/// A stacked glyph's inward step per card, in points.
 const STACK_STEP: f32 = 2.5;
 
-/// A ring's own stroke width, in points, unselected.
 const RING_WIDTH: f32 = 1.5;
 
-/// A selected ring's stroke width, in points.
 const SELECTED_RING_WIDTH: f32 = 3.0;
 
-/// A ring's own stroke colour where no material leads at its rock.
 const RING_COLOUR: Color32 = Color32::from_gray(140);
 
-/// How far a ring of one material alone is pulled from [`RING_COLOUR`]
-/// toward that material's own, in `0..=1`. The lobby and the match paint
-/// rings through this same code, so the pull is faint enough to sit under
-/// a match's runs and clear enough to group a region.
 const RING_TINT: f32 = 0.5;
 
-/// A selected ring's stroke colour.
 const SELECTED_RING_COLOUR: Color32 = Color32::WHITE;
 
-/// A fight arc's radial inset from its ring, in points.
 const ARC_INSET: f32 = 6.0;
 
-/// A fight arc's stroke width, in points.
 const ARC_WIDTH: f32 = 3.0;
 
-/// The colour a fight arc's trailing damage segment is drawn in.
 const ARC_TRAIL_COLOUR: Color32 = Color32::from_rgb(220, 40, 40);
 
-/// The straight segments an arc is approximated by.
 const ARC_SEGMENTS: usize = 24;
 
-/// A flight line's stroke width, in points.
 const FLIGHT_WIDTH: f32 = 1.5;
 
-/// A flight line's colour, at [`FLIGHT_FULL_ALPHA`] at the destination and
-/// [`FLIGHT_FAINT_ALPHA`] at the ship.
 const FLIGHT_COLOUR: Color32 = Color32::from_gray(200);
 
-/// A flight line's dash length, in points.
 const FLIGHT_DASH_LENGTH: f32 = 6.0;
 
-/// A flight line's gap length, in points.
 const FLIGHT_GAP_LENGTH: f32 = 5.0;
 
-/// How fast a flight line's dashes roll toward the destination, in points
-/// per second of the frame's own elapsed time: `egui`'s input clock, the
-/// client's, never the sim's tick.
 const FLIGHT_SPEED: f32 = 30.0;
 
-/// A flight line's alpha at the ship's own end.
 const FLIGHT_FAINT_ALPHA: f32 = 0.15;
 
-/// A flight line's alpha at the destination.
 const FLIGHT_FULL_ALPHA: f32 = 0.9;
 
-/// A radar contact's colour: no seat, since radar does not say whose it is.
 const BLIP_COLOUR: Color32 = Color32::from_gray(170);
 
-/// A radar contact's dot radius by mass class, in points.
 const BLIP_RADII: [f32; 3] = [2.0, 3.0, 4.5];
 
-/// How far ahead of a radar contact its streak reaches, in seconds of its
-/// drift past the nearest rock.
 const STREAK_SECONDS: f64 = 20.0;
 
-/// The longest a radar contact's streak is drawn, in points.
 const STREAK_MAX: f32 = 18.0;
 
-/// Paints `scene`'s HUD as `screen` projects it, with `wheel` open on the
-/// selected ring where there is one.
-pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &egui::Painter) {
+pub fn paint(scene: &Scene, viewport: &Viewport, wheel: Option<&Wheel>, painter: &egui::Painter) {
     for ring in &scene.rings {
-        let Some(centre) = centre_of(scene, screen, ring) else {
+        let Some(centre) = centre_of(scene, viewport, ring) else {
             continue;
         };
         paint_ring(painter, ring, centre, scene.selection == Some(ring.place));
@@ -112,8 +75,8 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
             continue;
         };
         let (Some(from), Some(to)) = (
-            screen.point_of(flight.from),
-            screen.point_of(destination.pos),
+            viewport.point_of(flight.from),
+            viewport.point_of(destination.pos),
         ) else {
             continue;
         };
@@ -121,7 +84,7 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
     }
 
     for blip in &scene.blips {
-        paint_blip(painter, screen, blip);
+        paint_blip(painter, viewport, blip);
     }
 
     if let Some(wheel) = wheel {
@@ -129,9 +92,6 @@ pub fn paint(scene: &Scene, screen: &Screen, wheel: Option<&Wheel>, painter: &eg
     }
 }
 
-/// A flight's line from `from`, the ship, to `to`, the destination: faint
-/// at `from` and full at `to`, its dashes rolling toward `to` by the
-/// frame's own elapsed time.
 fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2) {
     let delta = to - from;
     let length = delta.length();
@@ -160,8 +120,6 @@ fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2) {
     }
 }
 
-/// A ring's measures at `radius` points: marks are laid a widest glyph
-/// apart, so a glyph of any size class stands clear of its neighbours.
 fn geometry(radius: f32) -> Geometry {
     Geometry {
         radius,
@@ -169,7 +127,6 @@ fn geometry(radius: f32) -> Geometry {
     }
 }
 
-/// The screen radius of a ring for `band`, in points.
 pub fn ring_radius(band: Band) -> f32 {
     match band {
         Band::Inner => INNER_RADIUS,
@@ -177,7 +134,6 @@ pub fn ring_radius(band: Band) -> f32 {
     }
 }
 
-/// The wheel slot the scene's hover names, where it names one of `wheel`'s.
 fn hovered_slot(scene: &Scene, wheel: &Wheel) -> Option<(RowId, WheelBand)> {
     match scene.hover {
         Some(Hover::Wheel { place, row, band }) if place == wheel.place() => Some((row, band)),
@@ -185,19 +141,13 @@ fn hovered_slot(scene: &Scene, wheel: &Wheel) -> Option<(RowId, WheelBand)> {
     }
 }
 
-/// One mark of a ring laid where it draws: what it stands for, whose it
-/// is, where its centre goes and how big it stands.
 struct Placed<'a> {
     mark: &'a Mark,
     seat: SeatId,
     centre: Pos2,
-    /// Half the glyph's width at its size class, in points.
     half: f32,
 }
 
-/// Every mark of `ring`, laid around `centre`, the screen point of its
-/// rock. The paint and the hit test read the same layout, so a glyph
-/// cannot be drawn where it is not hovered.
 fn placed<'a>(ring: &'a RingView, centre: Pos2) -> Vec<Placed<'a>> {
     let radius = ring_radius(ring.place.band);
     let layout = Layout::of(&ring.runs, geometry(radius));
@@ -219,32 +169,28 @@ fn placed<'a>(ring: &'a RingView, centre: Pos2) -> Vec<Placed<'a>> {
         .collect()
 }
 
-/// The run glyph under `at`, in points: where it is drawn and what it
-/// stands for, or `None` off every run.
-pub fn glyph_at<'a>(scene: &'a Scene, screen: &Screen, at: Pos2) -> Option<(Pos2, &'a Mark)> {
+pub fn glyph_at<'a>(scene: &'a Scene, viewport: &Viewport, at: Pos2) -> Option<(Pos2, &'a Mark)> {
     scene
         .rings
         .iter()
-        .filter_map(|ring| Some((ring, centre_of(scene, screen, ring)?)))
+        .filter_map(|ring| Some((ring, centre_of(scene, viewport, ring)?)))
         .flat_map(|(ring, centre)| placed(ring, centre))
         .filter(|placed| placed.centre.distance(at) <= placed.half)
         .min_by(|a, b| a.centre.distance(at).total_cmp(&b.centre.distance(at)))
         .map(|placed| (placed.centre, placed.mark))
 }
 
-/// Where `ring`'s rock draws, in points; `None` when it is off screen.
-fn centre_of(scene: &Scene, screen: &Screen, ring: &RingView) -> Option<Pos2> {
+fn centre_of(scene: &Scene, viewport: &Viewport, ring: &RingView) -> Option<Pos2> {
     scene
         .rocks
         .iter()
         .find(|rock| rock.id == ring.place.rock)
-        .and_then(|rock| screen.point_of(rock.pos))
+        .and_then(|rock| viewport.point_of(rock.pos))
 }
 
 fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: bool) {
     let radius = ring_radius(ring.place.band);
-    // A selected ring is white and wider, so the brightening wins over the
-    // tint rather than mixing with it.
+
     let (stroke_colour, stroke_width) = match selected {
         true => (SELECTED_RING_COLOUR, SELECTED_RING_WIDTH),
         false => (tint::painted(RING_COLOUR, ring.caps, RING_TINT), RING_WIDTH),
@@ -273,8 +219,6 @@ fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: 
     }
 }
 
-/// A fight arc's own screen radius: [`ARC_INSET`] inside `ring_radius`, the
-/// radius of the ring the fight is at, whichever band that is.
 fn arc_radius(ring_radius: f32) -> f32 {
     ring_radius - ARC_INSET
 }
@@ -323,14 +267,12 @@ fn paint_arc_segment(
     painter.add(Shape::line(points, stroke));
 }
 
-/// One radar contact: a dot at its position, with a streak along its drift
-/// past the nearest rock, held to [`STREAK_MAX`] points.
-fn paint_blip(painter: &egui::Painter, screen: &Screen, blip: &Blip) {
-    let Some(at) = screen.point_of(blip.pos) else {
+fn paint_blip(painter: &egui::Painter, viewport: &Viewport, blip: &Blip) {
+    let Some(at) = viewport.point_of(blip.pos) else {
         return;
     };
     painter.circle_filled(at, radius_of(blip.mass), BLIP_COLOUR);
-    let Some(ahead) = screen.point_of(blip.pos + blip.drift * STREAK_SECONDS) else {
+    let Some(ahead) = viewport.point_of(blip.pos + blip.drift * STREAK_SECONDS) else {
         return;
     };
     let along = ahead - at;
@@ -341,7 +283,6 @@ fn paint_blip(painter: &egui::Painter, screen: &Screen, blip: &Blip) {
     painter.line_segment([at, held], Stroke::new(1.0, BLIP_COLOUR));
 }
 
-/// A radar contact's dot radius, in points; see [`BLIP_RADII`].
 fn radius_of(mass: MassClass) -> f32 {
     BLIP_RADII[match mass {
         MassClass::Light => 0,
@@ -354,7 +295,6 @@ fn radius_of(mass: MassClass) -> f32 {
 mod tests {
     use super::*;
 
-    /// A run of `marks` marks, whose glyphs no test reads.
     fn run(marks: usize) -> crate::display::scene::Run {
         crate::display::scene::Run {
             seat: probe_sim::SeatId(0),

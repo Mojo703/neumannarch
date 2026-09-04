@@ -1,27 +1,18 @@
-//! The spatial sweep: every entity's position sorted along the belt plane's
-//! `x`, so a range query reads one window instead of every entity.
-
 use crate::ids::EntityId;
 use crate::vec3::Vec3;
 
-/// Every entity's position, sorted by belt-plane `x` then id; built once per
-/// step from the snapshot, and read by every rule that needs what is near a
-/// point.
 #[derive(Clone, Debug)]
 pub struct Sweep {
     items: Vec<Item>,
 }
 
-/// One swept entity.
 #[derive(Clone, Copy, Debug)]
 struct Item {
     id: EntityId,
-    /// Position in meters.
     pos: Vec3,
 }
 
 impl Sweep {
-    /// Sweeps `items`, one per entity, in any order; positions in meters.
     pub fn build(items: impl IntoIterator<Item = (EntityId, Vec3)>) -> Sweep {
         let mut items: Vec<Item> = items
             .into_iter()
@@ -31,8 +22,6 @@ impl Sweep {
         Sweep { items }
     }
 
-    /// Every entity whose distance to `center` is at most `range`, both in
-    /// meters, in ascending id order. A negative range finds nothing.
     pub fn within(&self, center: Vec3, range: f64) -> impl Iterator<Item = EntityId> + '_ {
         let mut found: Vec<EntityId> = self
             .window(center, range)
@@ -44,19 +33,14 @@ impl Sweep {
         found.into_iter()
     }
 
-    /// The number of entities swept.
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Whether no entity was swept.
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    /// The run of items whose `x` displacement from `center` lies in
-    /// `-range..=range`, found by two binary searches. The displacement is
-    /// the one `distance` measures, so no rounding excludes a hit.
     fn window(&self, center: Vec3, range: f64) -> &[Item] {
         let dx = |item: &Item| item.pos.x - center.x;
         let start = self.items.partition_point(|item| dx(item) < -range);
@@ -69,12 +53,9 @@ impl Sweep {
 mod tests {
     use super::*;
 
-    /// A 64-bit linear congruential generator, the tests' only source of
-    /// variety; the same seed yields the same points on every target.
     struct Lcg(u64);
 
     impl Lcg {
-        /// The next coordinate, in `-100.0..100.0` meters.
         fn coordinate(&mut self) -> f64 {
             self.0 = self
                 .0
@@ -88,8 +69,6 @@ mod tests {
             Vec3::new(self.coordinate(), self.coordinate(), self.coordinate())
         }
 
-        /// Five hundred points, with ids given in descending order so the
-        /// sweep's id ordering is its own work.
         fn cloud(&mut self) -> Vec<(EntityId, Vec3)> {
             (0..500)
                 .rev()

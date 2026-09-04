@@ -10,7 +10,7 @@ target-state only. Agents see this file only through their briefs.
 One implementation agent at a time (owner, 2026-09-03): for usage and to
 avoid seams. A unit ends green through `check.sh`, is verified by the
 overseer's own gate run, and commits on the owner's word. Last commit:
-the `Stage` flow with one seating authority, 2026-09-05.
+b561351, the `Stage` flow with one seating authority, 2026-09-05.
 
 Owner's note on that commit (2026-09-05): the tree grew by about 700
 net lines and the owner is worried by how much code lands per unit; the
@@ -18,28 +18,7 @@ best system is no system. Every brief from now carries a net-line
 budget, the agent reports lines added against deleted, and a unit that
 grows the codebase names each new type and what it made unrepresentable.
 
-1. The socket read once, Sonnet, before movement. Three defects the
-   overseer found in the `Stage` tree, one seam: (a) `Room::heard` and
-   `Transport::received` both drain one link, and the screen reader
-   drops the match's messages (Command, Acknowledge, Hash, Desync)
-   silently; the fix is at the protocol: `Message` split into three
-   types by reader, what a machine says to a room (Join, Edit, Start,
-   Rematch, Leave), what a room says to a screen (Welcome, Lobby,
-   Started, Refused, Leave, Removed), and what the match relays both
-   ways, the wire a tagged union of the three, the socket decoding each
-   frame into one of three inboxes, each reader draining only its own,
-   `word_of`'s None arm and `Socket::heard`'s filter deleted; pulls
-   forward the programme's two-method `Transport` and `Room` folded
-   into `Socket`, the same seam. (b) `welcomed` in flow.rs rebinds the
-   title's listener with `Hosting::opened()` while the failed Host
-   join's own `hosted` listener is still alive, so Host reads disabled
-   after a failed loopback join; the listener is handed back as
-   `listener: Ok(hosted)` on every failure path, never rebound.
-   (c) `Lobby::admit` answers a `SeatId` nobody reads; it answers
-   whether the join found a slot, as `release` does. Also: the comment
-   at `Stage::vacant` reworded to name why `&mut` forces a stand-in
-   (verdict: justified). Critique stop first; net-line budget zero.
-2. Movement redone: one thrust schedule per row per send, solved at
+1. Movement redone: one thrust schedule per row per send, solved at
    departure by Lambert plus finite burns plus integrate-and-correct, to
    end on the destination anchor's orbit within a tolerance; every ship
    departs at once; ships of a row share a schedule and keep their
@@ -58,6 +37,23 @@ grows the codebase names each new type and what it made unrepresentable.
    and opens frames; ~10 ms per row per send acceptable with a
    three-iteration correction cap; position and velocity tolerances; one
    thrusting-tick method on `Body` shared by step and solver.
+
+Owner rulings 2026-09-05: every comment in the codebase is deleted,
+rustdoc and module docs included, and none is written from now; CLAUDE.md
+states it. A tolerated runtime failure's verdict moves from a comment to
+ARCHITECTURE.md's Invariants. The networking vocabulary is renamed per the
+Sonnet judge's report and the overseer's mapping (Request, Notice,
+Relayed on the wire; Connection, WebSocket, Codec; Screen, Room, Connect,
+Action, Outcome, Join; Listener, NoListener; Holder, Occupant, Match;
+Outbound, Recipient, Forwarding, Log); the owner did the type renames in
+the editor and a Sonnet sweep finished identifiers, files, tests and
+ARCHITECTURE.md. The socket is read once: the wire carries Request,
+Notice and Relayed, decoded once into the inbox each reader drains.
+Open for the owner's ruling, found by the sweep agent under the
+confused-agent rule: `Holder` (a lobby slot's) and `Occupant` (a frozen
+seat's) are two enums over one domain told apart only by when they
+apply, and `SeatSlot.control` is a field named for the type it no
+longer has; proposed `Seated { Player, Bot }` and `holder`.
 
 ## Docs ahead of code
 
@@ -80,7 +76,7 @@ against the code at every session start. Verified 2026-09-05.
 - DISPLAY The stockpile: the whole section; the view carries no income
   or spend. Plan item 5.
 - DESIGN Sends and Attractor: schedules; the sim flies two impulses and
-  ARCHITECTURE Flights describes that. Unit 2.
+  ARCHITECTURE Flights describes that. Unit 1.
 
 ## Plan, in order
 

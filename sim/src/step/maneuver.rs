@@ -1,7 +1,3 @@
-//! The manoeuvring rule: one thrust per free unit, a pull toward its
-//! attractor plus a bounded term with every ship nearby. It stores nothing
-//! and reads only the snapshot, so it can be replaced whole.
-
 use std::collections::BTreeMap;
 
 use crate::ids::{EntityId, SeatId};
@@ -12,54 +8,34 @@ use crate::state::{Attractor, Entity, Motion, Sight, State};
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
-/// Pull toward the attractor's position, in m/s² per meter of offset. A
-/// hypothesis the harness and the display confirm or kill.
 const STIFFNESS: f64 = 0.25;
 
-/// Pull toward the attractor's velocity, in m/s² per m/s of difference.
-/// Twice the root of the stiffness, so the pull is critically damped and a
-/// ship does not orbit its attractor. A hypothesis.
 const DAMPING: f64 = 1.0;
 
-/// The separation a pair of ships settles at, in meters. A hypothesis.
 const SPACING: f64 = 0.5;
 
-/// The separation past which a pair of ships ignores each other, in
-/// meters. Twice this plus the longest weapon range stays below the gap
-/// between the two bands' amplitudes. A hypothesis.
 const CUTOFF: f64 = 2.0;
 
-/// The strongest a pair term pushes apart, in m/s². Above every row's
-/// manoeuvring limit, so a ship pressed on always has the thrust to give
-/// ground. A hypothesis.
 const PAIR_STRENGTH: f64 = 8.0;
 
-/// The strongest a pair term pulls together, as a fraction of
-/// `PAIR_STRENGTH`. Below one, so a crowd cannot compress itself past the
-/// spacing. A hypothesis.
 const ATTRACTION_SHARE: f64 = 0.05;
 
-/// One tick's manoeuvring thrusts, computed from the snapshot.
 pub struct Maneuver<'a> {
     state: &'a State,
     sweep: Sweep,
     sights: BTreeMap<SeatId, Sight>,
 }
 
-/// One free unit's manoeuvring thrust this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Thrust {
     pub entity: EntityId,
-    /// In m/s², at most the row's manoeuvring limit.
     pub accel: Vec3,
 }
 
-/// Every free unit's manoeuvring thrust this tick, in id order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Thrusts(Vec<Thrust>);
 
 impl<'a> Maneuver<'a> {
-    /// Reads `state`, building the sweep and one sight per seat.
     pub fn of(state: &'a State) -> Maneuver<'a> {
         let sweep = state.sweep();
         let sights = (0..state.seats().len())
@@ -73,11 +49,6 @@ impl<'a> Maneuver<'a> {
         }
     }
 
-    /// The body a unit spawning at `place` for `tick` takes: the anchor at
-    /// that tick, offset along the rock's radial direction by one spacing
-    /// per unit already there, so no two spawn coincident. `tick` is the
-    /// first tick the unit exists in, one on from the step that built it,
-    /// so it starts on its anchor rather than a tick behind it.
     pub fn spawn_body(state: &State, place: Place, tick: Tick) -> Body {
         let anchor = state.anchor(place).at(tick, state.gravity());
         let already = state
@@ -88,7 +59,6 @@ impl<'a> Maneuver<'a> {
         Body::new(anchor.pos + radial * (SPACING * already as f64), anchor.vel)
     }
 
-    /// One thrust per free unit, in id order.
     pub fn run(self) -> Thrusts {
         Thrusts(
             self.state
@@ -98,7 +68,6 @@ impl<'a> Maneuver<'a> {
         )
     }
 
-    /// `entity`'s thrust, or `None` for a structure.
     fn thrust(&self, entity: &Entity) -> Option<Thrust> {
         let Motion::Free { body, .. } = entity.motion() else {
             return None;
@@ -114,7 +83,6 @@ impl<'a> Maneuver<'a> {
         })
     }
 
-    /// The sum of `entity`'s pair terms with every ship inside the cutoff.
     fn pairs(&self, entity: &Entity, body: Body) -> Vec3 {
         let mass = self.state[entity.row()].mass.0;
         self.sweep
@@ -134,8 +102,6 @@ impl<'a> Maneuver<'a> {
 }
 
 impl Thrusts {
-    /// What the entity `id` names thrusts this tick, in m/s²; zero for a
-    /// structure or an entity that is not there.
     pub fn of(&self, id: EntityId) -> Vec3 {
         self.0
             .binary_search_by_key(&id, |thrust| thrust.entity)
@@ -143,11 +109,6 @@ impl Thrusts {
     }
 }
 
-/// How hard a pair at `separation` meters pushes apart: positive below the
-/// spacing, negative from there to the cutoff, zero at the spacing, at the
-/// cutoff, past it, and where the two coincide, which is no line. The push
-/// rises to `PAIR_STRENGTH` at half the spacing and holds there, so a crowd
-/// meets a wall before it packs that close; nothing here is unbounded.
 fn pair_magnitude(separation: f64) -> f64 {
     let peak = 0.5 * (SPACING + CUTOFF);
     if separation <= 0.0 || separation >= CUTOFF {
@@ -159,7 +120,6 @@ fn pair_magnitude(separation: f64) -> f64 {
     }
 }
 
-/// `accel` cut to `limit`, both in m/s².
 fn within(accel: Vec3, limit: f64) -> Vec3 {
     let length = accel.length();
     if length > limit {

@@ -1,41 +1,21 @@
-//! Kepler's problem in universal variables: a body's state after a span,
-//! exact for every conic.
-
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::stumpff::{c2, c3};
 
-/// Newton steps after which the universal anomaly is taken as converged.
-/// Reaching it means the span was outside the contract; a `Span` type
-/// bounded by the body's period would delete the cap.
 const MAX_ITERATIONS: u32 = 60;
 
-/// Relative change of the universal anomaly below which iteration stops.
 const TOLERANCE: f64 = 1e-14;
 
-/// `|r0 / a|` below which the orbit starts from the parabolic guess.
 const PARABOLIC_BOUND: f64 = 1e-6;
 
-/// The invariants of one propagation, read by every Newton step.
 struct Problem {
-    /// √μ, in m^(3/2)/s.
     root_mu: f64,
-    /// Starting radius, in meters.
     r0: f64,
-    /// r0·v0 / √μ, in m^(1/2).
     sigma: f64,
-    /// 1/a, in 1/m; zero for a parabola, negative for a hyperbola.
     alpha: f64,
-    /// √μ·dt, in m^(3/2).
     target: f64,
-    /// Semi-latus rectum to the power 3/2, in m^(3/2).
     p_cubed_root: f64,
 }
 
-/// `body` after `dt` seconds of free fall about the central mass; `dt` may
-/// be negative. `body.pos` is never the origin. Newton's iteration
-/// converges for `|dt|` below one period of a bound body and for any span
-/// of an unbound one; a flying body steps one tick and Lambert bounds its
-/// spans, so no caller asks for more.
 pub fn propagate(body: Body, gravity: Gravity, dt: f64) -> Body {
     let problem = Problem::new(body, gravity, dt);
     let chi = problem.solve();
@@ -64,7 +44,6 @@ impl Problem {
         }
     }
 
-    /// The universal anomaly χ reaching `target`, in m^(1/2).
     fn solve(&self) -> f64 {
         let mut chi = self.initial_chi();
         for _ in 0..MAX_ITERATIONS {
@@ -78,8 +57,6 @@ impl Problem {
         chi
     }
 
-    /// One Newton step on Kepler's equation, whose derivative is the
-    /// radius at `chi`.
     fn newton_step(&self, chi: f64) -> f64 {
         let psi = chi * chi * self.alpha;
         let (c2, c3) = (c2(psi), c3(psi));
@@ -90,7 +67,6 @@ impl Problem {
         chi + (self.target - reached) / radius
     }
 
-    /// Vallado's starting guess for the conic the body is on.
     fn initial_chi(&self) -> f64 {
         let shape = self.alpha * self.r0;
         if shape > PARABOLIC_BOUND {
@@ -102,8 +78,6 @@ impl Problem {
         }
     }
 
-    /// Vallado's logarithmic guess through `asinh`, which shares its limit
-    /// for long spans and stays finite for short ones.
     fn hyperbolic_chi(&self, shape: f64) -> f64 {
         let sign = self.target.signum();
         let root_a = (-1.0 / self.alpha).sqrt();
@@ -111,7 +85,6 @@ impl Problem {
         sign * root_a * libm::asinh(ratio)
     }
 
-    /// Barker's equation solved from periapsis.
     fn parabolic_chi(&self) -> f64 {
         let span = 3.0 * self.target;
         let hypot = (self.p_cubed_root * self.p_cubed_root + span * span).sqrt();

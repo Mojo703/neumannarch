@@ -1,23 +1,15 @@
-//! The desync hash: FNV-1a over everything a value's `Hash` feeds.
-
 use core::hash::{Hash, Hasher};
 
-/// The FNV-1a 64-bit offset basis.
 const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 
-/// The FNV-1a 64-bit prime.
 const PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// FNV-1a over the bytes `value`'s `Hash` feeds, in the order it feeds
-/// them; the same value digests the same on every target, since integers
-/// feed little-endian bytes at a width that does not follow the platform.
 pub fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     let mut fnv = Fnv(OFFSET_BASIS);
     value.hash(&mut fnv);
     fnv.finish()
 }
 
-/// The running FNV-1a state.
 struct Fnv(u64);
 
 impl Hasher for Fnv {
@@ -47,8 +39,6 @@ impl Hasher for Fnv {
         self.write(&i.to_le_bytes());
     }
 
-    /// Widened to `u64`: a slice's length prefix feeds through here, and
-    /// wasm32's `usize` is half the width of native's.
     fn write_usize(&mut self, i: usize) {
         self.write_u64(i as u64);
     }

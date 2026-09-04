@@ -1,22 +1,14 @@
-//! A body in free fall about the central mass.
-
 use core::f64::consts::TAU;
 
 use crate::Vec3;
 use crate::real::Real;
 
-/// A body's state in the inertial frame centered on the central mass.
-/// Equal and hashed by bit pattern.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Body {
-    /// Position, in meters.
     pub pos: Vec3,
-    /// Velocity, in meters per second.
     pub vel: Vec3,
 }
 
-/// The central mass's gravitational parameter μ, in m³/s². A world
-/// constant, held in state as it stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Gravity(Real);
 
@@ -25,34 +17,26 @@ impl Body {
         Body { pos, vel }
     }
 
-    /// Distance from the central mass, in meters.
     pub fn radius(self) -> f64 {
         self.pos.length()
     }
 
-    /// Speed, in meters per second.
     pub fn speed(self) -> f64 {
         self.vel.length()
     }
 
-    /// Specific orbital energy, in J/kg: negative when bound, zero when
-    /// parabolic, positive when hyperbolic.
     pub fn specific_energy(self, gravity: Gravity) -> f64 {
         self.vel.length_squared() / 2.0 - gravity.mu() / self.radius()
     }
 
-    /// Specific angular momentum, in m²/s.
     pub fn angular_momentum(self) -> Vec3 {
         self.pos.cross(self.vel)
     }
 
-    /// The semi-major axis in meters: negative for a hyperbola, infinite
-    /// for a parabola.
     pub fn semi_major_axis(self, gravity: Gravity) -> f64 {
         -gravity.mu() / (2.0 * self.specific_energy(gravity))
     }
 
-    /// The orbital period in seconds, or `None` when the body is unbound.
     pub fn period(self, gravity: Gravity) -> Option<f64> {
         let a = self.semi_major_axis(gravity);
         (self.specific_energy(gravity) < 0.0).then(|| TAU * (a * a * a / gravity.mu()).sqrt())
@@ -60,12 +44,10 @@ impl Body {
 }
 
 impl Gravity {
-    /// The gravitational parameter `mu`, in m³/s².
     pub const fn new(mu: f64) -> Gravity {
         Gravity(Real(mu))
     }
 
-    /// The gravitational parameter μ, in m³/s².
     pub fn mu(self) -> f64 {
         self.0.0
     }

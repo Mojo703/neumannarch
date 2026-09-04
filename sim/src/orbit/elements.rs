@@ -1,7 +1,3 @@
-//! The elliptic conic as equinoctial elements, and Kepler's equation in
-//! that form. The elements are non-singular at zero eccentricity and zero
-//! inclination, which every rock in a thin belt is near.
-
 use core::f64::consts::TAU;
 
 use crate::orbit::body::{Body, Gravity};
@@ -9,19 +5,10 @@ use crate::real::Real;
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
-/// Newton steps after which the eccentric longitude is taken as converged.
-/// Reaching it means an eccentricity near one, which no orbit in the belt
-/// has; an eccentricity newtype bounded well below one would delete the
-/// cap.
 const MAX_ITERATIONS: u32 = 40;
 
-/// Change of the eccentric longitude, in radians, below which iteration
-/// stops.
 const TOLERANCE: f64 = 1e-14;
 
-/// An elliptic orbit about the central mass, as equinoctial elements: it is
-/// an ellipse by construction, so a body read from it is always bound.
-/// Equal and hashed by bit pattern.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Orbit {
     a: Real,
@@ -34,11 +21,6 @@ pub struct Orbit {
 }
 
 impl Orbit {
-    /// The orbit with these elements: semi-major axis `a` in meters,
-    /// eccentricity-vector components `h` and `k`, inclination-vector
-    /// components `p` and `q`, and mean longitude `lambda0` in radians at
-    /// `epoch`. `None` unless the elements are an ellipse: `a` above zero
-    /// and `h² + k²` below one.
     pub fn new(a: f64, h: f64, k: f64, p: f64, q: f64, lambda0: f64, epoch: Tick) -> Option<Orbit> {
         let elliptic = a > 0.0 && h * h + k * k < 1.0;
         (elliptic && p.is_finite() && q.is_finite() && lambda0.is_finite()).then(|| Orbit {
@@ -52,9 +34,6 @@ impl Orbit {
         })
     }
 
-    /// The orbit `body` is on, with `tick` as its epoch. `None` when the
-    /// body is unbound, radial, or exactly retrograde in the belt plane,
-    /// the one attitude these elements cannot name.
     pub fn from_body(body: Body, tick: Tick, gravity: Gravity) -> Option<Orbit> {
         if body.specific_energy(gravity) >= 0.0 {
             return None;
@@ -77,7 +56,6 @@ impl Orbit {
         Orbit::new(a, h, k, p, q, mean_longitude(longitude, h, k), tick)
     }
 
-    /// The body on this orbit at `tick`.
     pub fn at(&self, tick: Tick, gravity: Gravity) -> Body {
         let (a, h, k) = (self.a.0, self.h.0, self.k.0);
         let mu = gravity.mu();
@@ -99,9 +77,6 @@ impl Orbit {
         )
     }
 
-    /// This orbit with its mean longitude moved by `along` meters along the
-    /// orbit, ahead of it when positive. The period is unchanged, so the
-    /// shifted orbit keeps station with this one.
     pub fn shifted(&self, along: f64) -> Orbit {
         Orbit {
             lambda0: Real((self.lambda0.0 + along / self.a.0).rem_euclid(TAU)),
@@ -109,32 +84,24 @@ impl Orbit {
         }
     }
 
-    /// The orbital period in seconds.
     pub fn period(&self, gravity: Gravity) -> f64 {
         let a = self.a.0;
         TAU * (a * a * a / gravity.mu()).sqrt()
     }
 
-    /// The semi-major axis, in meters.
     pub fn semi_major_axis(&self) -> f64 {
         self.a.0
     }
 
-    /// The eccentricity, below one.
     pub fn eccentricity(&self) -> f64 {
         let (h, k) = (self.h.0, self.k.0);
         (h * h + k * k).sqrt()
     }
 
-    /// The tick the mean longitude is stated at.
     pub fn epoch(&self) -> Tick {
         self.epoch
     }
 
-    /// The eccentric longitude F, in radians, solving Kepler's equation
-    /// `lambda = F + h cos F - k sin F` by Newton. Its derivative is at
-    /// least one minus the eccentricity, so the iteration never divides by
-    /// zero.
     fn eccentric_longitude(&self, lambda: f64) -> f64 {
         let (h, k) = (self.h.0, self.k.0);
         let mut longitude = lambda;
@@ -150,8 +117,6 @@ impl Orbit {
     }
 }
 
-/// The equinoctial axes of the orbit plane, in the reference frame: the
-/// first at longitude zero, the second a quarter turn along the motion.
 fn axes(p: f64, q: f64) -> (Vec3, Vec3) {
     let scale = 1.0 / (1.0 + p * p + q * q);
     (
@@ -160,15 +125,10 @@ fn axes(p: f64, q: f64) -> (Vec3, Vec3) {
     )
 }
 
-/// The factor `1 / (1 + √(1 - h² - k²))` the position and velocity share.
 fn beta(h: f64, k: f64) -> f64 {
     1.0 / (1.0 + (1.0 - h * h - k * k).sqrt())
 }
 
-/// The eccentric longitude, in radians, of the position whose components
-/// along the equinoctial axes, in semi-major axes and offset by the
-/// eccentricity components, are `along` and `across`. The inversion is
-/// exact for every eccentricity below one.
 fn eccentric_longitude_of(along: f64, across: f64, h: f64, k: f64) -> f64 {
     let root = (1.0 - h * h - k * k).sqrt();
     let beta = beta(h, k);
@@ -177,19 +137,14 @@ fn eccentric_longitude_of(along: f64, across: f64, h: f64, k: f64) -> f64 {
     libm::atan2(sin, cos)
 }
 
-/// The mean longitude, in radians, of the eccentric longitude `longitude`.
 fn mean_longitude(longitude: f64, h: f64, k: f64) -> f64 {
     longitude + h * libm::cos(longitude) - k * libm::sin(longitude)
 }
 
-/// `vector` in the sim's frame, where the belt plane is XZ and its normal
-/// is +Y; the inverse of [`to_reference`].
 fn to_belt(vector: Vec3) -> Vec3 {
     Vec3::new(vector.x, vector.z, -vector.y)
 }
 
-/// `vector` in the frame these formulas are written in, where the
-/// reference plane is XY and its normal is +Z.
 fn to_reference(vector: Vec3) -> Vec3 {
     Vec3::new(vector.x, -vector.z, vector.y)
 }
@@ -199,22 +154,16 @@ mod tests {
     use super::*;
     use crate::orbit::universal::propagate;
 
-    /// A belt-scale central mass, in m³/s².
     const MU: Gravity = Gravity::new(4.0e13);
 
-    /// A belt-scale semi-major axis, in meters.
     const RADIUS: f64 = 1.0e7;
 
-    /// The tick a fixture's elements are read at, chosen away from zero so
-    /// an epoch that is ignored shows up.
     const EPOCH: Tick = Tick(7_000);
 
-    /// The circular speed at [`RADIUS`], in meters per second.
     fn circular_speed() -> f64 {
         (MU.mu() / RADIUS).sqrt()
     }
 
-    /// Prograde in the belt plane is +X toward -Z.
     fn circular_equatorial() -> Body {
         Body::new(
             Vec3::new(RADIUS, 0.0, 0.0),
@@ -283,8 +232,6 @@ mod tests {
 
     #[test]
     fn an_orbit_at_one_period_is_back_at_its_start() {
-        // A gravity whose period is a whole number of ticks, so the test
-        // can name one period as a tick.
         let period = 30_000.0;
         let gravity = Gravity::new(TAU * TAU * RADIUS * RADIUS * RADIUS / (period * period));
         let orbit = Orbit::new(RADIUS, 0.1, -0.05, 0.02, 0.03, 1.0, Tick::ZERO)

@@ -1,5 +1,3 @@
-//! What a unit is pulled toward this tick.
-
 use super::State;
 use super::entity::Entity;
 use super::sight::Sight;
@@ -7,22 +5,13 @@ use super::sweep::Sweep;
 use crate::orbit::body::Body;
 use crate::vec3::Vec3;
 
-/// The state a unit is pulled toward this tick. Decided from the snapshot
-/// alone, so nothing about it is stored.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Attractor {
-    /// In meters.
     pub pos: Vec3,
-    /// In meters per second.
     pub vel: Vec3,
 }
 
 impl Attractor {
-    /// What pulls `entity` this tick: its flight's anchor until the arrival
-    /// tick, then its home anchor, unless an enemy its seat sees is inside
-    /// the leash, in which case the point at half its longest weapon range
-    /// from that enemy on the line toward the ship. `sight` is `entity`'s
-    /// seat's.
     pub fn of(state: &State, entity: &Entity, sight: &Sight, sweep: &Sweep) -> Attractor {
         let home = Attractor::at(
             state
@@ -38,7 +27,6 @@ impl Attractor {
         }
     }
 
-    /// The attractor holding a body where it is.
     fn at(body: Body) -> Attractor {
         Attractor {
             pos: body.pos,
@@ -46,9 +34,6 @@ impl Attractor {
         }
     }
 
-    /// The point half a weapon range off the nearest enemy the seat sees
-    /// inside the leash; `None` when the row is unarmed, no such enemy is
-    /// there, or the ship is on top of it.
     fn chase(
         state: &State,
         entity: &Entity,

@@ -1,10 +1,3 @@
-//! The balance harness: matches between scripted agents, the determinism
-//! checks, and the composition matrix.
-//!
-//! `harness match [turtle|expand|none] [turtle|expand|none]`,
-//! `harness replay`, `harness rollback`, `harness matrix`. Output is plain
-//! text; a check that fails exits non-zero.
-
 use std::collections::BTreeMap;
 
 use probe_agents::{Mix, Personality, Scripted, Seated};
@@ -17,24 +10,16 @@ use probe_sim::{
     WINDOW_SECONDS,
 };
 
-/// The clock a full match ends at: fifteen minutes, as DESIGN.md states.
 const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
-/// The clock a matrix cell ends at: five minutes, long enough for two
-/// economies to meet and short enough for a whole matrix to run.
 const MATRIX_CLOCK: Tick = Tick(5 * 60 * TICKS_PER_SECOND as u64);
 
-/// The clock a determinism check runs to: a minute, by which both seats
-/// have placed, built, sent and fought.
 const CHECK_CLOCK: Tick = Tick(60 * TICKS_PER_SECOND as u64);
 
-/// How often `match` prints a line of the match's progress, in seconds.
 const TRACE_INTERVAL: u64 = 60;
 
-/// The seats every check plays: one per team.
 const SEATS: [SeatId; 2] = [SeatId(0), SeatId(1)];
 
-/// The map's seed the checks play.
 const SEED: u64 = 1;
 
 fn main() {
@@ -63,7 +48,6 @@ fn main() {
     }
 }
 
-/// One match between the named seats, traced once a minute.
 fn played(named: &[&str]) {
     let sides = [
         *named.first().unwrap_or(&"turtle"),
@@ -89,8 +73,6 @@ fn played(named: &[&str]) {
     report(run.session.state());
 }
 
-/// The determinism checks: the record reproduces the live hash, and the
-/// same match played twice does too.
 fn replayed() -> bool {
     let mut run = Match::new(CHECK_CLOCK, both());
     while !run.over() {
@@ -131,9 +113,6 @@ fn replayed() -> bool {
     passed
 }
 
-/// The rollback check: the same match played on time, and again with every
-/// command withheld and inserted late in scrambled order inside the
-/// window, hashes the same at every settled tick.
 fn rolled_back() -> bool {
     let mut run = Match::new(CHECK_CLOCK, both());
     let mut hashes = vec![run.session.state().hash()];
@@ -164,9 +143,7 @@ fn rolled_back() -> bool {
             pending.retain(|held| held != &stamped);
         }
         acknowledge(&mut late, &pending);
-        // A seat whose next command is still ahead settles a tick this
-        // machine has not stepped; the hash to compare is the newest tick
-        // it holds.
+
         settled = late.settled().min(late.state().tick());
         if late.hash_at(settled) != Some(hashes[settled.0 as usize]) {
             println!(
@@ -194,8 +171,6 @@ fn rolled_back() -> bool {
         & check("the whole match settled", late.settled() == end)
 }
 
-/// When each command is delivered: at least a tick after the one it takes
-/// effect at, spread over the window and reversed within a tick.
 fn scrambled(issued: &[Stamped]) -> BTreeMap<Tick, Vec<Stamped>> {
     let spread = WINDOW_SECONDS * TICKS_PER_SECOND / 2;
     let mut deliveries: BTreeMap<Tick, Vec<Stamped>> = BTreeMap::new();
@@ -212,8 +187,6 @@ fn scrambled(issued: &[Stamped]) -> BTreeMap<Tick, Vec<Stamped>> {
     deliveries
 }
 
-/// Acknowledges each seat up to the tick its earliest undelivered command
-/// takes effect at, or up to the tick the session shows where it has none.
 fn acknowledge(session: &mut Session, pending: &[Stamped]) {
     let latest = session.state().tick();
     for seat in SEATS {
@@ -226,7 +199,6 @@ fn acknowledge(session: &mut Session, pending: &[Stamped]) {
     }
 }
 
-/// Every named composition against every other, from both starts.
 fn matrix() {
     let compositions = compositions();
     println!("matrix, {} minutes a cell", MATRIX_CLOCK.seconds() / 60.0);
@@ -261,9 +233,6 @@ fn matrix() {
     }
 }
 
-/// The compositions the matrix plays: one armed row apiece, then all of
-/// them at equal weight, over the same expanding personality, so the mix
-/// is the only difference.
 fn compositions() -> Vec<(&'static str, Personality)> {
     let pinned = |name: &'static str, mix: Vec<(RowId, f64)>| {
         (
@@ -284,15 +253,12 @@ fn compositions() -> Vec<(&'static str, Personality)> {
     ]
 }
 
-/// One match: the session, and one agent per seat that plays it.
 struct Match {
     session: Session,
     seated: Vec<Seated>,
 }
 
 impl Match {
-    /// A match to `clock` over the shipped belt with `seated` playing every
-    /// seat, all of them this machine's.
     fn new(clock: Tick, seated: Vec<Seated>) -> Match {
         Match {
             session: Session::new(setup(clock), Retention::shipped(), &SEATS)
@@ -301,8 +267,6 @@ impl Match {
         }
     }
 
-    /// One tick, with every agent that is due to decide deciding first,
-    /// and what they issued.
     fn tick(&mut self) -> Vec<Stamped> {
         let session = &self.session;
         let issued: Vec<Stamped> = self
@@ -321,29 +285,24 @@ impl Match {
         issued
     }
 
-    /// Whether the clock has run out.
     fn over(&self) -> bool {
         self.session.state().standings().over()
     }
 }
 
-/// The setup a check plays, ending at `clock`.
 fn setup(clock: Tick) -> Setup {
     let teams = SEATS.iter().map(|seat| TeamId(seat.0)).collect();
     Setup::new(teams, SEED, clock).expect("one seat per team is a match")
 }
 
-/// Both shipped personalities, one per seat.
 fn both() -> Vec<Seated> {
     seats(&["turtle", "expand"]).expect("both ship")
 }
 
-/// The roster every agent of a match plays.
 fn roster() -> Roster {
     Roster::shipped()
 }
 
-/// One agent per named side, seat by seat; `none` seats nobody.
 fn seats(named: &[&str]) -> Option<Vec<Seated>> {
     let mut seated = Vec::new();
     for (at, name) in named.iter().enumerate() {
@@ -360,8 +319,6 @@ fn seats(named: &[&str]) -> Option<Vec<Seated>> {
     Some(seated)
 }
 
-/// One line of a match's progress: the clock, what is in flight, being
-/// built and wanted, and each team's rocks, army value and entity count.
 fn line(state: &State) -> String {
     let standings = state.standings();
     let sides: Vec<String> = standings
@@ -388,7 +345,6 @@ fn line(state: &State) -> String {
     )
 }
 
-/// The standings at the end, and who won by DESIGN.md's tie-break.
 fn report(state: &State) {
     let standings: Standings = state.standings();
     for team in standings.teams() {
@@ -411,7 +367,6 @@ fn report(state: &State) {
     println!("leaders: {}", leaders.join(", "));
 }
 
-/// Prints one check's verdict and passes it on.
 fn check(what: &str, passed: bool) -> bool {
     println!("{} {what}", if passed { "ok  " } else { "FAIL" });
     passed

@@ -1,5 +1,3 @@
-//! The eight shipped rows.
-
 use super::row::{Row, Weapon};
 use crate::ids::RowId;
 use crate::materials::Materials;
@@ -14,15 +12,10 @@ pub const RAIDER: RowId = RowId(5);
 pub const FRIGATE: RowId = RowId(6);
 pub const LANCER: RowId = RowId(7);
 
-/// The stockpile capacity a storage-class row contributes, per material.
 const STORE: Materials = Materials::new(500.0, 500.0, 500.0);
 
-/// Every shipped row's manoeuvring limit as a fraction of its movement
-/// limit. One quarter throughout, a hypothesis the harness confirms or
-/// kills.
 const MANEUVER_SHARE: f64 = 0.25;
 
-/// The shipped rows, in the order of the id constants.
 pub(super) fn rows() -> Vec<Row> {
     vec![
         row(
@@ -122,9 +115,6 @@ pub(super) fn rows() -> Vec<Row> {
     ]
 }
 
-/// A row with the table's defaults: mass equals the metals cost, the
-/// manoeuvring limit is `MANEUVER_SHARE` of `accel`, radar is twice
-/// `sight`, no plating, no capacity.
 fn row(
     name: &'static str,
     cost: Materials,

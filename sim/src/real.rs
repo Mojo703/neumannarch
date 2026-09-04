@@ -1,10 +1,5 @@
-//! The stored scalar.
-
 use core::hash::{Hash, Hasher};
 
-/// An `f64` held in state. Equal and hashed by bit pattern, so `-0.0` and
-/// `0.0` differ and every state type derives `Hash`; arithmetic happens on
-/// the `f64`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Real(pub f64);
 

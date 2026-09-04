@@ -1,8 +1,3 @@
-//! One glyph painted on the HUD, by the three rules: the frame in its fill
-//! state, the marks inside it, and the dim a preview draws it at. Frame and
-//! marks are the sheet's own primitives (`glyph::Frame::points`,
-//! `glyph::primitives_of`), scaled by [`Stencil::half`].
-
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use probe_sim::Material;
 
@@ -10,44 +5,27 @@ use crate::display::glyph::{self, Glyph, Primitive};
 use crate::display::hue;
 use crate::display::scene::Fill;
 
-/// A dashed outline's dash length, in points.
 const DASH_LENGTH: f32 = 3.0;
 
-/// A dashed outline's gap length, in points.
 const GAP_LENGTH: f32 = 2.0;
 
-/// The alpha a dimmed glyph is painted at, over its own.
 const DIM_ALPHA: f32 = 0.5;
 
-/// The straight segments an arc mark is approximated by.
 const ARC_SEGMENTS: usize = 8;
 
-/// A starved frame's outside belt's half-width, in cell units: the
-/// plating belt's own half-width (`43 - 17`, halved), since it sits along
-/// the same base.
 const STARVED_HALF_WIDTH: f32 = 13.0;
 
-/// One glyph ready to paint: where it goes, how big, whose colour it takes,
-/// and what its unit's state is.
 pub struct Stencil<'a> {
     pub glyph: &'a Glyph,
-    /// The glyph's centre, in points.
     pub centre: Pos2,
-    /// Half the glyph's width at its size class, in points.
     pub half: f32,
-    /// The fill's colour: the owner's.
     pub colour: Color32,
     pub fill: Fill,
-    /// Painted at [`DIM_ALPHA`]: a hover preview, or a glyph the pointer
-    /// says is leaving.
     pub dim: bool,
-    /// The material a frame has spent nothing on this second for want of,
-    /// drawn as a belt along the frame's base in that material's hue.
     pub starved: Option<Material>,
 }
 
 impl Stencil<'_> {
-    /// Paints the frame, then the marks over it.
     pub fn paint(&self, painter: &egui::Painter) {
         let points = self.frame_points();
         let outline = Stroke::new(
@@ -85,8 +63,6 @@ impl Stencil<'_> {
         }
     }
 
-    /// The belt a starved frame carries: along the base, just outside it,
-    /// so the plating belt inside the frame stays its own mark.
     fn paint_starved(&self, painter: &egui::Painter, material: Material) {
         let width = self.length(STARVED_HALF_WIDTH);
         let thickness = self.length(glyph::MARK_WIDTH) / 2.0;
@@ -103,19 +79,15 @@ impl Stencil<'_> {
         ));
     }
 
-    /// `point`, in the sheet's cell, at this stencil's own centre and
-    /// half-width.
     fn at(&self, point: (f32, f32)) -> Pos2 {
         let (x, y) = glyph::unit(point);
         egui::pos2(self.centre.x + x * self.half, self.centre.y + y * self.half)
     }
 
-    /// `length`, in the sheet's cell, at this stencil's own half-width.
     fn length(&self, length: f32) -> f32 {
         glyph::unit_length(length) * self.half
     }
 
-    /// The frame's corners, apex up for a triangle.
     fn frame_points(&self) -> Vec<Pos2> {
         self.glyph
             .frame
@@ -125,7 +97,6 @@ impl Stencil<'_> {
             .collect()
     }
 
-    /// Every primitive the glyph's marks draw, at its own place and size.
     fn paint_marks(&self, painter: &egui::Painter, colour: Color32) {
         for primitive in glyph::primitives_of(&self.glyph.marks) {
             self.paint_primitive(painter, &primitive, colour);
@@ -160,9 +131,6 @@ impl Stencil<'_> {
         }
     }
 
-    /// `points`, in the sheet's cell, as connected segments with a filled
-    /// circle at each vertex, approximating `stroke`'s round caps and
-    /// joins.
     fn paint_round_line(&self, painter: &egui::Painter, points: &[(f32, f32)], stroke: Stroke) {
         let screen: Vec<Pos2> = points.iter().map(|&point| self.at(point)).collect();
         for pair in screen.windows(2) {
@@ -181,8 +149,6 @@ impl Stencil<'_> {
     }
 }
 
-/// `points`, a convex polygon, clipped to the half-plane at and below
-/// `cutoff`, which is toward the bottom of the screen.
 fn below(points: &[Pos2], cutoff: f32) -> Vec<Pos2> {
     let mut kept = Vec::new();
     for (index, &current) in points.iter().enumerate() {

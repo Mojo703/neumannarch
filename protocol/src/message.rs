@@ -1,5 +1,3 @@
-//! What one machine of a match says to another.
-
 use probe_sim::{SeatId, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
@@ -7,52 +5,41 @@ use crate::ids::PlayerId;
 use crate::lobby::{Lobby, LobbyEdit, NotReady, Refused};
 use crate::seating::Started;
 
-/// Why the room did not do what a machine asked.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
-pub enum Refusal {
-    /// The edit was not this machine's to make.
-    Edit(Refused),
-    /// The lobby is not a match yet, so it does not start.
-    NotReady(NotReady),
-    /// Every slot is held, so a joining machine has nowhere to sit.
-    Full,
-    /// The joining machine speaks another version of the protocol.
-    Version,
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Request {
+    Join { version: u32 },
+    Edit(LobbyEdit),
+    Start,
+    Rematch,
+    Leave,
 }
 
-/// One message between a member of a room and the room. Everything before
-/// [`Message::Start`] is about the lobby; everything after is the match.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Notice {
+    Welcome { player: PlayerId, lobby: Lobby },
+    Lobby(Lobby),
+    Started(Started),
+    Refused(Refused),
+    NotReady(NotReady),
+    Full,
+    Version,
+    Left,
+    Removed,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Relayed {
+    Command(Stamped),
+    Acknowledge { seat: SeatId, up_to: Tick },
+    Hash { tick: Tick, hash: u64 },
+    Desync { tick: Tick },
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Message {
-    /// A machine asking to enter the room, speaking this version of the
-    /// protocol.
-    Join { version: u32 },
-    /// The id the room gave the joiner, and the lobby as it stands.
-    Welcome { player: PlayerId, lobby: Lobby },
-    /// An edit a member asks the room to apply.
-    Edit(LobbyEdit),
-    /// The lobby after an edit landed, to every member.
-    Lobby(Lobby),
-    /// Why the room did nothing, to the machine that asked.
-    Refused(Refusal),
-    /// The frozen lobby: every machine builds its initial state from this
-    /// and runs the seats it names.
-    Start(Started),
-    /// A command, at the tick it takes effect at.
-    Command(Stamped),
-    /// No command of `seat` before `up_to` is unknown to the sender.
-    Acknowledge { seat: SeatId, up_to: Tick },
-    /// The sender's state hash at a settled tick.
-    Hash { tick: Tick, hash: u64 },
-    /// Two members' hashes at this tick differ, which ends the match.
-    Desync { tick: Tick },
-    /// The host asking the room to set the same shape up again, which
-    /// answers with the lobby it reopens on.
-    Rematch,
-    /// The sender is leaving the room.
-    Leave,
-    /// The room has opened the slot the machine it is addressing held.
-    Removed,
+    Request(Request),
+    Notice(Notice),
+    Relayed(Relayed),
 }
 
 #[cfg(test)]
@@ -61,35 +48,38 @@ mod tests {
     use probe_sim::{Band, Place, RockId, RowId, TeamId};
 
     use super::*;
-    use crate::lobby::Control;
-    use crate::wire::Wire;
+    use crate::lobby::Holder;
+    use crate::wire::Codec;
 
-    /// One of every message, so a variant added without a wire form fails
-    /// here rather than on the wire.
     fn every_message() -> Vec<Message> {
         let lobby = crate::lobby::Lobby::skirmish(PlayerId::HOST);
         vec![
-            Message::Join {
+            Message::Request(Request::Join {
                 version: crate::VERSION,
-            },
-            Message::Welcome {
+            }),
+            Message::Request(Request::Edit(LobbyEdit::SetSlot {
+                slot: 2,
+                control: Holder::Open,
+            })),
+            Message::Request(Request::Edit(LobbyEdit::Kick(PlayerId(4)))),
+            Message::Request(Request::Start),
+            Message::Request(Request::Rematch),
+            Message::Request(Request::Leave),
+            Message::Notice(Notice::Welcome {
                 player: PlayerId(3),
                 lobby: lobby.clone(),
-            },
-            Message::Edit(LobbyEdit::SetSlot {
-                slot: 2,
-                control: Control::Open,
             }),
-            Message::Lobby(lobby.clone()),
-            Message::Refused(Refusal::Edit(Refused::NotHost)),
-            Message::Refused(Refusal::NotReady(NotReady::OpenSeat { slot: 1 })),
-            Message::Refused(Refusal::Full),
-            Message::Refused(Refusal::Version),
-            Message::Edit(LobbyEdit::Kick(PlayerId(4))),
-            Message::Rematch,
-            Message::Removed,
-            Message::Start(lobby.freeze().expect("a skirmish is a match")),
-            Message::Command(Stamped {
+            Message::Notice(Notice::Lobby(lobby.clone())),
+            Message::Notice(Notice::Started(
+                lobby.freeze().expect("a skirmish is a match"),
+            )),
+            Message::Notice(Notice::Refused(Refused::NotHost)),
+            Message::Notice(Notice::NotReady(NotReady::OpenSeat { slot: 1 })),
+            Message::Notice(Notice::Full),
+            Message::Notice(Notice::Version),
+            Message::Notice(Notice::Left),
+            Message::Notice(Notice::Removed),
+            Message::Relayed(Relayed::Command(Stamped {
                 tick: Tick(9),
                 issued: Issued {
                     seat: SeatId(1),
@@ -103,17 +93,16 @@ mod tests {
                         count: 3,
                     },
                 },
-            }),
-            Message::Acknowledge {
+            })),
+            Message::Relayed(Relayed::Acknowledge {
                 seat: SeatId(0),
                 up_to: Tick(120),
-            },
-            Message::Hash {
+            }),
+            Message::Relayed(Relayed::Hash {
                 tick: Tick(120),
                 hash: 0xDEAD_BEEF,
-            },
-            Message::Desync { tick: Tick(121) },
-            Message::Leave,
+            }),
+            Message::Relayed(Relayed::Desync { tick: Tick(121) }),
         ]
     }
 

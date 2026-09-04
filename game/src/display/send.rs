@@ -1,6 +1,3 @@
-//! The send: a drag from one ring to another, and the count edits it
-//! issues.
-
 use std::collections::BTreeMap;
 
 use probe_sim::roster::{Kind, Roster};
@@ -8,26 +5,18 @@ use probe_sim::state::view::View;
 use probe_sim::state::{Command, MAX_WANT};
 use probe_sim::{Place, RowId};
 
-/// A drag from one ring to another: the units it moves, and the edits that
-/// move them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sending {
     pub from: Place,
     pub to: Place,
-    /// How many units it moves, off the end of the source run. More than
-    /// the source holds moves what it holds.
     pub count: u32,
 }
 
 impl Sending {
-    /// Every unit of the seat's own at `place`, which is what a drag starts
-    /// out moving.
     pub fn present(view: &View, place: Place, roster: &Roster) -> u32 {
         run(view, place, roster).iter().map(|(_, held)| held).sum()
     }
 
-    /// The rows it moves and how many of each, taken off the end of the
-    /// source run, so the cheapest rows go first.
     pub fn rows(&self, view: &View, roster: &Roster) -> Vec<(RowId, u32)> {
         let mut left = self.count;
         let mut moving: Vec<(RowId, u32)> = Vec::new();
@@ -43,9 +32,6 @@ impl Sending {
         moving
     }
 
-    /// The two count edits per row it moves: the source's want down by what
-    /// leaves, the destination's up by what arrives, and never above
-    /// [`MAX_WANT`], which the sim would reject.
     pub fn commands(&self, view: &View, roster: &Roster) -> Vec<Command> {
         self.rows(view, roster)
             .into_iter()
@@ -54,17 +40,11 @@ impl Sending {
                     Command::Want {
                         place: self.from,
                         row,
-                        // A surplus is held above the want, so a drag can
-                        // move more than the source wants: the floor is the
-                        // arithmetic, not a tolerated failure.
                         count: wanted(view, self.from, row).saturating_sub(count),
                     },
                     Command::Want {
                         place: self.to,
                         row,
-                        // A `Want(u32)` bounded by `MAX_WANT` in `sim`, with
-                        // the cap in the type, would delete this clamp;
-                        // `Command::Want`'s count is a bare `u32` today.
                         count: (wanted(view, self.to, row) + count).min(MAX_WANT),
                     },
                 ]
@@ -73,10 +53,6 @@ impl Sending {
     }
 }
 
-/// The units of the seat's own holding at `place`, by row, in run order:
-/// rows by cost descending. It counts what the seat sees, which is what the
-/// run draws, so a unit the seat no longer wants there can still be sent.
-/// Structures never move, so they are not in it.
 fn run(view: &View, place: Place, roster: &Roster) -> Vec<(RowId, u32)> {
     let mut held: BTreeMap<RowId, u32> = BTreeMap::new();
     for seen in view
@@ -99,8 +75,6 @@ fn run(view: &View, place: Place, roster: &Roster) -> Vec<(RowId, u32)> {
     rows
 }
 
-/// What the seat wants of `row` at `place` now; none where it wants
-/// nothing.
 fn wanted(view: &View, place: Place, row: RowId) -> u32 {
     view.compositions
         .iter()
@@ -125,8 +99,6 @@ mod tests {
         }
     }
 
-    /// A match where the player has placed its reserve at rock zero: a
-    /// shipyard, which never moves, and a constructor, which does.
     fn placed() -> Local {
         let mut local = Local::start(1);
         local.want(&[(inner(0), SHIPYARD, 1), (inner(0), CONSTRUCTOR, 1)]);

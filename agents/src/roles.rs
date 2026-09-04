@@ -1,31 +1,17 @@
-//! The roster read as roles, so an agent names no row by id.
-
 use probe_sim::RowId;
 use probe_sim::roster::{Kind, Roster, Row};
 
-/// Which rows of a roster do which job, each list in the order an agent
-/// prefers: builders and extractors by rate, stores by capacity per cost,
-/// scouts by sight, army by damage per cost. Derived from the roster's own
-/// fields, so a roster variant needs no edit here.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Roles {
-    /// Structures that build, fastest first.
     pub yards: Vec<RowId>,
-    /// Units that build, fastest first: what claims a rock.
     pub masons: Vec<RowId>,
-    /// Rows that extract, highest rate first.
     pub extractors: Vec<RowId>,
-    /// Unarmed rows that carry capacity and do not build, most capacity per
-    /// cost first.
     pub stores: Vec<RowId>,
-    /// Unarmed units that neither build nor extract, longest sight first.
     pub scouts: Vec<RowId>,
-    /// Armed units, most damage per cost first.
     pub army: Vec<RowId>,
 }
 
 impl Roles {
-    /// The roles `roster`'s rows fill.
     pub fn of(roster: &Roster) -> Roles {
         Roles {
             yards: ranked(roster, |row| {
@@ -54,17 +40,14 @@ impl Roles {
     }
 }
 
-/// A row's combined build rate, in cost units per second.
 fn builds(row: &Row) -> f64 {
     row.builds().sum()
 }
 
-/// A row's combined extraction rate, in units per second of each material.
 fn extracts(row: &Row) -> f64 {
     row.extracts().sum()
 }
 
-/// Every row `score` rates, best first, ties by row id.
 fn ranked(roster: &Roster, score: impl Fn(&Row) -> Option<f64>) -> Vec<RowId> {
     let mut rated: Vec<(RowId, f64)> = roster
         .iter()

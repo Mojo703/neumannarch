@@ -1,13 +1,7 @@
-//! The Stumpff functions c2 and c3 of the universal-variable solution.
-
-/// `|z|` below which the power series replaces the closed forms, whose
-/// subtractions lose precision as `z` approaches zero.
 const SERIES_BOUND: f64 = 1.0;
 
-/// Series terms evaluated; the last is below `f64` precision at the bound.
 const SERIES_TERMS: u32 = 10;
 
-/// c2(z) = (1 - cos √z) / z, continued analytically through z = 0.
 pub fn c2(z: f64) -> f64 {
     if z.abs() < SERIES_BOUND {
         series(z, 2)
@@ -18,7 +12,6 @@ pub fn c2(z: f64) -> f64 {
     }
 }
 
-/// c3(z) = (√z - sin √z) / √z³, continued analytically through z = 0.
 pub fn c3(z: f64) -> f64 {
     if z.abs() < SERIES_BOUND {
         series(z, 3)
@@ -31,7 +24,6 @@ pub fn c3(z: f64) -> f64 {
     }
 }
 
-/// Σ (-z)^k / (first + 2k)! over the first `SERIES_TERMS` values of k.
 fn series(z: f64, first: u32) -> f64 {
     let mut term = 1.0 / f64::from((1..=first).product::<u32>());
     let mut sum = term;

@@ -1,40 +1,3 @@
-//! The opponent the game ships.
-//!
-//! Good RTS and 4X opponents are not one policy; they are a few
-//! independent layers that each state what they want, over a memory of a
-//! map they cannot see all of. This one is built that way, and because the
-//! only lever in this game is a want per row per place, every layer's
-//! output is the same shape: a target composition at a place. The
-//! decision is the difference between that and what the view says it has.
-//!
-//! The layers, in the order they take the stockpile:
-//!
-//! - **Opening.** The reserve placed at the richest rock its seat's index
-//!   picks, which is all a seat can do before it holds anything.
-//! - **Economy.** At every rock it has: extractors up to what the rock's
-//!   richest material feeds, a fast builder at the first rocks, stores at
-//!   home as the stockpile fills. It expands by claiming a near rich rock
-//!   and moving a mobile builder there, and a claim that never arrives
-//!   lapses, since the sim tells nobody that a send could not be planned.
-//! - **Scouting.** One cheap unit per scout it keeps, walking to the rock
-//!   it watched least recently, reassigned the moment that rock is in
-//!   sight.
-//! - **Army.** A value target at a ratio to the enemy value it estimates
-//!   from sight, radar and memory, never below a floor, so an unscouted
-//!   enemy is still respected. A share of it is posted at each of its own
-//!   rocks where an enemy force was just seen, and the rest stages in the
-//!   target rock's outer band until it outweighs what is at the rock, then
-//!   moves into the inner band.
-//! - **Counters** are not a layer but the army's mix: each armed row is
-//!   rated by its damage through the plating the enemy has shown, per cost
-//!   unit, skewed by the personality's taste for reach past the enemy's
-//!   and for durability. A row that shoots farther than it sees gets a
-//!   spotter, because fire needs sight.
-//!
-//! Every number is a constant of a [`Personality`], or of the module that
-//! uses it, with its unit and the word hypothesis. Nothing here reads the
-//! state, a clock, or anything the seat cannot see.
-
 use probe_sim::roster::Roster;
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
@@ -46,8 +9,6 @@ use crate::roles::Roles;
 use crate::survey::Survey;
 use crate::{Agent, Dice};
 
-/// The shipped opponent: one personality, the roster it plays, and what it
-/// remembers of a map it cannot see all of.
 pub struct Scripted {
     personality: Personality,
     roster: Roster,
@@ -57,9 +18,6 @@ pub struct Scripted {
 }
 
 impl Scripted {
-    /// An agent playing `personality` over `roster`, seeded by the
-    /// personality. The roster is match-constant and no view carries it, so
-    /// an agent is built with the one its match runs.
     pub fn new(personality: Personality, roster: Roster) -> Scripted {
         Scripted {
             roles: Roles::of(&roster),
@@ -70,7 +28,6 @@ impl Scripted {
         }
     }
 
-    /// The personality it plays.
     pub fn personality(&self) -> &Personality {
         &self.personality
     }
@@ -97,26 +54,14 @@ mod tests {
 
     use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION};
 
-    /// How far into a match the play tests run, in seconds. Seven minutes:
-    /// an agent has placed, saturated its first rock, built the second
-    /// builder it takes to spare one for a claim, and landed that claim by
-    /// then, measured against the shipped belt; a debug build steps it in
-    /// seconds.
     const PLAYED: u64 = 420;
 
-    /// What each seat starts with, in materials, as the shipped belt seats
-    /// a match with.
     const STOCK: Materials = Materials::new(300.0, 100.0, 100.0);
 
-    /// The first four rocks of the shipped belt: neighbours, so the two
-    /// agents open beside each other and meet. The whole belt spreads them
-    /// seven rocks apart, which no send crosses inside a match.
     fn neighbours() -> Vec<Rock> {
         Belt::fixed(Belt::GRAVITY).into_iter().take(4).collect()
     }
 
-    /// A match of two teams over `rocks`, ending at `clock` seconds, each
-    /// seat holding the shipped reserve.
     fn start(rocks: Vec<Rock>, clock: u64) -> State {
         let reserve = std::collections::BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]);
         let seats = [TeamId(0), TeamId(1)]
@@ -136,11 +81,6 @@ mod tests {
         Box::new(Scripted::new(personality, Roster::shipped()))
     }
 
-    /// `agents` playing `state` to its clock, and the damage dealt on the
-    /// way, which the state at the clock no longer shows.
-    ///
-    /// A belt laid by hand is not a [`Setup`](probe_sim::Setup)'s to name,
-    /// so this steps the state where a frontend drives a session.
     fn play(state: State, agents: Vec<(SeatId, Box<Scripted>)>) -> (State, f64) {
         let mut state = state;
         let mut playing: Vec<(Sequence, Box<Scripted>)> = agents

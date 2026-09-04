@@ -1,5 +1,3 @@
-//! The fogged view: everything one seat may know, and nothing else.
-
 use std::collections::BTreeMap;
 
 use super::State;
@@ -16,7 +14,6 @@ use crate::state::standings::Standings;
 use crate::step::fire::{Exchange, Shots};
 use crate::time::Tick;
 
-/// One entity the seat sees exactly.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Seen {
     pub entity: EntityId,
@@ -24,96 +21,63 @@ pub struct Seen {
     pub row: RowId,
     pub body: Body,
     pub hp: f64,
-    /// True while it is flying a send, when it neither shoots nor is shot.
     pub flying: bool,
-    /// The place it belongs to, which is where a flying one is going.
-    /// `None` for a flying entity of another team, whose destination sight
-    /// does not give; a holding entity's band its exact position does.
     pub home: Option<Place>,
-    /// The place a flying entity of the seat's team left. `None` for one
-    /// that is not flying and for another team's flier.
     pub from: Option<Place>,
 }
 
-/// One radar contact: inside a sensor's radar range but not its sight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Blip {
     pub body: Body,
     pub mass: MassClass,
 }
 
-/// One rock, which every seat always knows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Terrain {
     pub rock: RockId,
     pub orbit: Orbit,
-    /// The most of each material extractable per second.
     pub caps: Materials,
-    /// Visual radius in meters.
     pub radius: f64,
 }
 
-/// One open frame of one wanted row.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Building {
-    /// Work done, as a fraction of the row's cost.
     pub progress: f64,
-    /// The material the frame has spent nothing on this second for want
-    /// of, where there is one.
     pub starved_of: Option<Material>,
 }
 
-/// One row of one of the seat's own compositions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wanted {
     pub row: RowId,
     pub want: u32,
-    /// Units at the place, not counting those flying in.
     pub present: u32,
-    /// Units flying in to the place.
     pub flying: u32,
-    /// Each open frame, in the order opened.
     pub frames: Vec<Building>,
 }
 
-/// One of the seat's own compositions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composition {
     pub place: Place,
     pub rows: Vec<Wanted>,
 }
 
-/// What one seat may know at one tick. Built once per tick for a display
-/// or an agent; nothing in it refers to anything the seat cannot see.
-///
-/// The roster is match-constant and travels with the initial state, so it
-/// is not repeated here: a client holds it from the session it plays.
 #[derive(Clone, Debug, PartialEq)]
 pub struct View {
     pub seat: SeatId,
     pub tick: Tick,
     pub clock: Tick,
-    /// The central mass's gravitational parameter, in m³/s²: what an
-    /// orbit of the terrain is read at a tick with.
     pub gravity: Gravity,
     pub stockpile: Stockpile,
     pub reserve: BTreeMap<RowId, u32>,
     pub compositions: Vec<Composition>,
     pub seen: Vec<Seen>,
     pub blips: Vec<Blip>,
-    /// The tick's shots at the places the seat sees, in place then seat
-    /// order.
     pub exchanges: Vec<Exchange>,
-    /// Every rock, in rock id order, so `terrain[id]` is the rock at `id`.
     pub terrain: Vec<Terrain>,
-    /// The score, `Some` only once the clock has run out: DESIGN.md's Fog
-    /// section reveals it at the clock and never before.
     pub standings: Option<Standings>,
 }
 
 impl View {
-    /// What `seat` may know of `state`, with `shots` the last step
-    /// resolved. A seat the match does not have sees only the terrain.
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View {
         let sweep = state.sweep();
         let sight = Sight::of(state, seat, &sweep);
@@ -137,28 +101,21 @@ impl View {
         }
     }
 
-    /// The rock at `id`, or `None` when the map lacks it.
     pub fn terrain_of(&self, id: RockId) -> Option<&Terrain> {
         self.terrain.get(id.0 as usize)
     }
 
-    /// Where the rock at `id` is this tick, or `None` when the map lacks
-    /// it.
     pub fn rock_body(&self, id: RockId) -> Option<Body> {
         self.terrain_of(id)
             .map(|terrain| terrain.orbit.at(self.tick, self.gravity))
     }
 
-    /// The orbit `place`'s anchor follows, or `None` when the map lacks its
-    /// rock. Every seat at a place shares its anchor.
     pub fn anchor(&self, place: Place) -> Option<Orbit> {
         self.terrain_of(place.rock)
             .map(|terrain| terrain.orbit.shifted(place.band.amplitude()))
     }
 }
 
-/// The seat's own compositions, in place order: the wants, what is there,
-/// what is flying in, and the frames open.
 fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
     state
         .posts()
@@ -173,7 +130,6 @@ fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
         .collect()
 }
 
-/// One wanted row of one composition.
 fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
     let held = state.holding(post, row);
     Wanted {
@@ -192,8 +148,6 @@ fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
     }
 }
 
-/// Every entity the seat's team sees, in id order. `team` is the viewing
-/// seat's, and the match may not have one.
 fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
     sight
         .iter()
@@ -218,8 +172,6 @@ fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
         .collect()
 }
 
-/// Every radar contact, in id order: a body and a mass class, and nothing
-/// that would say whose it is.
 fn blips(state: &State, radar: &Radar) -> Vec<Blip> {
     radar
         .iter()
@@ -231,7 +183,6 @@ fn blips(state: &State, radar: &Radar) -> Vec<Blip> {
         .collect()
 }
 
-/// Every rock with its orbit and caps, which no fog hides.
 fn terrain(state: &State) -> Vec<Terrain> {
     state
         .rocks()
@@ -256,23 +207,19 @@ mod tests {
     use crate::state::{Batch, Command, Issued, Motion};
     use crate::step::fire::Fire;
 
-    /// The view of `seat`, with no shots this tick.
     fn quiet(state: &State, seat: SeatId) -> View {
         View::of(state, seat, &Shots::default())
     }
 
-    /// A match of two teams over the shipped belt, ending at `clock`.
     fn started(clock: Tick) -> State {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, clock).expect("two seats");
         State::start(&setup)
     }
 
-    /// A match of two teams whose clock no test reaches.
     fn state() -> State {
         started(Tick(1_000))
     }
 
-    /// One tick with `issued`, which must all be accepted.
     fn tick(state: &State, issued: &[Issued]) -> State {
         let mut batch = Batch::new();
         for issued in issued {
@@ -283,7 +230,6 @@ mod tests {
         next
     }
 
-    /// A want of `count` of `row` at `place`, as `seat`'s `seq`th command.
     fn want(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
@@ -351,7 +297,7 @@ mod tests {
     #[test]
     fn a_radar_contact_carries_a_mass_class_and_no_row() {
         let mut state = state();
-        // A scout sees two meters and reaches fifty by radar.
+
         let watcher = state.spawn(SeatId(0), crate::roster::SCOUT, inner(0), Motion::Fixed);
         let body = state.body_of(&state[watcher]);
         let heavy = Motion::Free {
@@ -441,8 +387,7 @@ mod tests {
     fn a_flying_units_home_is_its_destination_and_an_enemys_is_hidden() {
         let mut state = state();
         state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
-        // A frigate is in neither seat's reserve, so the send is the only
-        // way rock one's want is filled.
+
         let mine = state.spawn(SeatId(0), FRIGATE, inner(0), holding(&state, inner(0)));
         let theirs = state.spawn(SeatId(1), FRIGATE, inner(0), holding(&state, inner(0)));
         let state = sent(state, &[(0, mine), (1, theirs)]);
@@ -530,7 +475,6 @@ mod tests {
         assert!(view.exchanges.is_empty());
     }
 
-    /// Free at `place`'s anchor, as a unit that has arrived is.
     fn holding(state: &State, place: Place) -> Motion {
         Motion::Free {
             body: state.anchor(place).at(state.tick(), state.gravity()),
@@ -538,8 +482,6 @@ mod tests {
         }
     }
 
-    /// One tick that re-homes each `(seat, entity)` from rock zero to rock
-    /// one, which is the send that makes them fly.
     fn sent(state: State, units: &[(u8, EntityId)]) -> State {
         let issued: Vec<Issued> = units
             .iter()

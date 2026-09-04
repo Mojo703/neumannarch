@@ -1,5 +1,3 @@
-//! Orbital mechanics: bodies, elliptic orbits, and propagation.
-
 pub use body::{Body, Gravity};
 pub use elements::Orbit;
 pub use universal::propagate;

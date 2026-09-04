@@ -1,20 +1,13 @@
-//! What one seat sees: the union of its team's sight ranges.
-
 use super::State;
 use super::sweep::Sweep;
 use crate::ids::{EntityId, SeatId};
 
-/// The entities one seat sees this tick: every entity of its team, and
-/// every entity inside the sight range of one of them. The only query that
-/// answers whether a seat sees an entity.
 #[derive(Clone, Debug)]
 pub struct Sight {
     seen: Vec<EntityId>,
 }
 
 impl Sight {
-    /// What `seat` sees in the snapshot, over its `sweep`. A seat the match
-    /// does not have sees nothing.
     pub fn of(state: &State, seat: SeatId, sweep: &Sweep) -> Sight {
         let mut seen = Vec::new();
         if let Some(team) = state.seat(seat).map(|seat| seat.team()) {
@@ -32,12 +25,10 @@ impl Sight {
         Sight { seen }
     }
 
-    /// Whether the seat sees `entity`.
     pub fn sees(&self, entity: EntityId) -> bool {
         self.seen.binary_search(&entity).is_ok()
     }
 
-    /// Everything the seat sees, in id order.
     pub fn iter(&self) -> impl Iterator<Item = EntityId> + '_ {
         self.seen.iter().copied()
     }
@@ -69,7 +60,6 @@ mod tests {
         }
     }
 
-    /// Two seats on one team and one on another, over one rock.
     fn state() -> State {
         let radius = 1.0e7;
         let speed = (MU.mu() / radius).sqrt();
@@ -87,7 +77,6 @@ mod tests {
         )
     }
 
-    /// The frigate's sight is eight meters, the scout's twenty.
     #[test]
     fn a_seat_sees_its_team_and_what_its_team_is_near() {
         let mut state = state();

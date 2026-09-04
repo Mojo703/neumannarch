@@ -1,5 +1,3 @@
-//! Agents: a seat's player, and the cadence a runner calls one on.
-
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
 use probe_sim::step::fire::Shots;
@@ -10,38 +8,22 @@ pub use personality::{Mix, Personality};
 pub use roles::Roles;
 pub use scripted::Scripted;
 
-/// How many ticks pass between one agent's decisions: one second of sim
-/// time, on the ground that a player's hands are no faster. A hypothesis
-/// the harness confirms or kills.
 pub const DECISION_INTERVAL: Tick = Tick(TICKS_PER_SECOND as u64);
 
-/// The most wants one decision issues. Beyond this the least urgent wait
-/// for the next decision, which is a second away. A hypothesis.
 pub const MAX_COMMANDS_PER_DECISION: usize = 16;
 
-// A decision lands in one tick, whose own cap would refuse its tail.
 const _: () = assert!(MAX_COMMANDS_PER_DECISION <= probe_sim::state::MAX_COMMANDS_PER_TICK);
 
-/// A seat's player: it reads its own fogged view and speaks the one verb.
-///
-/// Called on [`DECISION_INTERVAL`], never every tick. An implementation
-/// holds no clock and no randomness but a seed it steps itself, so a match
-/// of agents replays exactly.
 pub trait Agent {
-    /// The wants this decision issues, at most
-    /// [`MAX_COMMANDS_PER_DECISION`] of them.
     fn decide(&mut self, view: &View) -> Vec<Command>;
 }
 
-/// One agent in one seat: what a runner drives, and the only place the
-/// decision cadence lives.
 pub struct Seated {
     sequence: Sequence,
     agent: Box<dyn Agent>,
 }
 
 impl Seated {
-    /// `agent` playing `seat`.
     pub fn new(seat: SeatId, agent: Box<dyn Agent>) -> Seated {
         Seated {
             sequence: Sequence::new(seat),
@@ -49,15 +31,10 @@ impl Seated {
         }
     }
 
-    /// The seat it plays.
     pub fn seat(&self) -> SeatId {
         self.sequence.seat()
     }
 
-    /// What the agent issues at the tick `session` shows: nothing off its
-    /// cadence, else its decision over that tick's fogged view, stamped
-    /// with its seat and its next sequence. Seats decide on different
-    /// ticks.
     pub fn issue(&mut self, session: &Session) -> Vec<Stamped> {
         let tick = session.state().tick();
         let interval = DECISION_INTERVAL.0;
@@ -90,15 +67,12 @@ mod tests {
     use probe_sim::roster::SCOUT;
     use probe_sim::{Band, Place, Retention, RockId, Setup, TeamId};
 
-    /// A session of two seats, both this machine's, whose clock no test
-    /// reaches.
     fn session() -> Session {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(1_000)).expect("two seats");
         Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)])
             .expect("both seats are seated")
     }
 
-    /// An agent that counts its decisions and always asks for one scout.
     struct Counting(u32);
 
     impl Agent for Counting {

@@ -1,7 +1,3 @@
-//! Build as flow: the builders' combined rate split across their post's
-//! frames, then spent from the stockpile in proportion to what it covers,
-//! then scrapping the surplus, then repairing the damaged.
-
 use core::ops::Add;
 
 use crate::ids::{EntityId, RockId, SeatId};
@@ -9,34 +5,25 @@ use crate::materials::{Material, Materials, Stockpile};
 use crate::state::{Entity, State};
 use crate::time::Tick;
 
-/// The construction phase over one tick's snapshot.
 pub struct Construction<'a> {
     state: &'a State,
 }
 
-/// Cost units of scrapping done to one entity this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scrapping {
     pub entity: EntityId,
-    /// Cost units.
     pub units: f64,
-    /// True once the scrapping is finished, which removes it and refunds
-    /// its whole cost.
     pub completed: bool,
 }
 
-/// Hit points restored to one entity this tick, which cost nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Repair {
     pub entity: EntityId,
     pub hp: f64,
 }
 
-/// What the builders did this tick: frames first, then scrapping, then
-/// repair.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Progress {
-    /// One per frame built, by its place in the order opened.
     pub spends: Vec<Spend>,
     pub scrapping: Vec<Scrapping>,
     pub repairs: Vec<Repair>,
@@ -47,7 +34,6 @@ impl<'a> Construction<'a> {
         Construction { state }
     }
 
-    /// The tick's spends, scrapping and repairs, in seat then rock order.
     pub fn run(self) -> Progress {
         let mut progress = Progress::default();
         let dt = Tick(1).seconds();
@@ -63,7 +49,6 @@ impl<'a> Construction<'a> {
         progress
     }
 
-    /// Every seat with a builder, in id order.
     fn seats(&self) -> Vec<SeatId> {
         let mut seats: Vec<SeatId> = self
             .state
@@ -76,7 +61,6 @@ impl<'a> Construction<'a> {
         seats
     }
 
-    /// Every rock where `seat` has a builder, in id order.
     fn rocks_of(&self, seat: SeatId) -> Vec<RockId> {
         let mut rocks: Vec<RockId> = self
             .state
@@ -89,7 +73,6 @@ impl<'a> Construction<'a> {
         rocks
     }
 
-    /// The build rates of `seat`'s builders at `rock`, in id order.
     fn builders(&self, seat: SeatId, rock: RockId) -> Vec<f64> {
         self.state
             .entities_at_rock(rock)
@@ -98,8 +81,6 @@ impl<'a> Construction<'a> {
             .collect()
     }
 
-    /// A builder's combined build rate, in cost units per second; zero for
-    /// anything that is not a builder or is in flight.
     fn rate_of(&self, entity: &Entity) -> f64 {
         if entity.is_flying() {
             return 0.0;
@@ -107,8 +88,6 @@ impl<'a> Construction<'a> {
         self.state[entity.row()].builds().sum()
     }
 
-    /// Spends the builders' effort on the frames at `rock`, and returns the
-    /// cost units the frames could not use.
     fn build(
         &self,
         progress: &mut Progress,
@@ -147,8 +126,6 @@ impl<'a> Construction<'a> {
         unused + spare
     }
 
-    /// Scraps the surplus at `rock` with what the frames left, and returns
-    /// what the scrapping did not use.
     fn scrap(&self, progress: &mut Progress, seat: SeatId, rock: RockId, effort: f64) -> f64 {
         let surplus: Vec<&Entity> = self
             .state
@@ -174,8 +151,6 @@ impl<'a> Construction<'a> {
         effort - used
     }
 
-    /// Repairs the damaged at `rock` with what is left, which costs
-    /// nothing.
     fn repair(&self, progress: &mut Progress, seat: SeatId, rock: RockId, effort: f64) {
         let damaged: Vec<&Entity> = self
             .state
@@ -196,7 +171,6 @@ impl<'a> Construction<'a> {
         }
     }
 
-    /// Where `seat`'s frames at `rock` sit in the order opened.
     fn frames_at(&self, seat: SeatId, rock: RockId) -> Vec<usize> {
         self.state
             .frames()
@@ -208,63 +182,46 @@ impl<'a> Construction<'a> {
     }
 }
 
-/// A frame under construction: its row's cost and the cost units done.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Work {
     pub cost: Materials,
-    /// Cost units done so far.
     pub progress: f64,
 }
 
-/// Cost units aimed at one frame this tick, before the stockpile is
-/// consulted. `frame` indexes the works slice given to [`spend`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Effort {
     pub frame: usize,
-    /// Cost units.
     pub amount: f64,
 }
 
-/// What one effort took from the stockpile, and whether that finished its
-/// frame. Progress is credited with `materials.total()`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spend {
     pub frame: usize,
-    /// The materials actually taken.
     pub materials: Materials,
     pub completed: bool,
-    /// The material the spend wanted and did not have, where it took
-    /// nothing at all.
     pub short: Option<Material>,
 }
 
-/// An effort clipped to the work its frame has left.
 struct Want {
     frame: usize,
     work: Work,
-    /// Cost units.
     units: f64,
 }
 
 impl Work {
-    /// Cost units still to do; zero once done.
     fn left(&self) -> f64 {
         (self.cost.total() - self.progress).max(0.0)
     }
 
-    /// The materials `units` cost units of this frame are made of.
     fn materials(&self, units: f64) -> Materials {
         self.cost * (units / self.cost.total())
     }
 }
 
 impl Want {
-    /// `effort` clipped to its frame's work left; none for a frame whose
-    /// cost totals zero, which is never built.
     fn of(works: &[Work], effort: &Effort) -> Option<Want> {
         let work = works[effort.frame];
-        // A cost totalling zero has no per-material share; rejecting such a
-        // row when the roster is built would delete this.
+
         (work.cost.total() > 0.0).then(|| Want {
             frame: effort.frame,
             work,
@@ -272,13 +229,10 @@ impl Want {
         })
     }
 
-    /// The materials this want asks of the stockpile.
     fn demand(&self) -> Materials {
         self.work.materials(self.units)
     }
 
-    /// Takes this want's share from `stockpile`, scaled by the smallest of
-    /// `ratios` among the materials its cost uses.
     fn spend(&self, ratios: Materials, stockpile: &mut Stockpile) -> Spend {
         let units = self.units * self.work.cost.bottleneck(ratios);
         let taken = stockpile.spend(self.work.materials(units));
@@ -294,9 +248,6 @@ impl Want {
     }
 }
 
-/// One post's builders' combined `rates` (cost units per second) over `dt`
-/// seconds, split evenly across its `frames`; empty when there is nothing
-/// to split or nothing to split it over.
 pub fn assign(rates: &[f64], frames: usize, dt: f64) -> Vec<Effort> {
     let combined = rates.iter().sum::<f64>() * dt;
     if frames == 0 || combined <= 0.0 {
@@ -306,10 +257,6 @@ pub fn assign(rates: &[f64], frames: usize, dt: f64) -> Vec<Effort> {
     (0..frames).map(|frame| Effort { frame, amount }).collect()
 }
 
-/// Spends `efforts` from one seat's `stockpile`: each frame's spend is its
-/// effort, clipped to the work left, scaled by the smallest fraction of the
-/// combined demand the stock covers among the materials its cost uses. One
-/// per effort at a frame with a nonzero cost, in effort order.
 pub fn spend(works: &[Work], efforts: &[Effort], stockpile: &mut Stockpile) -> Vec<Spend> {
     let wants: Vec<Want> = efforts
         .iter()
