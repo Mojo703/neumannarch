@@ -1,8 +1,8 @@
-use probe_agents::{Personality, Scripted, Seated};
-use probe_protocol::{Crew, Occupant, Seating};
-use probe_sim::roster::Roster;
-use probe_sim::state::{Command, MAX_COMMANDS_PER_TICK};
-use probe_sim::{SeatId, Sequence, Session, Stamped};
+use neumannarch_agents::{Personality, Scripted, Seated};
+use neumannarch_protocol::{Crew, Occupant, Seating};
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::state::{Command, MAX_COMMANDS_PER_TICK};
+use neumannarch_sim::{SeatId, Sequence, Session, Stamped};
 
 pub struct Human {
     sequence: Sequence,
@@ -83,9 +83,9 @@ impl Human {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
-    use probe_sim::roster::SHIPYARD;
-    use probe_sim::{Retention, RockId};
+    use neumannarch_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
+    use neumannarch_sim::roster::SHIPYARD;
+    use neumannarch_sim::{Retention, RockId};
 
     use super::*;
 

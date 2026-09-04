@@ -1,5 +1,5 @@
-use probe_sim::RowId;
-use probe_sim::roster::{Kind, Roster, Row};
+use neumannarch_sim::RowId;
+use neumannarch_sim::roster::{Kind, Roster, Row};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Roles {
@@ -52,7 +52,9 @@ fn ranked(roster: &Roster, score: impl Fn(&Row) -> Option<f64>) -> Vec<RowId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
+    use neumannarch_sim::roster::{
+        CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE,
+    };
 
     #[test]
     fn the_shipped_roster_fills_every_role() {

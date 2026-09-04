@@ -1,4 +1,4 @@
-# Probe Game — display language
+# Neumannarch — display language
 
 What the player sees, as the target. The only input is the sim's
 view. In the belt and on the HUD nothing is a numeral, a label or a

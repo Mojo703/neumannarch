@@ -1,4 +1,4 @@
-use probe_sim::{Retention, Tick};
+use neumannarch_sim::{Retention, Tick};
 
 pub const ACKNOWLEDGE_INTERVAL: u64 = 16;
 

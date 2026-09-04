@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Pos2};
-use probe_sim::roster::Roster;
-use probe_sim::{RockId, RowId, SeatId};
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::{RockId, RowId, SeatId};
 
 use crate::display::ease;
 use crate::display::scene::{Hover, Scene, Shown, WheelBand};
@@ -278,7 +278,7 @@ fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<Ro
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::FRIGATE;
+    use neumannarch_sim::roster::FRIGATE;
 
     use super::*;
     use crate::display::scene::{Entry, RowView, SectorView, WheelView};

@@ -1,4 +1,4 @@
-# Probe Game — design
+# Neumannarch — design
 
 The rules of the game, as the target. This document is the authority on what
 the simulation computes; ARCHITECTURE.md is the authority on how the code is
@@ -8,6 +8,15 @@ roster in `sim`, never here. Distances are metres, times seconds and
 rates per second throughout. The roster is the table of rows a match is
 played with; a row is one kind of entity, a ship or a structure, with its
 stats; a want is a count of a row a player asks for at a rock.
+
+## Fantasy
+
+Each player is a von Neumann probe that has entered an uninhabited
+system, arriving alongside probes sent by other countries, and fights
+them for supremacy in the system. The probe's payload is its reserve, a
+shipyard and a constructor; every builder is the probe replicating
+itself from the system's rocks; a faction is the country that sent the
+probe; the win is holding the system when the clock runs out.
 
 ## Pillars
 

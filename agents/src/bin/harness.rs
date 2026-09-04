@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use probe_agents::{Mix, Personality, Scripted, Seated};
-use probe_protocol::Record;
-use probe_sim::belt::Belt;
-use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
-use probe_sim::state::standings::Standings;
-use probe_sim::state::{Batch, Command, Issued, Seat, State};
-use probe_sim::{
+use neumannarch_agents::{Mix, Personality, Scripted, Seated};
+use neumannarch_protocol::Record;
+use neumannarch_sim::belt::Belt;
+use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
+use neumannarch_sim::state::standings::Standings;
+use neumannarch_sim::state::{Batch, Command, Issued, Seat, State};
+use neumannarch_sim::{
     EntityId, Materials, Real, Retention, RockId, RowId, SeatId, Session, Setup, Stamped,
     TICKS_PER_SECOND, TeamId, Tick, WINDOW_SECONDS,
 };

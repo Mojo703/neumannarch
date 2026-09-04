@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use crate::net::listener::NoListener;
 
-pub struct Listener(probe_server::Hosted);
+pub struct Listener(neumannarch_server::Hosted);
 
 impl Listener {
     pub fn address(&self) -> String {
@@ -12,12 +12,12 @@ impl Listener {
     pub fn opened() -> Result<Listener, NoListener> {
         Listener::serving(SocketAddr::from((
             [0, 0, 0, 0],
-            probe_protocol::DEFAULT_PORT,
+            neumannarch_protocol::DEFAULT_PORT,
         )))
     }
 
     pub fn serving(address: SocketAddr) -> Result<Listener, NoListener> {
-        probe_server::Hosted::serving(address)
+        neumannarch_server::Hosted::serving(address)
             .map(Listener)
             .map_err(|_| NoListener::PortHeld)
     }

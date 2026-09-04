@@ -1,8 +1,8 @@
 [package]
-name = "probe-sim"
+name = "neumannarch-sim"
 version.workspace = true
 edition.workspace = true
-description = "The deterministic lockstep simulation of Probe Game"
+description = "The deterministic lockstep simulation of Neumannarch"
 
 [dependencies]
 libm = "0.2"

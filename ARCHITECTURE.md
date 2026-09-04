@@ -1,4 +1,4 @@
-# Probe Game — architecture
+# Neumannarch — architecture
 
 How the code is shaped. This document describes the target; it never
 records interim status. DESIGN.md is the authority on the rules the sim
@@ -38,21 +38,21 @@ document.
 ## Crates
 
 ```
-sim/       probe-sim       the state system: state, rules, orbit, roster,
+sim/       neumannarch-sim       the state system: state, rules, orbit, roster,
                            belt, and history (snapshots, the stamped log,
                            rewind, settling, replay); no engine, both
                            targets
-protocol/  probe-protocol  every value two machines exchange, defined in
+protocol/  neumannarch-protocol  every value two machines exchange, defined in
                            Protocol below; serialisable; no io; both
                            targets
-agents/    probe-agents    the agent frontend: the Agent trait, the
+agents/    neumannarch-agents    the agent frontend: the Agent trait, the
                            scripted opponent, the personality a lobby's
                            bot plays by; bin: `harness`, native only
-game/      probe-game      the player frontend: display/, net/, screens/;
+game/      neumannarch-game      the player frontend: display/, net/, screens/;
                            bin: the playable on Mirage; `look`, behind a
                            `look` feature, synthetic scenes through the
                            engine's offscreen Session to screenshots
-server/    probe-server    the match server: rooms, lobby authority,
+server/    neumannarch-server    the match server: rooms, lobby authority,
                            forwarding, records; a library `game` embeds
                            on native to host, and a binary; native only
 ```
@@ -807,9 +807,9 @@ engine's `offscreen` feature and its default `ui` feature so the HUD
 lands in the pixels. It holds the three fixed scenes from DISPLAY.md as
 code, renders each through a `Session`, reads pixels back, and writes
 PNGs under `game/look/`, which is `.gitignore`d: screenshots are the
-judgement's input, never committed. `cargo run -p probe-game --features
+judgement's input, never committed. `cargo run -p neumannarch-game --features
 look --bin look` runs it; `check.sh` builds it, with `cargo build -p
-probe-game --features look --all-targets`, and runs the playable's own
+neumannarch-game --features look --all-targets`, and runs the playable's own
 drive under `xvfb-run`, so the default binary and the wasm build never
 pull `image` or `offscreen`. It is the only way a display change is
 verified.

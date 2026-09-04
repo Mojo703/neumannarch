@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use probe_sim::roster::{Kind, Roster};
-use probe_sim::state::view::View;
-use probe_sim::{RockId, Tick};
+use neumannarch_sim::roster::{Kind, Roster};
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::{RockId, Tick};
 
 const CLAIM_PATIENCE: f64 = 90.0;
 

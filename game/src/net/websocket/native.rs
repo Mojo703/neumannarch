@@ -1,7 +1,7 @@
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
 use futures_util::{SinkExt, StreamExt};
-use probe_protocol::WIRE_CAP;
+use neumannarch_protocol::WIRE_CAP;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::Message as Frame;
@@ -37,7 +37,7 @@ impl WebSocket {
         let (tx, tx_source) = unbounded_channel();
         let (rx_source, rx) = channel();
         let closed = std::thread::Builder::new()
-            .name("probe-socket".to_string())
+            .name("neumannarch-socket".to_string())
             .spawn(move || handler(url, tx_source, rx_source))
             .is_err();
         WebSocket { tx, rx, closed }

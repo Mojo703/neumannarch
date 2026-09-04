@@ -1,7 +1,7 @@
-use probe_protocol::{Crew, Relayed, Started};
-use probe_sim::state::view::View;
-use probe_sim::step::fire::Shots;
-use probe_sim::{Retention, Rewound, SeatId, Session, Tick};
+use neumannarch_protocol::{Crew, Relayed, Started};
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::step::fire::Shots;
+use neumannarch_sim::{Retention, Rewound, SeatId, Session, Tick};
 
 use crate::net::controller::{Controller, Human};
 use crate::net::pace::{ACKNOWLEDGE_INTERVAL, Allowed, Pace, REPORT_INTERVAL};
@@ -178,7 +178,7 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Bot, Holder, Lobby, LobbyEdit, PlayerId};
+    use neumannarch_protocol::{Bot, Holder, Lobby, LobbyEdit, PlayerId};
 
     use super::*;
     use crate::net::local::Local;

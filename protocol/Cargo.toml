@@ -1,12 +1,12 @@
 [package]
-name = "probe-protocol"
+name = "neumannarch-protocol"
 version.workspace = true
 edition.workspace = true
-description = "Every value two machines of Probe Game exchange"
+description = "Every value two machines of Neumannarch exchange"
 
 [dependencies]
 ciborium = "0.2.2"
-probe-sim = { path = "../sim" }
+neumannarch-sim = { path = "../sim" }
 serde = { version = "1.0.229", features = ["derive"] }
 
 [lints]

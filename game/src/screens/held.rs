@@ -1,5 +1,5 @@
 use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
-use probe_sim::{SeatId, Tick};
+use neumannarch_sim::{SeatId, Tick};
 
 use crate::display::glyph_quad::seat_color32;
 use crate::screens::control::{Controls, Rule};

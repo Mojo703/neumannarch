@@ -1,6 +1,6 @@
-use probe_sim::roster::Roster;
-use probe_sim::state::Command;
-use probe_sim::state::view::View;
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::state::Command;
+use neumannarch_sim::state::view::View;
 
 use crate::commitments::Commitments;
 use crate::personality::Personality;
@@ -50,12 +50,12 @@ impl Agent for Scripted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::belt::Belt;
-    use probe_sim::roster::{CONSTRUCTOR, SHIPYARD};
-    use probe_sim::state::{Batch, Command, Seat, State};
-    use probe_sim::state::{Rock, view::View};
-    use probe_sim::step::fire::Shots;
-    use probe_sim::{Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Tick};
+    use neumannarch_sim::belt::Belt;
+    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::state::{Batch, Command, Seat, State};
+    use neumannarch_sim::state::{Rock, view::View};
+    use neumannarch_sim::step::fire::Shots;
+    use neumannarch_sim::{Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Tick};
 
     use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION};
 

@@ -1,5 +1,5 @@
-use probe_protocol::Relayed;
-use probe_sim::{SeatId, Stamped, Tick};
+use neumannarch_protocol::Relayed;
+use neumannarch_sim::{SeatId, Stamped, Tick};
 
 pub trait Transport {
     fn send(&mut self, stamped: Stamped);

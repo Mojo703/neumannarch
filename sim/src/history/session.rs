@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "cost report: cargo test -p probe-sim --release -- --ignored --nocapture"]
+    #[ignore = "cost report: cargo test -p neumannarch-sim --release -- --ignored --nocapture"]
     fn the_worst_rewind_the_window_allows_fits_the_budget() {
         let span = Retention::shipped().span();
         let mut session =

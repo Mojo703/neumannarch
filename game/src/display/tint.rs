@@ -1,6 +1,6 @@
 use mirage_engine::Color;
 use mirage_engine::egui::Color32;
-use probe_sim::Materials;
+use neumannarch_sim::Materials;
 
 const MATERIAL_COLOURS: [Color; 3] = [
     Color::rgb(0.62, 0.64, 0.70),

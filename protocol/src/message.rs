@@ -1,4 +1,4 @@
-use probe_sim::{SeatId, Stamped, Tick};
+use neumannarch_sim::{SeatId, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
@@ -44,8 +44,8 @@ pub enum Message {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::state::{Command, Issued};
-    use probe_sim::{RockId, RowId, TeamId};
+    use neumannarch_sim::state::{Command, Issued};
+    use neumannarch_sim::{RockId, RowId, TeamId};
 
     use super::*;
     use crate::lobby::Holder;

@@ -93,7 +93,7 @@ impl Title {
     pub fn opening() -> Title {
         Title {
             address: Field::holding(
-                &format!("{LOOPBACK}:{}", probe_protocol::DEFAULT_PORT),
+                &format!("{LOOPBACK}:{}", neumannarch_protocol::DEFAULT_PORT),
                 Allow::Text(MAX_ADDRESS),
             ),
         }

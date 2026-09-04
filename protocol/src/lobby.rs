@@ -1,6 +1,6 @@
 use core::ops::RangeInclusive;
 
-use probe_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Tick};
+use neumannarch_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
@@ -663,16 +663,16 @@ mod tests {
             )
             .expect("the host adds a bot");
 
-        let seats: Vec<Option<probe_sim::SeatId>> =
+        let seats: Vec<Option<neumannarch_sim::SeatId>> =
             (0..MAX_SLOTS + 1).map(|slot| lobby.seat_of(slot)).collect();
 
         assert_eq!(
             seats,
             [
                 None,
-                Some(probe_sim::SeatId(0)),
+                Some(neumannarch_sim::SeatId(0)),
                 None,
-                Some(probe_sim::SeatId(1)),
+                Some(neumannarch_sim::SeatId(1)),
                 None
             ]
         );

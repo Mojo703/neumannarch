@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use probe_sim::state::view::View;
-use probe_sim::{RockId, SeatId, TICKS_PER_SECOND, Tick};
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::{RockId, SeatId, TICKS_PER_SECOND, Tick};
 
 use crate::display::scene::Arc;
 
@@ -93,12 +93,12 @@ fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::belt::Belt;
-    use probe_sim::orbit::Body;
-    use probe_sim::state::Standings;
-    use probe_sim::state::view::{Berth, Present};
-    use probe_sim::step::fire::Exchange;
-    use probe_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
+    use neumannarch_sim::belt::Belt;
+    use neumannarch_sim::orbit::Body;
+    use neumannarch_sim::state::Standings;
+    use neumannarch_sim::state::view::{Berth, Present};
+    use neumannarch_sim::step::fire::Exchange;
+    use neumannarch_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
 
     use super::*;
 

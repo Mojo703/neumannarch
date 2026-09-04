@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::thread::JoinHandle;
 
 use futures_util::{SinkExt, StreamExt};
-use probe_protocol::{Codec, MAX_SLOTS, Message, PlayerId, Request, WIRE_CAP};
+use neumannarch_protocol::{Codec, MAX_SLOTS, Message, PlayerId, Request, WIRE_CAP};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
@@ -52,7 +52,7 @@ impl Hosted {
         let address = listener.local_addr()?;
         let (stop, stopped) = oneshot::channel();
         let thread = std::thread::Builder::new()
-            .name("probe-room".to_string())
+            .name("neumannarch-room".to_string())
             .spawn(move || {
                 let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

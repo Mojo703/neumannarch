@@ -1,9 +1,9 @@
 use mirage_engine::egui::{Align2, Pos2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use probe_protocol::{Crew, Lobby, Started};
-use probe_sim::Tick;
-use probe_sim::belt::Belt;
+use neumannarch_protocol::{Crew, Lobby, Started};
+use neumannarch_sim::Tick;
+use neumannarch_sim::belt::Belt;
 
 use crate::display::camera::BeltCamera;
 use crate::display::glyph_quad::GlyphQuad;

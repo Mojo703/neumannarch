@@ -1,9 +1,9 @@
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
-use probe_game::controls::Controls;
-use probe_game::display::glyph_quad::GlyphQuad;
-use probe_game::screens::flow::Flow;
+use neumannarch_game::controls::Controls;
+use neumannarch_game::display::glyph_quad::GlyphQuad;
+use neumannarch_game::screens::flow::Flow;
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
@@ -11,9 +11,9 @@ const WINDOW: UVec2 = UVec2::new(1280, 720);
 
 fn main() {
     run(
-        Config::new("Probe Game")
+        Config::new("Neumannarch")
             .with_size(WINDOW.x, WINDOW.y)
-            .with_tick_interval(probe_sim::TICK),
+            .with_tick_interval(neumannarch_sim::TICK),
         |_| Ok(Probe::new()),
     );
 }
@@ -53,16 +53,16 @@ mod tests {
     use mirage_engine::egui;
     use mirage_engine::headless::Session as Offscreen;
     use mirage_engine::math::Vec2;
-    use probe_game::display::ease;
-    use probe_game::display::scene::WheelBand;
-    use probe_game::display::viewport::Viewport;
-    use probe_game::display::wheels::Still;
-    use probe_game::screens::flow::Screen;
-    use probe_game::screens::play::Play;
-    use probe_game::screens::{control, lobby, title};
-    use probe_protocol::Notice;
-    use probe_sim::roster::SHIPYARD;
-    use probe_sim::{RockId, RowId};
+    use neumannarch_game::display::ease;
+    use neumannarch_game::display::scene::WheelBand;
+    use neumannarch_game::display::viewport::Viewport;
+    use neumannarch_game::display::wheels::Still;
+    use neumannarch_game::screens::flow::Screen;
+    use neumannarch_game::screens::play::Play;
+    use neumannarch_game::screens::{control, lobby, title};
+    use neumannarch_protocol::Notice;
+    use neumannarch_sim::roster::SHIPYARD;
+    use neumannarch_sim::{RockId, RowId};
 
     use super::*;
 
@@ -82,7 +82,7 @@ mod tests {
 
     fn game() -> Offscreen<Probe> {
         Offscreen::new(
-            Config::new("probe-play").with_tick_interval(probe_sim::TICK),
+            Config::new("neumannarch-play").with_tick_interval(neumannarch_sim::TICK),
             TARGET,
             |_| Ok(Probe::new()),
         )
@@ -103,7 +103,7 @@ mod tests {
         }
     }
 
-    fn lobby(session: &Offscreen<Probe>) -> Option<&probe_protocol::Lobby> {
+    fn lobby(session: &Offscreen<Probe>) -> Option<&neumannarch_protocol::Lobby> {
         match session.game().flow.stage() {
             Screen::Lobby { screen, .. } => Some(screen.lobby()),
             _ => None,
@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn settled(session: &mut Offscreen<Probe>) {
-        let ticks = (ease::SPAN_SECONDS / probe_sim::TICK.as_secs_f64()).ceil() as u64;
+        let ticks = (ease::SPAN_SECONDS / neumannarch_sim::TICK.as_secs_f64()).ceil() as u64;
         advance(session, ticks);
         session.step();
     }
@@ -213,7 +213,7 @@ mod tests {
 
         assert_eq!(
             lobby(&session).expect("still the lobby").slots()[1].team,
-            probe_sim::TeamId(2)
+            neumannarch_sim::TeamId(2)
         );
     }
 
@@ -243,20 +243,20 @@ mod tests {
         click_at(&mut session, title::Places::over(window()).host.center());
         stepped_until(&mut session, |session| lobby(session).is_some());
 
-        let mut guest = probe_game::net::connection::Connection::joining(&format!(
+        let mut guest = neumannarch_game::net::connection::Connection::joining(&format!(
             "127.0.0.1:{}",
-            probe_protocol::DEFAULT_PORT
+            neumannarch_protocol::DEFAULT_PORT
         ));
         stepped_until(&mut session, |session| {
             lobby(session)
-                .is_some_and(|lobby| lobby.slot_of(probe_protocol::PlayerId(1)) == Some(1))
+                .is_some_and(|lobby| lobby.slot_of(neumannarch_protocol::PlayerId(1)) == Some(1))
         });
 
         let kick = lobby_places(&session).rows[1].kick;
         click_at(&mut session, kick.center());
         stepped_until(&mut session, |session| {
             lobby(session)
-                .is_some_and(|lobby| lobby.slots()[1].holder == probe_protocol::Holder::Open)
+                .is_some_and(|lobby| lobby.slots()[1].holder == neumannarch_protocol::Holder::Open)
         });
 
         let mut notices = Vec::new();
@@ -283,17 +283,20 @@ mod tests {
         );
         let opened = lobby(&session).expect("Skirmish opens a lobby").clone();
         assert!(
-            matches!(opened.slots()[1].holder, probe_protocol::Holder::Bot(_)),
+            matches!(
+                opened.slots()[1].holder,
+                neumannarch_protocol::Holder::Bot(_)
+            ),
             "a skirmish seats a bot in seat one"
         );
-        assert_eq!(opened.seat_of(1), Some(probe_sim::SeatId(1)));
+        assert_eq!(opened.seat_of(1), Some(neumannarch_sim::SeatId(1)));
 
         let clock = lobby_places(&session).clock;
         click_at(&mut session, clock.center());
         save(&session, "lobby");
         click_at(&mut session, control::list_row(clock, 0).center());
         let shortest = lobby(&session).expect("still the lobby").clock();
-        assert_eq!(shortest, *probe_protocol::CLOCK_RANGE.start());
+        assert_eq!(shortest, *neumannarch_protocol::CLOCK_RANGE.start());
 
         let act = lobby_places(&session).act;
         click_at(&mut session, act.center());
@@ -301,7 +304,7 @@ mod tests {
         session.step();
         let started = play(&session);
         assert_eq!(started.session().state().clock(), shortest);
-        assert_eq!(started.seat(), probe_sim::SeatId(0));
+        assert_eq!(started.seat(), neumannarch_sim::SeatId(0));
 
         placed(&mut session);
         paused(&mut session);

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use probe_sim::roster::{Kind, Roster};
-use probe_sim::state::view::View;
-use probe_sim::state::{Command, MAX_WANT};
-use probe_sim::{RockId, RowId};
+use neumannarch_sim::roster::{Kind, Roster};
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::state::{Command, MAX_WANT};
+use neumannarch_sim::{RockId, RowId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sending {
@@ -83,7 +83,7 @@ fn wanted(view: &View, rock: RockId, row: RowId) -> u32 {
 mod tests {
     use super::*;
     use crate::display::local::Local;
-    use probe_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
 
     fn rock(at: u32) -> RockId {
         RockId(at)

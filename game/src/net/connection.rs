@@ -1,5 +1,5 @@
-use probe_protocol::{Codec, Message, Notice, Relayed, Request};
-use probe_sim::{SeatId, Stamped, Tick};
+use neumannarch_protocol::{Codec, Message, Notice, Relayed, Request};
+use neumannarch_sim::{SeatId, Stamped, Tick};
 
 use crate::net::transport::Transport;
 use crate::net::websocket::WebSocket;
@@ -33,7 +33,7 @@ impl Connection {
             relayed: Vec::new(),
         };
         socket.request(Request::Join {
-            version: probe_protocol::VERSION,
+            version: neumannarch_protocol::VERSION,
         });
         socket
     }

@@ -857,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "cost report: cargo test -p probe-sim --release -- --ignored --nocapture"]
+    #[ignore = "cost report: cargo test -p neumannarch-sim --release -- --ignored --nocapture"]
     fn one_tick_of_a_crowded_rock_fits_the_budget() {
         for units in [100u32, 1000] {
             let mut world = World::started(&[TeamId(0), TeamId(1)]);

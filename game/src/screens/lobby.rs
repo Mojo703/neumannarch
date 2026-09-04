@@ -1,10 +1,10 @@
 use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use probe_agents::Personality;
-use probe_protocol::{Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
-use probe_sim::belt::Belt;
-use probe_sim::{TICKS_PER_SECOND, TeamId, Tick};
+use neumannarch_agents::Personality;
+use neumannarch_protocol::{Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
+use neumannarch_sim::belt::Belt;
+use neumannarch_sim::{TICKS_PER_SECOND, TeamId, Tick};
 
 use crate::controls::Button;
 use crate::display::camera::BeltCamera;
@@ -377,7 +377,7 @@ impl LobbyScreen {
         )
     }
 
-    pub(crate) fn start_reason(&self, why: probe_protocol::NotReady) -> String {
+    pub(crate) fn start_reason(&self, why: neumannarch_protocol::NotReady) -> String {
         let team = |slot: usize| {
             self.lobby
                 .slots()
@@ -385,12 +385,12 @@ impl LobbyScreen {
                 .map_or_else(|| "a seat".to_string(), |slot| team_name(slot.team))
         };
         match why {
-            probe_protocol::NotReady::NoSeats => "No seats".to_string(),
-            probe_protocol::NotReady::OpenSeat { slot }
-            | probe_protocol::NotReady::Unready { slot } => {
+            neumannarch_protocol::NotReady::NoSeats => "No seats".to_string(),
+            neumannarch_protocol::NotReady::OpenSeat { slot }
+            | neumannarch_protocol::NotReady::Unready { slot } => {
                 format!("Waiting for {}", team(slot))
             }
-            probe_protocol::NotReady::HostUnseated => NO_SEAT.to_string(),
+            neumannarch_protocol::NotReady::HostUnseated => NO_SEAT.to_string(),
         }
     }
 
@@ -661,7 +661,7 @@ mod tests {
         assert!(
             CLOCKS
                 .iter()
-                .all(|clock| probe_protocol::CLOCK_RANGE.contains(clock))
+                .all(|clock| neumannarch_protocol::CLOCK_RANGE.contains(clock))
         );
     }
 

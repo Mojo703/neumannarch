@@ -1,4 +1,6 @@
-use probe_protocol::{Lobby, LobbyEdit, Message, Notice, PlayerId, Refused, Relayed, Request};
+use neumannarch_protocol::{
+    Lobby, LobbyEdit, Message, Notice, PlayerId, Refused, Relayed, Request,
+};
 
 use crate::forwarding::Forwarding;
 use crate::records::Records;
@@ -76,7 +78,7 @@ impl Room {
     }
 
     pub fn join(&mut self, version: u32) -> Result<Joined, Notice> {
-        if version != probe_protocol::VERSION {
+        if version != neumannarch_protocol::VERSION {
             return Err(Notice::Version);
         }
         let player = self.next;
@@ -264,10 +266,10 @@ impl Outbound {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Bot, Holder, Lobby};
-    use probe_sim::roster::SHIPYARD;
-    use probe_sim::state::{Command, Issued};
-    use probe_sim::{RockId, SeatId, Stamped, TeamId, Tick};
+    use neumannarch_protocol::{Bot, Holder, Lobby};
+    use neumannarch_sim::roster::SHIPYARD;
+    use neumannarch_sim::state::{Command, Issued};
+    use neumannarch_sim::{RockId, SeatId, Stamped, TeamId, Tick};
 
     use super::*;
 
@@ -298,13 +300,13 @@ mod tests {
     fn joined() -> Room {
         let mut room = Room::opened();
         assert_eq!(
-            room.join(probe_protocol::VERSION)
+            room.join(neumannarch_protocol::VERSION)
                 .map(|joined| joined.player),
             Ok(PlayerId::HOST),
             "the first machine in hosts"
         );
         assert_eq!(
-            room.join(probe_protocol::VERSION)
+            room.join(neumannarch_protocol::VERSION)
                 .map(|joined| joined.player),
             Ok(GUEST)
         );
@@ -501,7 +503,7 @@ mod tests {
         let mut room = joined();
 
         assert_eq!(
-            room.join(probe_protocol::VERSION).err(),
+            room.join(neumannarch_protocol::VERSION).err(),
             Some(Notice::Full),
             "a room opens one seat beside the host's, and both are held"
         );
@@ -510,7 +512,7 @@ mod tests {
                 &room.receive(
                     PlayerId::HOST,
                     Message::Request(Request::Join {
-                        version: probe_protocol::VERSION
+                        version: neumannarch_protocol::VERSION
                     })
                 ),
                 Recipient::Sender
@@ -525,7 +527,7 @@ mod tests {
         let mut room = Room::opened();
 
         assert_eq!(
-            room.join(probe_protocol::VERSION + 1).err(),
+            room.join(neumannarch_protocol::VERSION + 1).err(),
             Some(Notice::Version)
         );
         assert!(room.members().is_empty(), "and is not taken in");
@@ -561,7 +563,7 @@ mod tests {
             "a machine the room has removed changes nothing"
         );
         assert_eq!(
-            room.join(probe_protocol::VERSION)
+            room.join(neumannarch_protocol::VERSION)
                 .map(|joined| joined.player),
             Ok(PlayerId(2)),
             "and another machine may take the slot"

@@ -1917,6 +1917,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "neumannarch-agents"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "neumannarch-protocol",
+ "neumannarch-sim",
+]
+
+[[package]]
+name = "neumannarch-game"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "image",
+ "js-sys",
+ "mirage-engine",
+ "neumannarch-agents",
+ "neumannarch-protocol",
+ "neumannarch-server",
+ "neumannarch-sim",
+ "tokio",
+ "tokio-tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "neumannarch-protocol"
+version = "0.1.0"
+dependencies = [
+ "ciborium",
+ "neumannarch-sim",
+ "serde",
+]
+
+[[package]]
+name = "neumannarch-server"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "neumannarch-protocol",
+ "neumannarch-sim",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "neumannarch-sim"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "serde",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2557,61 +2612,6 @@ name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
-
-[[package]]
-name = "probe-agents"
-version = "0.1.0"
-dependencies = [
- "libm",
- "probe-protocol",
- "probe-sim",
-]
-
-[[package]]
-name = "probe-game"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "image",
- "js-sys",
- "mirage-engine",
- "probe-agents",
- "probe-protocol",
- "probe-server",
- "probe-sim",
- "tokio",
- "tokio-tungstenite",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "probe-protocol"
-version = "0.1.0"
-dependencies = [
- "ciborium",
- "probe-sim",
- "serde",
-]
-
-[[package]]
-name = "probe-server"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "probe-protocol",
- "probe-sim",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "probe-sim"
-version = "0.1.0"
-dependencies = [
- "libm",
- "serde",
-]
 
 [[package]]
 name = "proc-macro-crate"

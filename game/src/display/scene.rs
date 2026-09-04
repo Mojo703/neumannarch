@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use probe_sim::belt::Belt;
-use probe_sim::orbit::Gravity;
-use probe_sim::roster::Roster;
-use probe_sim::state::view::{Berth, Building, View};
-use probe_sim::state::{Held, MAX_WANT, Rock};
-use probe_sim::{Material, Materials, RockId, RowId, SeatId, Tick, Vec3};
+use neumannarch_sim::belt::Belt;
+use neumannarch_sim::orbit::Gravity;
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::state::view::{Berth, Building, View};
+use neumannarch_sim::state::{Held, MAX_WANT, Rock};
+use neumannarch_sim::{Material, Materials, RockId, RowId, SeatId, Tick, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
@@ -489,8 +489,8 @@ fn builds_at(view: &View, rock: RockId, seat: SeatId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
-    use probe_sim::state::Send;
+    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
+    use neumannarch_sim::state::Send;
 
     use super::*;
     use crate::display::local::{Local, PLAYER, RIVAL};

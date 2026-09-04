@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use mirage_engine::egui;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
-use probe_protocol::Lobby;
-use probe_sim::state::Command;
-use probe_sim::state::view::View;
-use probe_sim::{RockId, RowId, SeatId, Session, Vec3};
+use neumannarch_protocol::Lobby;
+use neumannarch_sim::state::Command;
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::{RockId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
@@ -189,7 +189,7 @@ impl Play {
         }
         self.fights.observe(&self.view);
         self.camera
-            .advance(probe_sim::TICK.as_secs_f64(), self.view.gravity);
+            .advance(neumannarch_sim::TICK.as_secs_f64(), self.view.gravity);
         self.follow_the_first_placement();
     }
 
@@ -278,7 +278,7 @@ impl Play {
         )
     }
 
-    fn roster(&self) -> &probe_sim::roster::Roster {
+    fn roster(&self) -> &neumannarch_sim::roster::Roster {
         self.machine.session().state().roster()
     }
 
@@ -559,7 +559,7 @@ impl Repeat {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Lobby, PlayerId};
+    use neumannarch_protocol::{Lobby, PlayerId};
 
     use super::*;
     use crate::net::local::Local;

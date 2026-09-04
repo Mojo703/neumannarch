@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use probe_sim::roster::{Kind, Roster, Row};
-use probe_sim::state::view::{Present, View};
-use probe_sim::{Materials, RockId, RowId};
+use neumannarch_sim::roster::{Kind, Roster, Row};
+use neumannarch_sim::state::view::{Present, View};
+use neumannarch_sim::{Materials, RockId, RowId};
 
 use crate::roles::Roles;
 

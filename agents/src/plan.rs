@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use probe_sim::roster::Roster;
-use probe_sim::state::view::View;
-use probe_sim::state::{Command, MAX_WANT};
-use probe_sim::{Materials, RockId, RowId};
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::state::{Command, MAX_WANT};
+use neumannarch_sim::{Materials, RockId, RowId};
 
 use crate::commitments::Commitments;
 use crate::dice::Dice;
@@ -304,7 +304,7 @@ fn covers(budget: Materials, cost: Materials) -> bool {
 fn is_structure(roster: &Roster, row: RowId) -> bool {
     roster
         .get(row)
-        .is_some_and(|row| row.kind() == probe_sim::roster::Kind::Structure)
+        .is_some_and(|row| row.kind() == neumannarch_sim::roster::Kind::Structure)
 }
 
 fn first(rows: &[RowId]) -> impl Iterator<Item = RowId> + '_ {
@@ -445,12 +445,12 @@ fn nearest(survey: &Survey, rocks: &[RockId]) -> Option<RockId> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use probe_sim::belt::Belt;
-    use probe_sim::roster::{RAIDER, SHIPYARD};
-    use probe_sim::state::view::View;
-    use probe_sim::state::{Batch, Issued, Seat, State};
-    use probe_sim::step::fire::Shots;
-    use probe_sim::{Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick};
+    use neumannarch_sim::belt::Belt;
+    use neumannarch_sim::roster::{RAIDER, SHIPYARD};
+    use neumannarch_sim::state::view::View;
+    use neumannarch_sim::state::{Batch, Issued, Seat, State};
+    use neumannarch_sim::step::fire::Shots;
+    use neumannarch_sim::{Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick};
 
     use super::*;
     use crate::personality::Personality;

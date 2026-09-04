@@ -1,7 +1,7 @@
 use mirage_engine::Camera;
 use mirage_engine::egui::{self, Pos2};
 use mirage_engine::math::{self, UVec2, Vec2};
-use probe_sim::Vec3;
+use neumannarch_sim::Vec3;
 
 use crate::display::camera::BeltCamera;
 

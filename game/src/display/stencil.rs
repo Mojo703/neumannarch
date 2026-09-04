@@ -1,5 +1,5 @@
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
-use probe_sim::Material;
+use neumannarch_sim::Material;
 
 use crate::display::glyph::{self, Glyph, Primitive};
 use crate::display::hue;

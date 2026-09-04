@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use probe_protocol::{Message, PlayerId, Record, Relayed, Seating, Started};
-use probe_sim::{SeatId, Setup, Stamped, Tick};
+use neumannarch_protocol::{Message, PlayerId, Record, Relayed, Seating, Started};
+use neumannarch_sim::{SeatId, Setup, Stamped, Tick};
 
 use crate::records::Log;
 use crate::rooms::{Outbound, Recipient};

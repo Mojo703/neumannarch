@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use probe_protocol::Record;
-use probe_sim::state::Batch;
-use probe_sim::{Refused, Setup, Stamped, Tick};
+use neumannarch_protocol::Record;
+use neumannarch_sim::state::Batch;
+use neumannarch_sim::{Refused, Setup, Stamped, Tick};
 
 const KEPT_MATCHES: usize = 16;
 

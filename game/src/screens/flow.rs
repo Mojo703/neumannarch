@@ -1,7 +1,7 @@
 use mirage_engine::egui;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use probe_protocol::{Lobby, LobbyEdit, Notice, PlayerId, Request, Started};
+use neumannarch_protocol::{Lobby, LobbyEdit, Notice, PlayerId, Request, Started};
 
 use crate::controls::Button;
 use crate::display::glyph_quad::GlyphQuad;

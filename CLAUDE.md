@@ -1,8 +1,8 @@
-# Probe Game — rules for working in this repo
+# Neumannarch — rules for working in this repo
 
 The overseer reads OVERSEER.md before anything else. Implementation agents do not.
 
-Probe Game is a two-to-four-player space RTS: a deterministic lockstep
+Neumannarch is a two-to-four-player space RTS: a deterministic lockstep
 simulation of ships, structures and asteroids, played through one verb, on
 the Mirage engine (a path dependency at `../../mirage-renderer`) for desktop
 and the browser. **Read DESIGN.md before writing sim code and DISPLAY.md

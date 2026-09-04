@@ -1,4 +1,4 @@
-use probe_sim::{SeatId, Setup};
+use neumannarch_sim::{SeatId, Setup};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;

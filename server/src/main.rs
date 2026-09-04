@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
-use probe_protocol::DEFAULT_PORT;
-use probe_server::Hosted;
+use neumannarch_protocol::DEFAULT_PORT;
+use neumannarch_server::Hosted;
 
 fn main() {
     let asked = std::env::args().nth(1);

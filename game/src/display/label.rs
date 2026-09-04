@@ -12,10 +12,10 @@ pub fn is_a_phrase(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::{Bot, Holder, Lobby, PlayerId, Refused};
-    use probe_sim::roster::{FRIGATE, Roster};
-    use probe_sim::state::view::Building;
-    use probe_sim::{Material, RockId, TeamId, Tick};
+    use neumannarch_protocol::{Bot, Holder, Lobby, PlayerId, Refused};
+    use neumannarch_sim::roster::{FRIGATE, Roster};
+    use neumannarch_sim::state::view::Building;
+    use neumannarch_sim::{Material, RockId, TeamId, Tick};
 
     use super::*;
     use crate::display::scene::{Entry, WheelBand};
@@ -112,10 +112,10 @@ mod tests {
             Refused::HeldByAGuest,
         ];
         let unready = [
-            probe_protocol::NotReady::NoSeats,
-            probe_protocol::NotReady::OpenSeat { slot: 1 },
-            probe_protocol::NotReady::Unready { slot: 1 },
-            probe_protocol::NotReady::HostUnseated,
+            neumannarch_protocol::NotReady::NoSeats,
+            neumannarch_protocol::NotReady::OpenSeat { slot: 1 },
+            neumannarch_protocol::NotReady::Unready { slot: 1 },
+            neumannarch_protocol::NotReady::HostUnseated,
         ];
         let holders = [
             Holder::Open,

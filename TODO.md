@@ -1,4 +1,4 @@
-# Probe Game — project state (overseer-facing)
+# Neumannarch — project state (overseer-facing)
 
 Present and future tense only: operational constraints, pending work,
 settled decisions. An in-flight milestone gets one entry, deleted when
@@ -465,7 +465,7 @@ step/mod.rs and history/session.rs move.
 - The engine is a path dependency at `../../mirage-renderer`; its wgpu 29
   and egui 0.35 pin is its own concern. Its verification recipes are in
   `docs/verifying.md` there.
-- The prototype from the web sessions sits at `/tmp/probe-game-previous-work`
+- The prototype from the web sessions sits at `/tmp/neumannarch-game-previous-work`
   until the next reboot. The owner does not need it kept. Agents never read
   it.
 - Linear is not set up and is ignored for now (owner, 2026-09-03).

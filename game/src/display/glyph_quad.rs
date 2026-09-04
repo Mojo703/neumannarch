@@ -2,8 +2,8 @@ use mirage_engine::egui::Color32;
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::{Mesh, MeshData, Quad};
 use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
-use probe_sim::roster::Roster;
-use probe_sim::{MAX_SEATS, SeatId};
+use neumannarch_sim::roster::Roster;
+use neumannarch_sim::{MAX_SEATS, SeatId};
 
 use crate::display::glyph::{self, Frame, Glyph, Primitive, Size};
 
@@ -187,7 +187,7 @@ pub(crate) fn encode(colour: Color) -> [u8; 4] {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::Roster;
+    use neumannarch_sim::roster::Roster;
 
     use super::*;
 

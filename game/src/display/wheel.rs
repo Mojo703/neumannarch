@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
-use probe_sim::roster::{Kind, Roster, Row};
-use probe_sim::state::Command;
-use probe_sim::state::view::Building;
-use probe_sim::{RockId, RowId, SeatId};
+use neumannarch_sim::roster::{Kind, Roster, Row};
+use neumannarch_sim::state::Command;
+use neumannarch_sim::state::view::Building;
+use neumannarch_sim::{RockId, RowId, SeatId};
 
 use crate::display::glyph::{self, Glyph};
 use crate::display::glyph_quad::seat_color32;
@@ -856,8 +856,8 @@ const _: () = assert!(GLYPH_SLOT < SECTION_HEIGHT);
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::{FRIGATE, SHIPYARD};
-    use probe_sim::state::MAX_WANT;
+    use neumannarch_sim::roster::{FRIGATE, SHIPYARD};
+    use neumannarch_sim::state::MAX_WANT;
 
     use super::*;
     use crate::display::scene::RowView;
@@ -1337,7 +1337,7 @@ mod tests {
     fn a_starved_frame_speaks_before_the_want_it_fills() {
         let starved = Building {
             progress: 0.5,
-            starved_of: Some(probe_sim::Material::Metals),
+            starved_of: Some(neumannarch_sim::Material::Metals),
         };
         let wheel = wheel(
             vec![sector(

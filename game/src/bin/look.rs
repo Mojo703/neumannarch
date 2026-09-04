@@ -5,25 +5,25 @@ use mirage_engine::headless::Session;
 use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
-use probe_game::display::camera::BeltCamera;
-use probe_game::display::glyph::Glyph;
-use probe_game::display::glyph_quad::GlyphQuad;
-use probe_game::display::scene::{
+use neumannarch_game::display::camera::BeltCamera;
+use neumannarch_game::display::glyph::Glyph;
+use neumannarch_game::display::glyph_quad::GlyphQuad;
+use neumannarch_game::display::scene::{
     Arc, EntityView, Entry, FlightLine, Hover, RockView, RowView, Scene, SectorView, Shown,
     WheelBand, WheelView,
 };
-use probe_game::display::viewport::Viewport;
-use probe_game::display::wheels::{Aim, Still, Wheels};
-use probe_game::display::{belt, hud};
-use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD, STORAGE};
-use probe_sim::state::view::Building;
-use probe_sim::{Material, Materials, RockId, RowId, SeatId, Vec3};
+use neumannarch_game::display::viewport::Viewport;
+use neumannarch_game::display::wheels::{Aim, Still, Wheels};
+use neumannarch_game::display::{belt, hud};
+use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD, STORAGE};
+use neumannarch_sim::state::view::Building;
+use neumannarch_sim::{Material, Materials, RockId, RowId, SeatId, Vec3};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
-const ZONE: f64 = probe_sim::belt::Belt::ZONE_RADIUS_METERS;
+const ZONE: f64 = neumannarch_sim::belt::Belt::ZONE_RADIUS_METERS;
 
 fn glyph_of(row: RowId) -> Glyph {
     Glyph::of(&Roster::shipped()[row])
@@ -94,7 +94,7 @@ fn aim(scene: &Scene) -> Aim {
 
 fn render(scene: Scene, camera: BeltCamera) -> Vec<u8> {
     let mut session = Session::<Looker>::new(
-        Config::new("probe-look").with_tick_interval(probe_sim::TICK),
+        Config::new("neumannarch-look").with_tick_interval(neumannarch_sim::TICK),
         WINDOW,
         |_ctx| Ok(Looker { scene, camera }),
     )

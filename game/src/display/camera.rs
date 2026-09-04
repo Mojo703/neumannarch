@@ -2,8 +2,8 @@ use core::ops::{Range, RangeInclusive};
 
 use mirage_engine::math;
 use mirage_engine::{Camera, Projection, View};
-use probe_sim::Vec3;
-use probe_sim::orbit::Gravity;
+use neumannarch_sim::Vec3;
+use neumannarch_sim::orbit::Gravity;
 
 use crate::display::ease;
 
@@ -254,11 +254,12 @@ mod tests {
 
     #[test]
     fn the_widest_zoom_shows_two_rocks_of_the_shipped_belt() {
-        let rocks = probe_sim::belt::Belt::fixed(probe_sim::belt::Belt::GRAVITY);
+        let rocks = neumannarch_sim::belt::Belt::fixed(neumannarch_sim::belt::Belt::GRAVITY);
         let body = |at: usize| {
-            rocks[at]
-                .orbit()
-                .at(probe_sim::Tick::ZERO, probe_sim::belt::Belt::GRAVITY)
+            rocks[at].orbit().at(
+                neumannarch_sim::Tick::ZERO,
+                neumannarch_sim::belt::Belt::GRAVITY,
+            )
         };
         let (first, second) = (body(0), body(1));
         let camera = BeltCamera::new(first.pos, *BeltCamera::ZOOM_RANGE.end());

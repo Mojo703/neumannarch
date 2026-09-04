@@ -1,4 +1,4 @@
-use probe_sim::roster::{Kind, Row, Weapon};
+use neumannarch_sim::roster::{Kind, Row, Weapon};
 
 pub const HALF: f32 = 11.0;
 
@@ -184,8 +184,8 @@ impl Size {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::{Roster, Weights};
-    use probe_sim::{Materials, Real};
+    use neumannarch_sim::roster::{Roster, Weights};
+    use neumannarch_sim::{Materials, Real};
 
     use super::*;
 

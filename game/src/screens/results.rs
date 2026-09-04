@@ -1,10 +1,10 @@
 use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use probe_protocol::Lobby;
-use probe_sim::state::State;
-use probe_sim::state::standings::{Standings, Team};
-use probe_sim::{SeatId, TeamId};
+use neumannarch_protocol::Lobby;
+use neumannarch_sim::state::State;
+use neumannarch_sim::state::standings::{Standings, Team};
+use neumannarch_sim::{SeatId, TeamId};
 
 use crate::display::camera::BeltCamera;
 use crate::display::glyph::{self, Frame, Glyph, Size};

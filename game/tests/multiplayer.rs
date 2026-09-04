@@ -3,17 +3,17 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
-use probe_agents::{Personality, Scripted, Seated};
-use probe_game::net::connection::Connection;
-use probe_game::net::listener::Listener;
-use probe_game::net::machine::Machine;
-use probe_game::net::transport::Transport;
-use probe_protocol::{
+use neumannarch_agents::{Personality, Scripted, Seated};
+use neumannarch_game::net::connection::Connection;
+use neumannarch_game::net::listener::Listener;
+use neumannarch_game::net::machine::Machine;
+use neumannarch_game::net::transport::Transport;
+use neumannarch_protocol::{
     Bot, CLOCK_RANGE, Lobby, LobbyEdit, Notice, PlayerId, Relayed, Request, Started,
 };
-use probe_sim::roster::SHIPYARD;
-use probe_sim::state::{Command, Issued};
-use probe_sim::{RockId, SeatId, Stamped, Tick};
+use neumannarch_sim::roster::SHIPYARD;
+use neumannarch_sim::state::{Command, Issued};
+use neumannarch_sim::{RockId, SeatId, Stamped, Tick};
 
 const TICKS: u64 = 360;
 
@@ -206,7 +206,7 @@ fn seated(seat: SeatId, bot: Bot) -> Seated {
         seat,
         Box::new(Scripted::new(
             Personality::of(bot),
-            probe_sim::roster::Roster::shipped(),
+            neumannarch_sim::roster::Roster::shipped(),
         )),
     )
 }

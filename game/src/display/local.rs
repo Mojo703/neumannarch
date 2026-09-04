@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use probe_sim::state::Command;
-use probe_sim::state::view::View;
-use probe_sim::step::fire::Shots;
-use probe_sim::{
+use neumannarch_sim::state::Command;
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::step::fire::Shots;
+use neumannarch_sim::{
     Retention, RockId, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
 };
 

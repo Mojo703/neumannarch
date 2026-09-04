@@ -1,6 +1,6 @@
-use probe_protocol::Bot;
-use probe_sim::RowId;
-use probe_sim::roster::Roster;
+use neumannarch_protocol::Bot;
+use neumannarch_sim::RowId;
+use neumannarch_sim::roster::Roster;
 
 use crate::roles::Roles;
 
@@ -153,7 +153,7 @@ fn share(scored: Vec<(RowId, f64)>) -> Vec<(RowId, f64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::roster::{FRIGATE, LANCER, RAIDER};
+    use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER};
 
     fn weights(personality: &Personality, plating: f64, range: f64) -> Vec<(RowId, f64)> {
         let roster = Roster::shipped();

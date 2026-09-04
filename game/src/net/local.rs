@@ -1,5 +1,5 @@
-use probe_protocol::Relayed;
-use probe_sim::{SeatId, Stamped, Tick};
+use neumannarch_protocol::Relayed;
+use neumannarch_sim::{SeatId, Stamped, Tick};
 
 use crate::net::transport::Transport;
 

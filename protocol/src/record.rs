@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use probe_sim::state::State;
-use probe_sim::{Batch, Refused, Session, Setup, Stamped, Tick};
+use neumannarch_sim::state::State;
+use neumannarch_sim::{Batch, Refused, Session, Setup, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,9 +107,9 @@ fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::{CONSTRUCTOR, SHIPYARD};
-    use probe_sim::state::{Command, Issued};
-    use probe_sim::{Retention, RockId, RowId, SeatId, TeamId};
+    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::state::{Command, Issued};
+    use neumannarch_sim::{Retention, RockId, RowId, SeatId, TeamId};
 
     use super::*;
     use crate::wire::Codec;

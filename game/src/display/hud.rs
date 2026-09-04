@@ -1,5 +1,5 @@
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
-use probe_sim::Vec3;
+use neumannarch_sim::Vec3;
 
 use crate::display::glyph_quad::seat_color32;
 use crate::display::scene::Scene;

@@ -1,5 +1,5 @@
 use mirage_engine::egui::Color32;
-use probe_sim::Material;
+use neumannarch_sim::Material;
 
 pub const METALS: Color32 = Color32::from_rgb(150, 170, 200);
 

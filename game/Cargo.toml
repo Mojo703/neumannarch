@@ -1,8 +1,8 @@
 [package]
-name = "probe-game"
+name = "neumannarch-game"
 version.workspace = true
 edition.workspace = true
-description = "Probe Game on the Mirage engine, for desktop and the browser"
+description = "Neumannarch on the Mirage engine, for desktop and the browser"
 
 [[bin]]
 name = "look"
@@ -11,15 +11,15 @@ required-features = ["look"]
 
 [dependencies]
 mirage-engine = { path = "../../../mirage-renderer" }
-probe-agents = { path = "../agents" }
-probe-protocol = { path = "../protocol" }
-probe-sim = { path = "../sim" }
+neumannarch-agents = { path = "../agents" }
+neumannarch-protocol = { path = "../protocol" }
+neumannarch-sim = { path = "../sim" }
 image = { version = "0.25.10", optional = true, default-features = false, features = [
     "png",
 ] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-probe-server = { path = "../server", optional = true }
+neumannarch-server = { path = "../server", optional = true }
 futures-util = { version = "0.3", default-features = false, features = [
     "sink",
     "std",
@@ -51,7 +51,7 @@ look = ["mirage-engine/offscreen", "dep:image"]
 
 # Serving a room in the game's own process, which is what Host does.
 # Native only: the browser opens sockets and does not answer them.
-host = ["dep:probe-server"]
+host = ["dep:neumannarch-server"]
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
-use probe_sim::state::Command;
-use probe_sim::state::view::View;
-use probe_sim::step::fire::Shots;
-use probe_sim::{SeatId, Sequence, Session, Stamped, TICKS_PER_SECOND, Tick};
+use neumannarch_sim::state::Command;
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::step::fire::Shots;
+use neumannarch_sim::{SeatId, Sequence, Session, Stamped, TICKS_PER_SECOND, Tick};
 
 pub use dice::Dice;
 pub use personality::{Mix, Personality};
@@ -12,7 +12,7 @@ pub const DECISION_INTERVAL: Tick = Tick(TICKS_PER_SECOND as u64);
 
 pub const MAX_COMMANDS_PER_DECISION: usize = 16;
 
-const _: () = assert!(MAX_COMMANDS_PER_DECISION <= probe_sim::state::MAX_COMMANDS_PER_TICK);
+const _: () = assert!(MAX_COMMANDS_PER_DECISION <= neumannarch_sim::state::MAX_COMMANDS_PER_TICK);
 
 pub trait Agent {
     fn decide(&mut self, view: &View) -> Vec<Command>;
@@ -64,8 +64,8 @@ mod survey;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::roster::RAIDER;
-    use probe_sim::{Retention, RockId, Setup, TeamId};
+    use neumannarch_sim::roster::RAIDER;
+    use neumannarch_sim::{Retention, RockId, Setup, TeamId};
 
     fn session() -> Session {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(1_000)).expect("two seats");
