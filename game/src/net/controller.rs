@@ -140,7 +140,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 2,
-                    control: Holder::Player {
+                    holder: Holder::Player {
                         player: PlayerId(4),
                         ready: true,
                     },
@@ -167,7 +167,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 1,
-                    control: Holder::Player {
+                    holder: Holder::Player {
                         player: PlayerId(4),
                         ready: true,
                     },

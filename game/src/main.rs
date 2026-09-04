@@ -263,7 +263,7 @@ mod tests {
         click_at(&mut session, kick.center());
         stepped_until(&mut session, |session| {
             lobby(session)
-                .is_some_and(|lobby| lobby.slots()[1].control == probe_protocol::Holder::Open)
+                .is_some_and(|lobby| lobby.slots()[1].holder == probe_protocol::Holder::Open)
         });
 
         let mut notices = Vec::new();
@@ -290,7 +290,7 @@ mod tests {
         );
         let opened = lobby(&session).expect("Skirmish opens a lobby").clone();
         assert!(
-            matches!(opened.slots()[1].control, probe_protocol::Holder::Bot(_)),
+            matches!(opened.slots()[1].holder, probe_protocol::Holder::Bot(_)),
             "a skirmish seats a bot in seat one"
         );
         assert_eq!(opened.seat_of(1), Some(probe_sim::SeatId(1)));

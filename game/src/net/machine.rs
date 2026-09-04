@@ -191,18 +191,18 @@ mod tests {
         for edit in [
             LobbyEdit::SetSlot {
                 slot: 1,
-                control: Holder::Player {
+                holder: Holder::Player {
                     player: GUEST,
                     ready: true,
                 },
             },
             LobbyEdit::SetSlot {
                 slot: 2,
-                control: Holder::Bot(Bot::Turtle),
+                holder: Holder::Bot(Bot::Turtle),
             },
             LobbyEdit::SetSlot {
                 slot: 0,
-                control: Holder::Closed,
+                holder: Holder::Closed,
             },
         ] {
             lobby.edit(PlayerId::HOST, edit).expect("the host's shape");

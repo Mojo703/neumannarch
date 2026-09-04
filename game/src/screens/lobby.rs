@@ -213,35 +213,35 @@ impl LobbyScreen {
 
         let holds = self.rule(LobbyEdit::SetSlot {
             slot: row.slot,
-            control: slot.control,
+            holder: slot.holder,
         });
         let chosen = controls.choice(
             row.holder,
-            &self.holder_name(slot.control),
+            &self.holder_name(slot.holder),
             &self.holder_choices(row.slot),
             &holds,
             self.open == Some(Open::Holder(row.slot)),
         );
         match chosen {
             Some(Chose::Toggled) => self.toggle(Open::Holder(row.slot)),
-            Some(Chose::Value(control)) => {
+            Some(Chose::Value(holder)) => {
                 self.open = None;
                 edits.push(LobbyEdit::SetSlot {
                     slot: row.slot,
-                    control,
+                    holder,
                 });
             }
             None => {}
         }
 
-        if let Holder::Player { player, .. } = slot.control
+        if let Holder::Player { player, .. } = slot.holder
             && player != self.lobby.host()
             && controls.action(row.kick, "Kick", &self.rule(LobbyEdit::Kick(player)))
         {
             edits.push(LobbyEdit::Kick(player));
         }
 
-        if slot.control == Holder::Closed {
+        if slot.holder == Holder::Closed {
             return;
         }
 
@@ -269,7 +269,7 @@ impl LobbyScreen {
         }
 
         panel.label(
-            match slot.control {
+            match slot.holder {
                 Holder::Player { ready: true, .. } => "Ready",
                 Holder::Player { ready: false, .. } => "Waiting",
                 Holder::Open | Holder::Closed | Holder::Bot(_) => "",
@@ -406,10 +406,10 @@ impl LobbyScreen {
         ]
         .into_iter()
         .chain(BOTS.map(Holder::Bot))
-        .map(|control| Value {
-            value: control,
-            label: self.holder_name(control),
-            rule: self.rule(LobbyEdit::SetSlot { slot, control }),
+        .map(|holder| Value {
+            value: holder,
+            label: self.holder_name(holder),
+            rule: self.rule(LobbyEdit::SetSlot { slot, holder }),
         })
         .collect()
     }
@@ -436,8 +436,8 @@ impl LobbyScreen {
             .collect()
     }
 
-    fn holder_name(&self, control: Holder) -> String {
-        match control {
+    fn holder_name(&self, holder: Holder) -> String {
+        match holder {
             Holder::Open => "Open".to_string(),
             Holder::Closed => "Closed".to_string(),
             Holder::Bot(bot) => titled(Personality::of(bot).name),
@@ -602,12 +602,12 @@ mod tests {
         let closed = lobby
             .slots()
             .iter()
-            .position(|slot| slot.control == Holder::Closed)
+            .position(|slot| slot.holder == Holder::Closed)
             .expect("a skirmish closes the seats it does not use");
         let screen = LobbyScreen::of(lobby, PlayerId::HOST);
 
         assert_eq!(
-            screen.holder_name(screen.lobby.slots()[closed].control),
+            screen.holder_name(screen.lobby.slots()[closed].holder),
             "Closed"
         );
         assert!(
@@ -647,15 +647,9 @@ mod tests {
         assert_eq!(clock_name(CLOCKS[0]), "1 minute");
         assert_eq!(clock_name(CLOCKS[2]), "15 minutes");
         assert_eq!(player_name(PlayerId(1)), "Player 2");
-        assert_eq!(screen.holder_name(screen.lobby.slots()[0].control), "You");
-        assert_eq!(
-            screen.holder_name(screen.lobby.slots()[1].control),
-            "Expand"
-        );
-        assert_eq!(
-            screen.holder_name(screen.lobby.slots()[2].control),
-            "Closed"
-        );
+        assert_eq!(screen.holder_name(screen.lobby.slots()[0].holder), "You");
+        assert_eq!(screen.holder_name(screen.lobby.slots()[1].holder), "Expand");
+        assert_eq!(screen.holder_name(screen.lobby.slots()[2].holder), "Closed");
     }
 
     #[test]
@@ -685,7 +679,7 @@ mod tests {
                 PlayerId::HOST,
                 LobbyEdit::SetSlot {
                     slot: 1,
-                    control: Holder::Player {
+                    holder: Holder::Player {
                         player: guest,
                         ready: false,
                     },

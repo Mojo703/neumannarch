@@ -59,7 +59,7 @@ mod tests {
             }),
             Message::Request(Request::Edit(LobbyEdit::SetSlot {
                 slot: 2,
-                control: Holder::Open,
+                holder: Holder::Open,
             })),
             Message::Request(Request::Edit(LobbyEdit::Kick(PlayerId(4)))),
             Message::Request(Request::Start),

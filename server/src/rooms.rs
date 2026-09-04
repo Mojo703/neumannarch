@@ -356,14 +356,14 @@ mod tests {
             GUEST,
             Message::Request(Request::Edit(LobbyEdit::SetSlot {
                 slot: 0,
-                control: Holder::Bot(Bot::Turtle),
+                holder: Holder::Bot(Bot::Turtle),
             })),
         );
 
         assert_eq!(lobby(&room).seed(), 42);
         assert_eq!(lobby(&room).slots()[1].team, TeamId(3));
         assert_eq!(
-            lobby(&room).slots()[0].control,
+            lobby(&room).slots()[0].holder,
             Holder::Player {
                 player: PlayerId::HOST,
                 ready: true
@@ -549,7 +549,7 @@ mod tests {
         );
         assert!(matches!(
             to(&kicked, Recipient::Everyone).as_slice(),
-            [Message::Notice(Notice::Lobby(sent))] if sent.slots()[1].control == Holder::Open
+            [Message::Notice(Notice::Lobby(sent))] if sent.slots()[1].holder == Holder::Open
         ));
         assert_eq!(room.members(), [PlayerId::HOST]);
         assert_eq!(
@@ -600,9 +600,9 @@ mod tests {
 
         room.receive(PlayerId::HOST, Message::Request(Request::Rematch));
 
-        assert_eq!(lobby(&room).slots()[1].control, Holder::Open);
+        assert_eq!(lobby(&room).slots()[1].holder, Holder::Open);
         assert_eq!(
-            lobby(&room).slots()[0].control,
+            lobby(&room).slots()[0].holder,
             Holder::Player {
                 player: PlayerId::HOST,
                 ready: true

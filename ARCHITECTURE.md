@@ -583,12 +583,12 @@ pub enum Bot { Turtle, Expand }                 // agents turns it into a Person
 pub enum Holder {
     Open, Closed, Player { player: PlayerId, ready: bool }, Bot(Bot),
 }
-pub struct SeatSlot { pub team: TeamId, pub control: Holder }
+pub struct SeatSlot { pub team: TeamId, pub holder: Holder }
 pub struct Lobby {                              // MAX_SLOTS == MAX_SEATS slots
     slots: Vec<SeatSlot>, seed: u64, clock: Tick, host: PlayerId,
 }
 pub enum LobbyEdit {
-    SetSlot { slot, control }, Kick(PlayerId), SetTeam { slot, team },
+    SetSlot { slot, holder }, Kick(PlayerId), SetTeam { slot, team },
     SetSeed(u64), SetClock(Tick), SetReady { ready },
 }
 pub enum Refused {                              // why an edit was not applied
