@@ -1,8 +1,7 @@
 //! One room: the machines in it, the phase it is in, and what it says back.
 
-use probe_protocol::{LobbyEdit, Message, PlayerId, Refusal, Refused};
+use probe_protocol::{Lobby, LobbyEdit, Message, PlayerId, Refusal, Refused};
 
-use crate::lobby::Seating;
 use crate::playing::Playing;
 use crate::records::Records;
 
@@ -35,33 +34,33 @@ pub enum To {
 /// One room of a match server: the authority on its lobby, and the
 /// forwarder of the match its members play.
 pub struct Room {
-    /// The machines in the room, in the order they joined.
-    members: Vec<PlayerId>,
-    /// The id the next joiner takes.
+    /// The id the next machine to join takes. It only rises for the life of
+    /// the room, so a room that reopens hands out no id it has held before.
     next: PlayerId,
     phase: Phase,
     records: Records,
 }
 
-/// What a room is doing.
+/// What a room is doing, and the machines in it while it does it.
 enum Phase {
-    /// Setting a match up.
-    Seating(Seating),
-    /// Forwarding one, over the lobby it was set up in, which a rematch
-    /// opens again.
-    Playing {
-        playing: Box<Playing>,
-        seating: Seating,
+    /// Setting a match up, as the authority on the lobby it is set up in.
+    Seating {
+        lobby: Lobby,
+        /// The machines in the room, in the order they joined.
+        members: Vec<PlayerId>,
     },
+    /// Forwarding one, over the lobby it was set up in, which a rematch
+    /// opens again. The match knows its own machines, so this holds no
+    /// second list of them.
+    Playing { playing: Box<Playing>, lobby: Lobby },
 }
 
 impl Room {
     /// An empty room, open on the shape a host takes.
     pub fn opened() -> Room {
         Room {
-            members: Vec::new(),
             next: PlayerId::HOST,
-            phase: Phase::Seating(Seating::opened()),
+            phase: Phase::opened(),
             records: Records::default(),
         }
     }
@@ -69,7 +68,7 @@ impl Room {
     /// What the room does with `heard` from `from`. A machine the room has
     /// not taken in is not heard at all.
     pub fn hears(&mut self, from: PlayerId, heard: Message) -> Vec<Post> {
-        if !self.members.contains(&from) {
+        if !self.members().contains(&from) {
             return Vec::new();
         }
         match heard {
@@ -105,14 +104,14 @@ impl Room {
         if version != probe_protocol::VERSION {
             return Err(Refusal::Version);
         }
-        let Phase::Seating(seating) = &mut self.phase else {
+        let player = self.next;
+        let Phase::Seating { lobby, members } = &mut self.phase else {
             return Err(Refusal::Full);
         };
-        let player = self.next;
-        seating.seat(player).ok_or(Refusal::Full)?;
+        lobby.admit(player).ok_or(Refusal::Full)?;
+        let lobby = lobby.clone();
+        members.push(player);
         self.next = PlayerId(player.0 + 1);
-        self.members.push(player);
-        let lobby = seating.lobby().clone();
         Ok(Joined {
             player,
             posts: vec![
@@ -135,34 +134,37 @@ impl Room {
     /// The shape of a lobby is its host's, so a host that leaves one ends
     /// it: the room reopens and every other machine is sent away.
     pub fn leaves(&mut self, who: PlayerId) -> Vec<Post> {
-        self.members.retain(|member| *member != who);
         match &mut self.phase {
-            Phase::Seating(seating) if seating.lobby().host() == who => {
-                self.reopen();
+            Phase::Seating { lobby, .. } if lobby.host() == who => {
+                self.phase = Phase::opened();
                 vec![Post::to(To::Everyone, Message::Leave)]
             }
-            Phase::Seating(seating) => match seating.release(who) {
-                true => vec![Post::to(
-                    To::Everyone,
-                    Message::Lobby(seating.lobby().clone()),
-                )],
-                false => Vec::new(),
-            },
+            Phase::Seating { lobby, members } => {
+                members.retain(|member| *member != who);
+                match lobby.release(who) {
+                    true => vec![Post::to(To::Everyone, Message::Lobby(lobby.clone()))],
+                    false => Vec::new(),
+                }
+            }
             Phase::Playing { playing, .. } => {
                 let posts = playing.left(who);
-                if self.members.is_empty() {
+                if playing.members().is_empty() {
                     let record = playing.record();
                     self.records.keep(record);
-                    self.reopen();
+                    self.phase = Phase::opened();
                 }
                 posts
             }
         }
     }
 
-    /// The machines in the room, in the order they joined.
-    pub fn members(&self) -> &[PlayerId] {
-        &self.members
+    /// The machines in the room: in a lobby, those that joined it, in the
+    /// order they did; in a match, those still playing it.
+    pub fn members(&self) -> Vec<PlayerId> {
+        match &self.phase {
+            Phase::Seating { members, .. } => members.clone(),
+            Phase::Playing { playing, .. } => playing.members(),
+        }
     }
 
     /// The records of the matches this room has served.
@@ -173,16 +175,20 @@ impl Room {
     /// Applies `from`'s edit to the lobby, or answers why it did not. A
     /// kick also drops the machine whose slot it opened and tells it so.
     fn edits(&mut self, from: PlayerId, edit: LobbyEdit) -> Vec<Post> {
-        let Phase::Seating(seating) = &mut self.phase else {
+        let Phase::Seating {
+            lobby: held,
+            members,
+        } = &mut self.phase
+        else {
             return Vec::new();
         };
-        if let Err(why) = seating.edit(from, edit) {
-            return vec![Post::to(To::Sender, Message::Refused(why))];
+        if let Err(why) = held.edit(from, edit) {
+            return vec![Post::to(To::Sender, Message::Refused(Refusal::Edit(why)))];
         }
-        let lobby = Message::Lobby(seating.lobby().clone());
+        let lobby = Message::Lobby(held.clone());
         match edit {
             LobbyEdit::Kick(who) => {
-                self.members.retain(|member| *member != who);
+                members.retain(|member| *member != who);
                 vec![
                     Post::to(To::One(who), Message::Removed),
                     Post::to(To::Everyone, lobby),
@@ -203,39 +209,36 @@ impl Room {
     /// The slots of machines that have left stand open again, so the shape
     /// the host starts from is the shape the room can still play.
     fn rematches(&mut self, from: PlayerId) -> Vec<Post> {
-        let Phase::Playing { seating, .. } = &mut self.phase else {
+        let Phase::Playing { lobby, playing } = &self.phase else {
             return Vec::new();
         };
-        if seating.lobby().host() != from {
+        if lobby.host() != from {
             return vec![Post::to(
                 To::Sender,
                 Message::Refused(Refusal::Edit(Refused::NotHost)),
             )];
         }
-        let mut seating = seating.clone();
-        for gone in seating.guests() {
-            if !self.members.contains(&gone) {
-                seating.release(gone);
+        let members = playing.members();
+        let mut opened = lobby.clone();
+        for player in opened.players() {
+            if !members.contains(&player) {
+                opened.release(player);
             }
         }
-        let lobby = seating.lobby().clone();
-        self.phase = Phase::Seating(seating);
-        vec![Post::to(To::Everyone, Message::Lobby(lobby))]
+        let sent = opened.clone();
+        self.phase = Phase::Seating {
+            lobby: opened,
+            members,
+        };
+        vec![Post::to(To::Everyone, Message::Lobby(sent))]
     }
 
     /// The match this room is forwarding, where it is forwarding one.
     fn playing(&mut self) -> Option<&mut Playing> {
         match &mut self.phase {
             Phase::Playing { playing, .. } => Some(playing),
-            Phase::Seating(_) => None,
+            Phase::Seating { .. } => None,
         }
-    }
-
-    /// Empties the room and opens it on a host's shape again.
-    fn reopen(&mut self) {
-        self.members.clear();
-        self.next = PlayerId::HOST;
-        self.phase = Phase::Seating(Seating::opened());
     }
 
     /// Freezes the lobby as `from`'s start, or answers why it did not.
@@ -243,25 +246,41 @@ impl Room {
     /// The room is the authority on the lobby, so it freezes its own copy;
     /// the setup a host sends with its start is not read.
     fn starts(&mut self, from: PlayerId) -> Vec<Post> {
-        let Phase::Seating(seating) = &self.phase else {
+        let Phase::Seating { lobby: held, .. } = &self.phase else {
             return Vec::new();
         };
-        if seating.lobby().host() != from {
+        if held.host() != from {
             return vec![Post::to(
                 To::Sender,
                 Message::Refused(Refusal::Edit(Refused::NotHost)),
             )];
         }
-        let setup = match seating.freeze() {
-            Ok(setup) => setup,
-            Err(why) => return vec![Post::to(To::Sender, Message::Refused(why))],
+        let started = match held.freeze() {
+            Ok(started) => started,
+            Err(why) => {
+                return vec![Post::to(
+                    To::Sender,
+                    Message::Refused(Refusal::NotReady(why)),
+                )];
+            }
         };
-        let playing = Playing::started(seating.lobby(), setup.clone());
+        let lobby = held.clone();
+        let playing = Playing::started(started.clone());
         self.phase = Phase::Playing {
             playing: Box::new(playing),
-            seating: seating.clone(),
+            lobby,
         };
-        vec![Post::to(To::Everyone, Message::Start(setup))]
+        vec![Post::to(To::Everyone, Message::Start(started))]
+    }
+}
+
+impl Phase {
+    /// A room with nobody in it, open on the shape a host takes.
+    fn opened() -> Phase {
+        Phase::Seating {
+            lobby: Lobby::room(PlayerId::HOST),
+            members: Vec::new(),
+        }
     }
 }
 
@@ -304,10 +323,10 @@ mod tests {
 
     /// The lobby every member of `room` was last sent.
     fn lobby(room: &Room) -> Lobby {
-        let Phase::Seating(seating) = &room.phase else {
+        let Phase::Seating { lobby, .. } = &room.phase else {
             panic!("the room is not seating");
         };
-        seating.lobby().clone()
+        lobby.clone()
     }
 
     /// A room the host and one guest have joined, the guest ready.
@@ -332,12 +351,12 @@ mod tests {
     /// seat one.
     fn started() -> Room {
         let mut room = joined();
-        let setup = lobby(&room).freeze().expect("both machines are seated");
-        let posts = room.hears(PlayerId::HOST, Message::Start(setup.clone()));
+        let started = lobby(&room).freeze().expect("both machines are seated");
+        let posts = room.hears(PlayerId::HOST, Message::Start(started.clone()));
 
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0].to, To::Everyone);
-        assert_eq!(posts[0].message, Message::Start(setup));
+        assert_eq!(posts[0].message, Message::Start(started));
         room
     }
 
@@ -576,8 +595,8 @@ mod tests {
     fn the_hosts_rematch_opens_the_lobby_the_match_was_set_up_in_and_nobody_elses_does() {
         let mut room = started();
         let shape = match &room.phase {
-            Phase::Playing { seating, .. } => seating.lobby().clone(),
-            Phase::Seating(_) => panic!("the room is playing"),
+            Phase::Playing { lobby, .. } => lobby.clone(),
+            Phase::Seating { .. } => panic!("the room is playing"),
         };
 
         let refused = room.hears(GUEST, Message::Rematch);

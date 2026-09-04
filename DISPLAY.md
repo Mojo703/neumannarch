@@ -1,8 +1,9 @@
 # Probe Game — display language
 
 What the player sees, as the target. The only input is the sim's fogged
-view. Nothing is a numeral, a label, or a panel; every fact is a shape, a
-position, a colour, or a line in the belt. Inside a match the pause and
+view. Nothing is a numeral, a label, or a panel, except the stockpile's bars
+(The stockpile, below); every other fact is a shape, a position, a
+colour, or a line in the belt. Inside a match the pause and
 results screens are the only panels; outside a match every screen is a
 panel in the game's style (Screens, below). Every control shows, while
 hovered, the change to a want it will make; what the sim does about that change is drawn in the next tick
@@ -33,8 +34,9 @@ the same at every zoom, for its inner band. A second,
 outer ring at a larger fixed radius stands for the outer band and is drawn
 only when that band holds something or the rock is selected. On a ring,
 runs start at twelve o'clock and are laid clockwise; when more than one
-seat is present, in seat order. Ownership is colour; position tells seats
-apart only where several share a ring, which is uncommon. An empty ring
+seat is present, in seat order. Ownership is colour, and colour is the team's; a team's
+seats share it, and position tells them apart only where several share a
+ring, which is uncommon. An empty ring
 draws nothing.
 
 ## Glyph runs
@@ -81,6 +83,19 @@ Three rules produce every glyph from its row; no glyph is drawn by hand.
   game crate.
 
 Fill is the owner's colour; the outline is white.
+
+## The stockpile
+
+The match's one numeral exception on the HUD, shaped as Beyond All
+Reason shapes its resource bar. Across the top centre, one cell per
+material, metals then volatiles then energy. A cell is: the material's
+icon in its hue at the left; a bar filled to the stock over the capacity;
+two numerals stacked at the bar's right, the stock above the capacity;
+and after them the income and the spend per second as two signed
+numerals, "+3" and "-5", income above spend. A bar at capacity shows the
+loss as a faint overflow running off its right end. These are the only
+numerals on the HUD. A wheel slot whose row the stock cannot fund one of
+dims, and its hover names the short material.
 
 ## Fights
 
@@ -174,6 +189,10 @@ title, shows its reason beside it always when disabled, not only on
 hover, so the way forward is never hidden. Every row of a settings
 column carries its label at the left and its control at the right.
 
+A control whose feature does not exist in this version is not drawn.
+Disabled with a reason is only for a control that exists and cannot act
+now.
+
 Enabled means it will work. A control is enabled only when the rule
 behind it, evaluated on this machine against the state shown, says the
 action succeeds; otherwise it is disabled, and hovering it shows the
@@ -202,11 +221,12 @@ roster's glyphs from the same rasteriser as the belt's ships. No screen
 floats over another; each replaces the last. Every control on them
 follows Controls, above.
 
-- **Title.** Skirmish, Host, Join, Settings, Quit, in a column, each an
-  action; Join is a value field for the address with Join as the action
-  inside it. Host is enabled only while the title holds a listener it
-  bound on opening, so a port in use disables it. A version that cannot
-  host, or cannot close, shows those actions disabled with their reason.
+- **Title.** Skirmish, Host, Join, Quit, in a column, each an action;
+  Join is a value field for the address with Join as the action inside
+  it. Host is enabled only while the title holds a listener it bound on
+  opening, so a port in use disables it. Quit closes the game on the
+  desktop and is not drawn in the browser. Settings is drawn once a
+  settings screen exists.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
@@ -214,11 +234,13 @@ follows Controls, above.
   caps; it redraws the instant the seed changes, and it pans and zooms
   under the same controls as the match. Over it, at the left, the seats
   as a table of four rows, one per seat the match can hold, under column
-  labels Seat, Holder, Team, Ready. Seat is the seat's number from one
-  in a square of its colour. Holder is a choice: You, Open, Closed, each
+  labels Holder, Team, Ready. Holder is a choice: You, Open, Closed, each
   bot personality by name, or, for a seat a guest holds, that guest's
   name, not chosen but shown with Kick as an action beside it. Team is a
-  choice of the four teams. Ready is a mark. A closed seat's row stays
+  choice of the four teams, each shown as a square of the team's colour
+  beside its number, in the closed control and in the open list alike;
+  colour is the team's everywhere the game draws ownership. Ready is a
+  mark. A closed seat's row stays
   in the table with its holder reading Closed and its team and ready
   cells empty. Down the right, the match's settings as labelled rows:
   Seed, a value with Random Seed inside it; Clock, a choice of one, five,
@@ -230,7 +252,8 @@ follows Controls, above.
 - **Loading.** The belt from the lobby, still, until every machine has
   built the match and agreed the first hash.
 - **Play.** The match, as every section above describes. Escape opens the
-  pause screen over it: Resume, Surrender, Leave. Play continues under it
+  pause screen over it: Resume and Leave, and Surrender once DESIGN.md
+  has a rule for it. Play continues under it
   in multiplayer and stops under it in a skirmish. Play has two held
   states, both in multiplayer only. Waiting: when a peer has fallen
   behind by the stated span, the match holds, the HUD dims, and the

@@ -4,8 +4,7 @@
 use mirage_engine::egui::{Align2, Pos2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use probe_protocol::{Lobby, PlayerId};
-use probe_sim::Setup;
+use probe_protocol::{Crew, Lobby, Started};
 use probe_sim::Tick;
 use probe_sim::belt::Belt;
 
@@ -14,9 +13,8 @@ use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::Scene;
 use crate::display::screen::Screen;
 use crate::display::{belt, hud};
-use crate::net::machine::{Machine, Unplayable};
+use crate::net::machine::Machine;
 use crate::net::transport::Transport;
-use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 use crate::screens::play::Play;
 use crate::screens::{Playable, lobby};
@@ -28,16 +26,26 @@ use crate::screens::{Playable, lobby};
 /// frame.
 pub struct Loading {
     lobby: Lobby,
-    /// The match, until the frame that hands it to the play screen.
-    machine: Option<Machine>,
+    machine: Machine,
     scene: Scene,
     camera: BeltCamera,
 }
 
 impl Loading {
-    /// Paints the still belt and, once every machine agrees, hands the
-    /// match over.
-    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>) -> Option<Step>
+    /// Whether every machine has built the match and agreed its first hash,
+    /// which is when the match is played.
+    pub fn agreed(&self) -> bool {
+        self.machine.agreed()
+    }
+
+    /// The match it built, which the play screen takes once every machine
+    /// has agreed it.
+    pub fn plays(self) -> Play {
+        Play::of(self.lobby, self.machine)
+    }
+
+    /// Paints the still belt.
+    pub fn frame<G: Playable>(&mut self, ctx: &mut FrameCtx<'_, G>)
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
@@ -60,35 +68,29 @@ impl Loading {
                 panel::BODY_SIZE,
             );
         });
-
-        let agreed = self.machine.as_ref().is_some_and(Machine::agreed);
-        let machine = agreed.then(|| self.machine.take()).flatten()?;
-        Some(Step::Play(Box::new(Play::of(self.lobby.clone(), machine))))
     }
 
-    /// The match `setup` names, over the belt `lobby`'s seed lays, as the
-    /// person holding `me`'s slot plays it.
+    /// The match `started` names, over the belt `lobby`'s seed lays, as the
+    /// machine `crew` is the seats of plays it.
     pub fn of(
         lobby: Lobby,
-        setup: Setup,
-        me: PlayerId,
+        started: Started,
+        crew: &Crew,
         transport: &mut dyn Transport,
-    ) -> Result<Loading, Unplayable> {
-        let machine = Machine::of(&lobby, setup, me, transport)?;
+    ) -> Loading {
+        let machine = Machine::of(started, crew, transport);
         let scene = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO);
         let camera = BeltCamera::new(scene.centre(), lobby::PREVIEW_ZOOM);
-        Ok(Loading {
+        Loading {
             lobby,
-            machine: Some(machine),
+            machine,
             scene,
             camera,
-        })
+        }
     }
 
     /// Takes in what the other machines say while the match is built.
     pub fn tick(&mut self, transport: &mut dyn Transport) {
-        if let Some(machine) = &mut self.machine {
-            machine.listen(transport);
-        }
+        self.machine.listen(transport);
     }
 }

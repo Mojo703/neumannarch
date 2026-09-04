@@ -9,9 +9,9 @@ use std::net::SocketAddr;
 use probe_agents::{Personality, Scripted, Seated};
 use probe_game::net::hosting::Hosting;
 use probe_game::net::machine::Machine;
-use probe_game::net::room::Room;
+use probe_game::net::room::{Room, Word};
 use probe_game::net::transport::Transport;
-use probe_protocol::{Bot, CLOCK_RANGE, Lobby, LobbyEdit, Message, PlayerId};
+use probe_protocol::{Bot, CLOCK_RANGE, Lobby, LobbyEdit, Message, PlayerId, Started};
 use probe_sim::{SeatId, Stamped, Tick};
 
 /// How long the two machines play, in ticks: three seconds, which is
@@ -95,7 +95,7 @@ fn advance(machine: &mut Machine, transport: &mut dyn Transport, hashes: &mut Ha
 
 /// Reads `room` until what it has said holds `ready`, and answers
 /// everything it said. Panics on a room that never answers.
-fn heard_until(room: &mut Room, ready: impl Fn(&[Message]) -> bool) -> Vec<Message> {
+fn heard_until(room: &mut Room, ready: impl Fn(&[Word]) -> bool) -> Vec<Word> {
     let mut heard = Vec::new();
     for _ in 0..PATIENCE {
         heard.extend(room.heard());
@@ -108,10 +108,10 @@ fn heard_until(room: &mut Room, ready: impl Fn(&[Message]) -> bool) -> Vec<Messa
     panic!("the room never answered: {heard:?}");
 }
 
-/// The setup a message carries, where it is a start.
-fn started(heard: &[Message]) -> Option<probe_sim::Setup> {
-    heard.iter().find_map(|message| match message {
-        Message::Start(setup) => Some(setup.clone()),
+/// The match a word starts, where one of them is a start.
+fn started(heard: &[Word]) -> Option<Started> {
+    heard.iter().find_map(|word| match word {
+        Word::Started(started) => Some(started.clone()),
         _ => None,
     })
 }
@@ -144,14 +144,18 @@ fn played(withheld: u64) -> (Hashes, Hashes, usize) {
         lobby.freeze().expect("both seats are held and ready"),
     ));
 
-    let setup = started(&heard_until(&mut host, |heard| started(heard).is_some()))
+    // The room is the authority: both machines play the match it sent.
+    let frozen = started(&heard_until(&mut host, |heard| started(heard).is_some()))
         .expect("the room started the match");
     heard_until(&mut guest, |heard| started(heard).is_some());
 
-    let mut playing =
-        Machine::of(&lobby, setup.clone(), me, host.transport()).expect("the host holds a seat");
-    let mut joined =
-        Machine::of(&lobby, setup, other, guest.transport()).expect("the guest holds a seat");
+    let mine = frozen.seating().run_by(me).expect("the host holds a seat");
+    let theirs = frozen
+        .seating()
+        .run_by(other)
+        .expect("the guest holds a seat");
+    let mut playing = Machine::of(frozen.clone(), &mine, host.transport());
+    let mut joined = Machine::of(frozen, &theirs, guest.transport());
     for _ in 0..PATIENCE {
         joined.listen(guest.transport());
         playing.listen(host.transport());
@@ -199,18 +203,18 @@ fn played(withheld: u64) -> (Hashes, Hashes, usize) {
     (theirs, ours, rewinds)
 }
 
-/// The id a message carries, where it is a welcome.
-fn welcomed(heard: &[Message]) -> Option<PlayerId> {
-    heard.iter().find_map(|message| match message {
-        Message::Welcome { player, .. } => Some(*player),
+/// The id a word carries, where one of them is a welcome.
+fn welcomed(heard: &[Word]) -> Option<PlayerId> {
+    heard.iter().find_map(|word| match word {
+        Word::Welcome { player, .. } => Some(*player),
         _ => None,
     })
 }
 
-/// The lobby a message carries, where every seat of it is ready.
-fn ready_lobby(message: &Message) -> Option<Lobby> {
-    match message {
-        Message::Lobby(lobby) if lobby.freeze().is_ok() => Some(lobby.clone()),
+/// The lobby a word carries, where every seat of it is ready.
+fn ready_lobby(word: &Word) -> Option<Lobby> {
+    match word {
+        Word::Lobby(lobby) if lobby.freeze().is_ok() => Some(lobby.clone()),
         _ => None,
     }
 }

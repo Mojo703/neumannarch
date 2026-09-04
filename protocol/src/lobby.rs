@@ -2,10 +2,11 @@
 
 use core::ops::RangeInclusive;
 
-use probe_sim::{MAX_SEATS, Setup, TICKS_PER_SECOND, TeamId, Tick};
+use probe_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
+use crate::seating::{Holder, Seating, Started};
 
 /// Clocks a lobby allows, in ticks: a minute to half an hour, around
 /// DESIGN.md's fifteen.
@@ -21,8 +22,8 @@ pub const DEFAULT_SEED: u64 = 1;
 /// Slots a lobby holds, one per seat a match can have.
 pub const MAX_SLOTS: usize = MAX_SEATS;
 
-/// What [`Lobby::random_seed_seed`] steps the seed by: odd, so the seeds it
-/// walks never repeat.
+/// What [`Lobby::next_seed`] steps the seed by: odd, so the seeds it walks
+/// never repeat.
 const SEED_STEP: u64 = 0x9E37_79B9_7F4A_7C15;
 
 /// A frozen lobby is a match, so its held slots are a setup's seats.
@@ -71,6 +72,9 @@ pub enum Refused {
     AlreadySeated,
     /// The player named holds no guest's slot, so there is none to open.
     NotAGuest,
+    /// A guest holds that slot, and a guest's slot is opened by a kick,
+    /// which sends the guest away with it.
+    HeldByAGuest,
 }
 
 /// Why a lobby is not yet a match.
@@ -82,6 +86,9 @@ pub enum NotReady {
     OpenSeat { slot: usize },
     /// This slot's guest has not readied.
     Unready { slot: usize },
+    /// The host runs none of the seats, so its own machine has no part in
+    /// the match it would start.
+    HostUnseated,
 }
 
 /// One change to a lobby. The host may make any of them; a guest may set
@@ -173,16 +180,54 @@ impl Lobby {
     /// The seat a slot becomes once the lobby is frozen: its place among
     /// the slots that are not closed. `None` for a closed slot, which is
     /// not in the match, and for no such slot.
-    pub fn seat_of(&self, slot: usize) -> Option<probe_sim::SeatId> {
-        let held = self.slots.get(slot)?.control != Control::Closed;
-        held.then(|| {
-            probe_sim::SeatId(
-                self.slots[..slot]
+    pub fn seat_of(&self, slot: usize) -> Option<SeatId> {
+        self.numbered()
+            .find(|(_, at, _)| *at == slot)
+            .map(|(seat, _, _)| seat)
+    }
+
+    /// Every machine with a seat to run once this lobby is frozen, in id
+    /// order, each once.
+    pub fn players(&self) -> Vec<PlayerId> {
+        self.seating().players()
+    }
+
+    /// Whether `player` holds a slot and has readied.
+    pub fn readied(&self, player: PlayerId) -> bool {
+        self.slot_of(player)
+            .map(|slot| self.slots[slot].control)
+            .is_some_and(|control| matches!(control, Control::Player { ready: true, .. }))
+    }
+
+    /// Opens the slot a guest holds, so another machine may take it. False
+    /// for the host's own slot, which stays its own, and for a player
+    /// holding none.
+    pub fn release(&mut self, who: PlayerId) -> bool {
+        let Some(slot) = self.slot_of(who).filter(|_| who != self.host) else {
+            return false;
+        };
+        self.slots[slot].control = Control::Open;
+        true
+    }
+
+    /// Seats `player`: the slot it already holds, else the first open one.
+    /// `None` where no slot is open, which is a lobby with nowhere to sit.
+    pub fn admit(&mut self, player: PlayerId) -> Option<SeatId> {
+        let slot = match self.slot_of(player) {
+            Some(slot) => slot,
+            None => {
+                let open = self
+                    .slots
                     .iter()
-                    .filter(|slot| slot.control != Control::Closed)
-                    .count() as u8,
-            )
-        })
+                    .position(|slot| slot.control == Control::Open)?;
+                self.slots[open].control = Control::Player {
+                    player,
+                    ready: false,
+                };
+                open
+            }
+        };
+        self.seat_of(slot)
     }
 
     /// Applies `edit` as `by`, or refuses it by name: the host owns the
@@ -191,8 +236,12 @@ impl Lobby {
         match edit {
             LobbyEdit::SetSlot { slot, control } => {
                 self.as_host(by)?;
-                if self.slots.get(slot).is_none() {
-                    return Err(Refused::NoSuchSlot);
+                let held = self.slots.get(slot).ok_or(Refused::NoSuchSlot)?.control;
+                if let Control::Player { player: guest, .. } = held
+                    && guest != self.host
+                    && !matches!(control, Control::Player { player, .. } if player == guest)
+                {
+                    return Err(Refused::HeldByAGuest);
                 }
                 if let Control::Player { player, .. } = control
                     && self.slot_of(player).is_some_and(|held| held != slot)
@@ -203,11 +252,9 @@ impl Lobby {
             }
             LobbyEdit::Kick(who) => {
                 self.as_host(by)?;
-                let slot = self
-                    .slot_of(who)
-                    .filter(|_| who != self.host)
-                    .ok_or(Refused::NotAGuest)?;
-                self.slots[slot].control = Control::Open;
+                if !self.release(who) {
+                    return Err(Refused::NotAGuest);
+                }
             }
             LobbyEdit::SetTeam { slot, team } => {
                 if usize::from(team.0) >= MAX_SLOTS {
@@ -242,26 +289,56 @@ impl Lobby {
     }
 
     /// The match this lobby starts, or why it is not one yet: every slot
-    /// held or closed, every guest ready, and at least one seat.
-    pub fn freeze(&self) -> Result<Setup, NotReady> {
-        let mut teams = Vec::new();
+    /// held or closed, every guest ready, at least one seat, and a seat the
+    /// host's own machine runs.
+    pub fn freeze(&self) -> Result<Started, NotReady> {
         for (at, slot) in self.slots.iter().enumerate() {
             match slot.control {
-                Control::Closed => continue,
                 Control::Open => return Err(NotReady::OpenSeat { slot: at }),
                 Control::Player { player, ready } if !ready && player != self.host => {
                     return Err(NotReady::Unready { slot: at });
                 }
-                Control::Player { .. } | Control::Bot(_) => {}
+                Control::Closed | Control::Player { .. } | Control::Bot(_) => {}
             }
-            teams.push(slot.team);
         }
-        if teams.is_empty() {
+        let seating = self.seating();
+        if seating.players().is_empty() {
             return Err(NotReady::NoSeats);
+        }
+        if seating.run_by(self.host).is_none() {
+            return Err(NotReady::HostUnseated);
         }
         // At most `MAX_SLOTS` slots are held and `MAX_SLOTS` is `MAX_SEATS`,
         // so the only setup a lobby can refuse is the empty one, above.
-        Ok(Setup::new(teams, self.seed, self.clock).expect("held slots are a match's seats"))
+        let setup = Setup::new(self.teams_seated(), self.seed, self.clock)
+            .expect("held slots are a match's seats");
+        Ok(Started::new(setup, seating).expect("one seat per slot that holds one"))
+    }
+
+    /// Every slot that holds a seat, with the seat it becomes and its own
+    /// index, in slot order.
+    fn numbered(&self) -> impl Iterator<Item = (SeatId, usize, &SeatSlot)> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| slot.control.holder().is_some())
+            .zip(0u8..)
+            .map(|((at, slot), seat)| (SeatId(seat), at, slot))
+    }
+
+    /// Who holds each seat this lobby would freeze into.
+    fn seating(&self) -> Seating {
+        Seating::new(
+            self.numbered()
+                .filter_map(|(_, _, slot)| slot.control.holder())
+                .collect(),
+            self.host,
+        )
+    }
+
+    /// Each seat's team, in seat order, which is a match's seating.
+    fn teams_seated(&self) -> Vec<TeamId> {
+        self.numbered().map(|(_, _, slot)| slot.team).collect()
     }
 
     /// `slot` as its holder or as the host, or a refusal.
@@ -275,6 +352,19 @@ impl Lobby {
 
     fn as_host(&self, by: PlayerId) -> Result<(), Refused> {
         (by == self.host).then_some(()).ok_or(Refused::NotHost)
+    }
+}
+
+impl Control {
+    /// What it holds as a seat of a match; `None` for a closed slot, which
+    /// holds no seat.
+    pub fn holder(self) -> Option<Holder> {
+        match self {
+            Control::Open => Some(Holder::Open),
+            Control::Player { player, .. } => Some(Holder::Player(player)),
+            Control::Bot(bot) => Some(Holder::Bot(bot)),
+            Control::Closed => None,
+        }
     }
 }
 
@@ -507,7 +597,8 @@ mod tests {
             .edit(GUEST, LobbyEdit::SetReady { ready: true })
             .expect("the guest readies");
 
-        let setup = lobby.freeze().expect("three held slots are a match");
+        let started = lobby.freeze().expect("three held slots are a match");
+        let setup = started.setup();
         assert_eq!(setup.teams(), [TeamId(0), TeamId(1), TeamId(2)]);
         assert_eq!(setup.seed(), lobby.seed());
         assert_eq!(setup.clock(), lobby.clock());
@@ -523,6 +614,9 @@ mod tests {
             .expect("the host opens a seat");
         assert_eq!(lobby.freeze(), Err(NotReady::OpenSeat { slot: 3 }));
 
+        lobby
+            .edit(PlayerId::HOST, LobbyEdit::Kick(GUEST))
+            .expect("the host removes the guest");
         for slot in 0..MAX_SLOTS {
             lobby
                 .edit(
@@ -535,6 +629,105 @@ mod tests {
                 .expect("the host closes a seat");
         }
         assert_eq!(lobby.freeze(), Err(NotReady::NoSeats));
+    }
+
+    #[test]
+    fn a_guests_slot_is_opened_by_a_kick_and_by_no_other_edit() {
+        let mut lobby = joined();
+
+        for control in [
+            Control::Open,
+            Control::Closed,
+            Control::Bot(Bot::Turtle),
+            Control::Player {
+                player: PlayerId::HOST,
+                ready: true,
+            },
+        ] {
+            assert_eq!(
+                lobby.edit(PlayerId::HOST, LobbyEdit::SetSlot { slot: 2, control }),
+                Err(Refused::HeldByAGuest),
+                "{control:?}"
+            );
+        }
+
+        assert_eq!(lobby, joined(), "a refused edit changes nothing");
+        assert_eq!(lobby.edit(PlayerId::HOST, LobbyEdit::Kick(GUEST)), Ok(()));
+        assert_eq!(lobby.slots()[2].control, Control::Open);
+    }
+
+    #[test]
+    fn a_lobby_the_host_runs_no_seat_of_is_not_a_match() {
+        let mut lobby = joined();
+        lobby
+            .edit(GUEST, LobbyEdit::SetReady { ready: true })
+            .expect("the guest readies");
+        for slot in [0, 1] {
+            lobby
+                .edit(
+                    PlayerId::HOST,
+                    LobbyEdit::SetSlot {
+                        slot,
+                        control: Control::Closed,
+                    },
+                )
+                .expect("the host closes a seat");
+        }
+
+        assert_eq!(lobby.freeze(), Err(NotReady::HostUnseated));
+
+        lobby
+            .edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 1,
+                    control: Control::Bot(Bot::Turtle),
+                },
+            )
+            .expect("the host adds a bot");
+        assert!(
+            lobby.freeze().is_ok(),
+            "a bot of the host's is a seat its machine runs"
+        );
+    }
+
+    #[test]
+    fn every_machine_of_a_frozen_lobby_runs_a_seat_of_it() {
+        let mut lobby = joined();
+        lobby
+            .edit(GUEST, LobbyEdit::SetReady { ready: true })
+            .expect("the guest readies");
+        lobby
+            .edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 0,
+                    control: Control::Closed,
+                },
+            )
+            .expect("the host closes its own seat");
+
+        let started = lobby.freeze().expect("a bot and a ready guest");
+        let seating = started.seating();
+
+        assert_eq!(seating.players(), [PlayerId::HOST, GUEST]);
+        for player in seating.players() {
+            assert!(
+                seating.run_by(player).is_some(),
+                "{player:?} runs no seat of the match it is in"
+            );
+        }
+        let host = seating.run_by(PlayerId::HOST).expect("the host's bot");
+        assert_eq!(host.seats(), [SeatId(0)], "the bot is the host's to run");
+        assert_eq!(
+            host.watched(),
+            SeatId(0),
+            "a host holding no seat watches the one it runs"
+        );
+        assert_eq!(seating.seat(PlayerId::HOST), None);
+        assert_eq!(seating.owner(SeatId(0)), Some(PlayerId::HOST));
+        assert_eq!(seating.owner(SeatId(1)), Some(GUEST));
+        assert_eq!(seating.owner(SeatId(2)), None, "the match holds two seats");
     }
 
     #[test]
@@ -573,7 +766,12 @@ mod tests {
             ]
         );
         assert_eq!(
-            lobby.freeze().expect("two bots are a match").teams().len(),
+            lobby
+                .freeze()
+                .expect("two bots are a match")
+                .setup()
+                .teams()
+                .len(),
             2,
             "the seats a freeze names are the slots that are not closed"
         );

@@ -68,6 +68,8 @@ mod tests {
     use probe_game::display::scene::{Fill, Scene, WheelBand};
     use probe_game::display::screen::Screen;
     use probe_game::display::wheel::Wheel;
+    use probe_game::net::room::Word;
+    use probe_game::screens::flow::Stage;
     use probe_game::screens::play::Play;
     use probe_game::screens::{control, lobby, title};
     use probe_sim::RockId;
@@ -118,7 +120,18 @@ mod tests {
 
     /// The match on screen.
     fn play(session: &Offscreen<Probe>) -> &Play {
-        session.game().flow.play().expect("the match is on screen")
+        match session.game().flow.stage() {
+            Stage::Play { play, .. } => play,
+            _ => panic!("the match is on screen"),
+        }
+    }
+
+    /// The lobby on screen, where the lobby is the screen on.
+    fn lobby(session: &Offscreen<Probe>) -> Option<&probe_protocol::Lobby> {
+        match session.game().flow.stage() {
+            Stage::Lobby { screen, .. } => Some(screen.lobby()),
+            _ => None,
+        }
     }
 
     /// The frame's projection, as the match builds it.
@@ -186,7 +199,7 @@ mod tests {
 
     /// Where the lobby's controls stand, with the lobby on screen.
     fn lobby_places(session: &Offscreen<Probe>) -> lobby::Places {
-        session.game().flow.lobby().expect("the lobby is on screen");
+        lobby(session).expect("the lobby is on screen");
         lobby::Places::over(window())
     }
 
@@ -220,7 +233,7 @@ mod tests {
         session.step();
 
         assert!(
-            session.game().flow.play().is_some(),
+            matches!(session.game().flow.stage(), Stage::Play { .. }),
             "Start was not enabled on the lobby the game opens"
         );
     }
@@ -241,13 +254,7 @@ mod tests {
         click_at(&mut session, control::list_row(team, 2).center());
 
         assert_eq!(
-            session
-                .game()
-                .flow
-                .lobby()
-                .expect("still the lobby")
-                .slots()[1]
-                .team,
+            lobby(&session).expect("still the lobby").slots()[1].team,
             probe_sim::TeamId(2)
         );
     }
@@ -264,7 +271,7 @@ mod tests {
         click(&mut session);
 
         assert!(
-            session.game().flow.lobby().is_none() && session.game().flow.play().is_none(),
+            matches!(session.game().flow.stage(), Stage::Title { .. }),
             "a disabled Quit opens nothing"
         );
         save(&session, "title_quit_reason");
@@ -276,36 +283,28 @@ mod tests {
         let mut session = game();
         session.step();
         click_at(&mut session, title::Places::over(window()).host.center());
-        stepped_until(&mut session, |session| {
-            session.game().flow.lobby().is_some()
-        });
+        stepped_until(&mut session, |session| lobby(session).is_some());
 
         let mut guest = probe_game::net::room::Room::joining(&format!(
             "127.0.0.1:{}",
             probe_protocol::DEFAULT_PORT
         ));
         stepped_until(&mut session, |session| {
-            session
-                .game()
-                .flow
-                .lobby()
+            lobby(session)
                 .is_some_and(|lobby| lobby.slot_of(probe_protocol::PlayerId(1)) == Some(1))
         });
 
         let kick = lobby_places(&session).rows[1].kick;
         click_at(&mut session, kick.center());
         stepped_until(&mut session, |session| {
-            session
-                .game()
-                .flow
-                .lobby()
+            lobby(session)
                 .is_some_and(|lobby| lobby.slots()[1].control == probe_protocol::Control::Open)
         });
 
         let mut heard = Vec::new();
         for _ in 0..PATIENCE {
             heard.extend(guest.heard());
-            if heard.contains(&probe_protocol::Message::Removed) {
+            if heard.contains(&Word::Removed) {
                 return;
             }
             session.step();
@@ -324,17 +323,12 @@ mod tests {
             &mut session,
             title::Places::over(window()).skirmish.center(),
         );
-        let lobby = session
-            .game()
-            .flow
-            .lobby()
-            .expect("Skirmish opens a lobby")
-            .clone();
+        let opened = lobby(&session).expect("Skirmish opens a lobby").clone();
         assert!(
-            matches!(lobby.slots()[1].control, probe_protocol::Control::Bot(_)),
+            matches!(opened.slots()[1].control, probe_protocol::Control::Bot(_)),
             "a skirmish seats a bot in seat one"
         );
-        assert_eq!(lobby.seat_of(1), Some(probe_sim::SeatId(1)));
+        assert_eq!(opened.seat_of(1), Some(probe_sim::SeatId(1)));
 
         // The shortest clock the lobby offers, so the drive reaches the
         // standings: the first value of the clock's own list.
@@ -342,12 +336,7 @@ mod tests {
         click_at(&mut session, clock.center());
         save(&session, "lobby");
         click_at(&mut session, control::list_row(clock, 0).center());
-        let shortest = session
-            .game()
-            .flow
-            .lobby()
-            .expect("still the lobby")
-            .clock();
+        let shortest = lobby(&session).expect("still the lobby").clock();
         assert_eq!(shortest, *probe_protocol::CLOCK_RANGE.start());
 
         let act = lobby_places(&session).act;
@@ -361,17 +350,12 @@ mod tests {
         placed(&mut session);
         paused(&mut session);
 
-        while session
-            .game()
-            .flow
-            .play()
-            .is_some_and(|play| play.view().standings.is_none())
-        {
+        while matches!(session.game().flow.stage(), Stage::Play { play, .. } if !play.over()) {
             advance(&mut session, 1);
         }
         session.step();
         assert!(
-            session.game().flow.results().is_some(),
+            matches!(session.game().flow.stage(), Stage::Results { .. }),
             "the clock runs out into the results"
         );
         // The step that hands over still draws the match; the next one is

@@ -5,7 +5,6 @@ use probe_sim::{SeatId, Tick};
 
 use crate::display::glyph_quad::seat_color32;
 use crate::screens::control::{Controls, Rule};
-use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 
 /// How wide a waiting seat's colour stands, in points.
@@ -13,6 +12,14 @@ const SWATCH: f32 = 22.0;
 
 /// How wide the desync's Leave action stands, in points.
 const WIDTH: f32 = 220.0;
+
+/// What a held match's own action asks for: a desynced match offers Leave
+/// and nothing else, and a waiting one offers nothing at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Picked {
+    /// Leave the match for the title.
+    Leave,
+}
 
 /// Why a match is holding.
 pub enum Held {
@@ -27,7 +34,7 @@ pub enum Held {
 impl Held {
     /// Paints the hold over the whole window, dimming what the HUD drew
     /// under it, and answers what the player picked.
-    pub fn frame(&self, panel: &Panel<'_>) -> Option<Step> {
+    pub fn frame(&self, panel: &Panel<'_>) -> Option<Picked> {
         let window = panel.window();
         panel.scrim(window);
         let middle = window.center();
@@ -59,7 +66,7 @@ impl Held {
                 let mut controls = Controls::over(panel);
                 let left = controls.action(leave, "Leave", &Rule::Allows);
                 controls.finish();
-                left.then_some(Step::Title)
+                left.then_some(Picked::Leave)
             }
         }
     }

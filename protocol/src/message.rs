@@ -1,10 +1,11 @@
 //! What one machine of a match says to another.
 
-use probe_sim::{SeatId, Setup, Stamped, Tick};
+use probe_sim::{SeatId, Stamped, Tick};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
 use crate::lobby::{Lobby, LobbyEdit, NotReady, Refused};
+use crate::seating::Started;
 
 /// Why the room did not do what a machine asked.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
@@ -34,8 +35,9 @@ pub enum Message {
     Lobby(Lobby),
     /// Why the room did nothing, to the machine that asked.
     Refused(Refusal),
-    /// The frozen lobby: every machine builds its initial state from this.
-    Start(Setup),
+    /// The frozen lobby: every machine builds its initial state from this
+    /// and runs the seats it names.
+    Start(Started),
     /// A command, at the tick it takes effect at.
     Command(Stamped),
     /// No command of `seat` before `up_to` is unknown to the sender.

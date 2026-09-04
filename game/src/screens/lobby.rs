@@ -105,12 +105,12 @@ pub struct Asked {
     /// Edits to apply in order; every one is the viewer's to make.
     pub edits: Vec<LobbyEdit>,
     /// The action across the bottom the viewer picked.
-    pub picked: Option<Wants>,
+    pub picked: Option<Picked>,
 }
 
 /// What the lobby's own actions ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Wants {
+pub enum Picked {
     /// Leave the lobby for the title.
     Leave,
     /// Start the match, which only the host is offered.
@@ -403,11 +403,11 @@ impl LobbyScreen {
                 let starts =
                     Rule::unless(self.lobby.freeze().err().map(|why| self.start_reason(why)));
                 if controls.main_action(places.act, "Start", &starts) {
-                    asked.picked = Some(Wants::Start);
+                    asked.picked = Some(Picked::Start);
                 }
             }
             false => {
-                let readies = match self.is_ready() {
+                let readies = match self.lobby.readied(self.me) {
                     true => Rule::refuses("You are ready"),
                     false => self.rule(LobbyEdit::SetReady { ready: true }),
                 };
@@ -417,7 +417,7 @@ impl LobbyScreen {
             }
         }
         if controls.action(places.leave, "Leave", &Rule::Allows) {
-            asked.picked = Some(Wants::Leave);
+            asked.picked = Some(Picked::Leave);
         }
     }
 
@@ -452,15 +452,8 @@ impl LobbyScreen {
             probe_protocol::NotReady::Unready { slot } => {
                 format!("Waiting for {} to be ready", team(slot))
             }
+            probe_protocol::NotReady::HostUnseated => "You hold no seat in this match".to_string(),
         }
-    }
-
-    /// Whether this viewer has readied, which only a person does.
-    fn is_ready(&self) -> bool {
-        self.lobby
-            .slot_of(self.me)
-            .map(|slot| self.lobby.slots()[slot].control)
-            .is_some_and(|control| matches!(control, Control::Player { ready: true, .. }))
     }
 
     /// Opens `choice`'s list, or closes it where it is the open one.
@@ -628,6 +621,7 @@ fn refusal_sentence(why: Refused, edit: LobbyEdit) -> String {
         Refused::BadClock => "The clock does not go that far".to_string(),
         Refused::AlreadySeated => "That player already holds a seat".to_string(),
         Refused::NotAGuest => "That seat holds no guest".to_string(),
+        Refused::HeldByAGuest => "Kick this player to open their seat".to_string(),
     }
 }
 

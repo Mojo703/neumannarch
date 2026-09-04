@@ -9,7 +9,6 @@ pub use records::Records;
 pub use rooms::{Joined, Post, Room, To};
 pub use stream::Hosted;
 
-mod lobby;
 mod playing;
 mod records;
 mod rooms;

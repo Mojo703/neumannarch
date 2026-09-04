@@ -1,7 +1,7 @@
 //! Who speaks for one seat on this machine.
 
 use probe_agents::{Personality, Scripted, Seated};
-use probe_protocol::{Control, Lobby, PlayerId};
+use probe_protocol::{Crew, Holder, Seating};
 use probe_sim::roster::Roster;
 use probe_sim::state::{Command, MAX_COMMANDS_PER_TICK};
 use probe_sim::{SeatId, Sequence, Session, Stamped};
@@ -27,30 +27,26 @@ pub enum Controller {
 }
 
 impl Controller {
-    /// One controller per seat of the match `lobby` freezes into, in seat
-    /// order: the person at this machine in the slot `me` holds, a bot in
-    /// each slot this machine runs one for, and the rest remote.
+    /// One controller per seat of `seating`, in seat order: the person at
+    /// this machine in the seat they hold, a bot in each seat `crew` runs
+    /// one for, and the rest remote.
     ///
     /// Only a host seats a bot, so only the host's machine runs one; on
     /// every other machine that seat is another machine's.
-    pub fn of(lobby: &Lobby, me: PlayerId, roster: &Roster) -> Vec<Controller> {
-        let host = lobby.host() == me;
-        lobby
-            .slots()
-            .iter()
-            .enumerate()
-            .filter_map(|(at, slot)| Some((lobby.seat_of(at)?, slot.control)))
-            .map(|(seat, control)| match control {
-                Control::Player { player, .. } if player == me => {
+    pub fn of(seating: &Seating, crew: &Crew, roster: &Roster) -> Vec<Controller> {
+        seating
+            .seats()
+            .map(|(seat, holder)| match holder {
+                Holder::Player(player) if player == crew.player() => {
                     Controller::Human(Human::new(seat))
                 }
-                Control::Bot(bot) if host => Controller::Bot(Box::new(Seated::new(
-                    seat,
-                    Box::new(Scripted::new(Personality::of(bot), roster.clone())),
-                ))),
-                Control::Bot(_) | Control::Player { .. } | Control::Open | Control::Closed => {
-                    Controller::Remote(seat)
+                Holder::Bot(bot) if crew.seats().contains(&seat) => {
+                    Controller::Bot(Box::new(Seated::new(
+                        seat,
+                        Box::new(Scripted::new(Personality::of(bot), roster.clone())),
+                    )))
                 }
+                Holder::Bot(_) | Holder::Player(_) | Holder::Open => Controller::Remote(seat),
             })
             .collect()
     }
@@ -115,7 +111,7 @@ impl Human {
 
 #[cfg(test)]
 mod tests {
-    use probe_protocol::PlayerId;
+    use probe_protocol::{Control, Lobby, LobbyEdit, PlayerId};
     use probe_sim::roster::SHIPYARD;
     use probe_sim::{Band, Place, Retention, RockId};
 
@@ -138,18 +134,26 @@ mod tests {
 
     fn session(lobby: &Lobby) -> Session {
         Session::new(
-            lobby.freeze().expect("a skirmish is a match"),
+            lobby.freeze().expect("a skirmish is a match").parts().0,
             Retention::shipped(),
             &[],
         )
         .expect("a session owning no seat seats nothing to refuse")
     }
 
+    /// The controllers the machine `me` is at holds of `lobby`'s match.
+    fn controllers(lobby: &Lobby, me: PlayerId) -> Vec<Controller> {
+        let started = lobby.freeze().expect("the lobby is a match");
+        let seating = started.seating();
+        let crew = seating.run_by(me).expect("the machine runs a seat");
+        Controller::of(seating, &crew, &Roster::shipped())
+    }
+
     #[test]
     fn a_skirmish_seats_the_person_at_this_machine_and_runs_its_bot() {
         let lobby = skirmish();
 
-        let controllers = Controller::of(&lobby, PlayerId::HOST, &Roster::shipped());
+        let controllers = controllers(&lobby, PlayerId::HOST);
 
         assert_eq!(controllers.len(), 2, "two held slots are two seats");
         assert!(matches!(controllers[0], Controller::Human(_)));
@@ -163,7 +167,7 @@ mod tests {
         lobby
             .edit(
                 PlayerId::HOST,
-                probe_protocol::LobbyEdit::SetSlot {
+                LobbyEdit::SetSlot {
                     slot: 2,
                     control: Control::Player {
                         player: PlayerId(4),
@@ -173,8 +177,8 @@ mod tests {
             )
             .expect("the host seats a guest");
 
-        let host = Controller::of(&lobby, PlayerId::HOST, &Roster::shipped());
-        let guest = Controller::of(&lobby, PlayerId(4), &Roster::shipped());
+        let host = controllers(&lobby, PlayerId::HOST);
+        let guest = controllers(&lobby, PlayerId(4));
 
         assert!(matches!(host[1], Controller::Bot(_)));
         assert!(
@@ -190,7 +194,7 @@ mod tests {
         lobby
             .edit(
                 PlayerId::HOST,
-                probe_protocol::LobbyEdit::SetSlot {
+                LobbyEdit::SetSlot {
                     slot: 1,
                     control: Control::Player {
                         player: PlayerId(4),
@@ -201,7 +205,7 @@ mod tests {
             .expect("the host seats a guest");
         let session = session(&lobby);
 
-        let mut controllers = Controller::of(&lobby, PlayerId::HOST, &Roster::shipped());
+        let mut controllers = controllers(&lobby, PlayerId::HOST);
 
         assert!(matches!(controllers[1], Controller::Remote(_)));
         assert!(controllers[1].issue(&session).is_empty());

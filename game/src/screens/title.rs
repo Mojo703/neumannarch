@@ -2,11 +2,10 @@
 //! join is typed into.
 
 use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
+use probe_protocol::Refusal;
 
-use crate::net::hosting::{Hosting, NoRoom};
 use crate::screens::control::{Controls, Rule, Valued};
 use crate::screens::field::{Allow, Field, MAX_ADDRESS, Typed};
-use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 
 /// The address a join offers, which is a room served on this machine.
@@ -27,8 +26,6 @@ const NO_QUIT: &str = "Closing is not available in this version";
 /// field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Joining {
-    /// The socket is open and the welcome has not arrived.
-    Connecting,
     /// The socket closed before any welcome, so nothing answers there.
     NoRoom,
     /// Every slot of the room is held.
@@ -43,13 +40,21 @@ pub enum Joining {
     Removed,
 }
 
-/// The title screen: the address a join would use, and the room this
-/// machine serves while the title is on screen.
+/// The title screen: the address a join would use, kept as it was typed
+/// for as long as the game runs.
 pub struct Title {
     address: Field,
-    /// The room Host hands to the flow, or why none is served, which is
-    /// what disables Host.
-    hosting: Result<Hosting, NoRoom>,
+}
+
+/// What the title's actions ask for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Picked {
+    /// A lobby of seats all on this machine.
+    Skirmish,
+    /// Serve a room here and join it.
+    Host,
+    /// Join the room at this address, as `host:port`.
+    Join(String),
 }
 
 /// Where the title's controls stand, which its paint, its hit test and the
@@ -65,10 +70,20 @@ pub struct Places {
 }
 
 impl Joining {
+    /// What the join field says about a refusal, where it is one a joining
+    /// machine hears; `None` for a refusal only a machine already in the
+    /// room is sent, which the lobby the room broadcasts answers.
+    pub fn refused(why: Refusal) -> Option<Joining> {
+        match why {
+            Refusal::Full => Some(Joining::Full),
+            Refusal::Version => Some(Joining::Version),
+            Refusal::Edit(_) | Refusal::NotReady(_) => None,
+        }
+    }
+
     /// The one line the join field shows about it.
     pub fn sentence(self) -> &'static str {
         match self {
-            Joining::Connecting => "Connecting",
             Joining::NoRoom => "No room at this address",
             Joining::Full => "The room is full",
             Joining::Version => "That version differs",
@@ -102,29 +117,27 @@ impl Places {
 }
 
 impl Title {
-    /// The title as the game opens on it, serving a room this machine can
-    /// host and offering a join to it.
-    ///
-    /// The room is served here, so Host is offered exactly where a click
-    /// on it will work.
+    /// The title as the game opens on it, offering a join to the room this
+    /// machine would serve.
     pub fn opening() -> Title {
         Title {
             address: Field::holding(
                 &format!("{LOOPBACK}:{}", probe_protocol::DEFAULT_PORT),
                 Allow::Text(MAX_ADDRESS),
             ),
-            hosting: Hosting::opened(),
         }
     }
 
-    /// Paints the title and answers what the player picked. `joining` is
-    /// what the last join of an address did.
+    /// Paints the title and answers what the player picked. `hosts` is
+    /// whether a room is served for Host to join, and `said` what the join
+    /// field shows about the last join or the last room.
     pub fn frame(
         &mut self,
         panel: &Panel<'_>,
         typed: &Typed,
-        joining: Option<Joining>,
-    ) -> Option<Step> {
+        hosts: &Rule,
+        said: Option<&'static str>,
+    ) -> Option<Picked> {
         panel.backdrop();
         let window = panel.window();
         let heading = Pos2::new(window.center().x, window.top() + panel::MARGIN * 2.0);
@@ -138,38 +151,30 @@ impl Title {
         );
 
         let places = Places::over(window);
-        let hosts = Rule::unless(
-            self.hosting
-                .as_ref()
-                .err()
-                .map(|why| why.reason().to_string()),
-        );
         let mut controls = Controls::over(panel);
-        let mut step = None;
+        let mut picked = None;
         if controls.action(places.skirmish, "Skirmish", &Rule::Allows) {
-            step = Some(Step::Skirmish);
+            picked = Some(Picked::Skirmish);
         }
-        if controls.action(places.host, "Host", &hosts)
-            && let Ok(hosting) = core::mem::replace(&mut self.hosting, Err(NoRoom::Held))
-        {
-            step = Some(Step::Host(hosting));
+        if controls.action(places.host, "Host", hosts) {
+            picked = Some(Picked::Host);
         }
         let typing = controls.value(
             Valued {
                 rect: places.join,
                 rule: &Rule::Allows,
                 inside: Some(("Join", &Rule::Allows)),
-                state: joining.map(Joining::sentence),
+                state: said,
             },
             &mut self.address,
             typed,
         );
         if typing.entered || typing.acted {
-            step = Some(Step::Join(self.address.text().to_string()));
+            picked = Some(Picked::Join(self.address.text().to_string()));
         }
         controls.action(places.settings, "Settings", &Rule::refuses(NO_SETTINGS));
         controls.action(places.quit, "Quit", &Rule::refuses(NO_QUIT));
         controls.finish();
-        step
+        picked
     }
 }

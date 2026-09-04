@@ -1,7 +1,7 @@
 //! The belt camera: a focus point moving at the local circular orbital
 //! velocity, seen from a fixed tilt, with pan and zoom.
 
-use core::ops::RangeInclusive;
+use core::ops::{Range, RangeInclusive};
 
 use mirage_engine::math;
 use mirage_engine::{Camera, Projection, View};
@@ -105,7 +105,7 @@ impl BeltCamera {
     pub fn engine_camera(&self) -> Camera {
         Camera::new(
             View::look_at(self.local(self.eye()), math::Vec3::ZERO),
-            Projection::perspective(Self::FOV_DEGREES),
+            Projection::perspective(Self::FOV_DEGREES).clip(Self::clip_range()),
         )
     }
 
@@ -130,6 +130,16 @@ impl BeltCamera {
 
     fn within_zoom_range(distance: f64) -> f64 {
         distance.clamp(*Self::ZOOM_RANGE.start(), *Self::ZOOM_RANGE.end())
+    }
+
+    /// Clip planes for [`Self::engine_camera`]'s lens, derived from
+    /// [`Self::ZOOM_RANGE`]: the near plane sits a tenth of the nearest
+    /// zoom in front of the eye, and the far plane sits twice the farthest
+    /// zoom out, past both the farthest eye and a belt region that far
+    /// again beyond its focus.
+    fn clip_range() -> Range<f32> {
+        let (nearest, farthest) = (*Self::ZOOM_RANGE.start(), *Self::ZOOM_RANGE.end());
+        (nearest / 10.0) as f32..(farthest * 2.0) as f32
     }
 }
 
@@ -231,6 +241,25 @@ mod tests {
 
         camera.zoom(0.0);
         assert_eq!(camera.distance(), *BeltCamera::ZOOM_RANGE.start());
+    }
+
+    #[test]
+    fn the_farthest_zoom_clips_far_enough_for_a_region_beyond_the_focus() {
+        let camera = BeltCamera::new(Vec3::ZERO, *BeltCamera::ZOOM_RANGE.end());
+        let screen = crate::display::screen::Screen::of(&camera, WINDOW, 1.0);
+        assert!(
+            screen.pixel_of(camera.focus()).is_some(),
+            "the focus must render at the farthest zoom"
+        );
+
+        let region_depth = *BeltCamera::ZOOM_RANGE.end() - *BeltCamera::ZOOM_RANGE.start();
+        let needed = camera.distance() + region_depth;
+        let far = f64::from(camera.engine_camera().projection().far());
+
+        assert!(
+            far > needed,
+            "far clip {far} does not reach {needed}, one region past the focus"
+        );
     }
 
     #[test]

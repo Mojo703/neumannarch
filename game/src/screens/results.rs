@@ -16,7 +16,6 @@ use crate::display::screen::Screen;
 use crate::display::stencil::Stencil;
 use crate::display::{belt, hud};
 use crate::screens::control::{Controls, Rule};
-use crate::screens::flow::Step;
 use crate::screens::panel::{self, Panel};
 
 /// How wide the standings panel stands, in points.
@@ -43,6 +42,16 @@ const WINNER_FROM: f32 = 84.0;
 /// How far into a team's row its rocks begin, in points, clear of its name
 /// and its own mark.
 const ROCKS_FROM: f32 = 176.0;
+
+/// What the results' own actions ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Picked {
+    /// Set the same shape up again, which only the host of a room is
+    /// offered.
+    Rematch,
+    /// Leave for the title.
+    Leave,
+}
 
 /// The end of a match: what each team held, the belt it ended on, and the
 /// lobby it came from, which a rematch returns to unchanged.
@@ -78,7 +87,7 @@ impl Results {
         &mut self,
         ctx: &mut FrameCtx<'_, G>,
         rematch: &Rule,
-    ) -> Option<Step>
+    ) -> Option<Picked>
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
@@ -160,7 +169,7 @@ fn paint(
     standings: &Standings,
     teams: &[TeamId],
     rematch: &Rule,
-) -> Option<Step> {
+) -> Option<Picked> {
     let window = panel.window();
     let rows = standings.teams().len();
     let height = panel::ROW_HEIGHT * (rows as f32 * 1.25 + 6.0);
@@ -195,10 +204,10 @@ fn paint(
     let mut controls = Controls::over(panel);
     let mut picked = None;
     if controls.action(again, "Rematch", rematch) {
-        picked = Some(Step::Rematch);
+        picked = Some(Picked::Rematch);
     }
     if controls.action(leave, "Leave", &Rule::Allows) {
-        picked = Some(Step::Title);
+        picked = Some(Picked::Leave);
     }
     controls.finish();
     picked

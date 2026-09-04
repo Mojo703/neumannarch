@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use probe_protocol::{Control, Lobby, Message, PlayerId, Record};
+use probe_protocol::{Message, PlayerId, Record, Seating, Started};
 use probe_sim::{SeatId, Setup, Stamped, Tick};
 
 use crate::records::Ledger;
@@ -23,8 +23,8 @@ const KEPT_REPORTS: usize = 64;
 /// steps no sim: it forwards, it collects hashes, and it declares a desync.
 pub(crate) struct Playing {
     setup: Setup,
-    /// The machine that owns each seat, in seat order.
-    owners: Vec<PlayerId>,
+    /// Who holds each seat, which says whose commands the room forwards.
+    seating: Seating,
     ledger: Ledger,
     /// What each member reported at a settled tick.
     reports: BTreeMap<Tick, Vec<(PlayerId, u64)>>,
@@ -35,23 +35,14 @@ pub(crate) struct Playing {
 }
 
 impl Playing {
-    /// The match `setup` starts, with each seat owned by the machine
-    /// `lobby` gives it: a slot's own player, and the host for every bot,
-    /// since only the host seats one.
-    pub(crate) fn started(lobby: &Lobby, setup: Setup) -> Playing {
-        let owners = lobby
-            .slots()
-            .iter()
-            .filter(|slot| slot.control != Control::Closed)
-            .map(|slot| match slot.control {
-                Control::Player { player, .. } => player,
-                Control::Bot(_) | Control::Open | Control::Closed => lobby.host(),
-            })
-            .collect();
+    /// The match `started` names, with each seat run by the machine its
+    /// seating gives it.
+    pub(crate) fn started(started: Started) -> Playing {
+        let (setup, seating) = started.parts();
         Playing {
             ledger: Ledger::of(setup.clock()),
             setup,
-            owners,
+            seating,
             reports: BTreeMap::new(),
             desynced: None,
             gone: Vec::new(),
@@ -60,7 +51,7 @@ impl Playing {
 
     /// Passes `up_to` on to every other machine, where `from` owns `seat`.
     pub(crate) fn acknowledged(&self, from: PlayerId, seat: SeatId, up_to: Tick) -> Vec<Post> {
-        match self.owns(from, seat) {
+        match self.seating.owner(seat) == Some(from) {
             true => vec![Post::to(
                 To::EveryoneElse,
                 Message::Acknowledge { seat, up_to },
@@ -76,7 +67,9 @@ impl Playing {
     /// refused: a machine that forges another's seat has not made a
     /// mistake to be told about.
     pub(crate) fn commanded(&mut self, from: PlayerId, stamped: Stamped) -> Vec<Post> {
-        match self.owns(from, stamped.issued.seat) && self.ledger.take(stamped).is_ok() {
+        match self.seating.owner(stamped.issued.seat) == Some(from)
+            && self.ledger.take(stamped).is_ok()
+        {
             true => vec![Post::to(To::EveryoneElse, Message::Command(stamped))],
             false => Vec::new(),
         }
@@ -88,7 +81,8 @@ impl Playing {
         if !self.gone.contains(&who) {
             self.gone.push(who);
         }
-        self.seats_of(who)
+        self.seating
+            .seats_of(who)
             .map(|seat| {
                 Post::to(
                     To::Everyone,
@@ -117,7 +111,7 @@ impl Playing {
         if self.desynced.is_some() || tick > self.setup.clock() {
             return Vec::new();
         }
-        let machines = self.machines();
+        let machines = self.members().len();
         let at = self.reports.entry(tick).or_default();
         let differs = at.iter().any(|(_, held)| *held != hash);
         if !at.iter().any(|(who, _)| *who == from) {
@@ -137,31 +131,14 @@ impl Playing {
         }
     }
 
-    /// How many machines are still in the match, which is how many reports
-    /// one tick is agreed by.
-    fn machines(&self) -> usize {
-        let mut owners: Vec<PlayerId> = self
-            .owners
-            .iter()
-            .copied()
-            .filter(|owner| !self.gone.contains(owner))
-            .collect();
-        owners.sort_unstable();
-        owners.dedup();
-        owners.len()
-    }
-
-    /// Whether `who` owns `seat`.
-    fn owns(&self, who: PlayerId, seat: SeatId) -> bool {
-        self.owners.get(usize::from(seat.0)) == Some(&who)
-    }
-
-    /// The seats `who` owns, in seat order.
-    fn seats_of(&self, who: PlayerId) -> impl Iterator<Item = SeatId> + '_ {
-        self.owners
-            .iter()
-            .enumerate()
-            .filter(move |(_, owner)| **owner == who)
-            .map(|(at, _)| SeatId(at as u8))
+    /// The machines still in the match: those the seating gives a seat to
+    /// and that have not left. How many of them there are is how many
+    /// reports one tick is agreed by.
+    pub(crate) fn members(&self) -> Vec<PlayerId> {
+        self.seating
+            .players()
+            .into_iter()
+            .filter(|player| !self.gone.contains(player))
+            .collect()
     }
 }

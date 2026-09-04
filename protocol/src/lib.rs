@@ -9,6 +9,7 @@ pub use lobby::{
 };
 pub use message::{Message, Refusal};
 pub use record::{BadRecord, Record};
+pub use seating::{Crew, Holder, Seating, Started};
 pub use wire::{Malformed, Wire};
 
 /// The port a room is served on, and the one a join offers: no registered
@@ -31,4 +32,5 @@ mod ids;
 mod lobby;
 mod message;
 mod record;
+mod seating;
 mod wire;

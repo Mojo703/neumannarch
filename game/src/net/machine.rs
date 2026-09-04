@@ -1,10 +1,10 @@
 //! This machine's part of one match: every seat stepped, its own seats
 //! spoken for, and what its peers are told.
 
-use probe_protocol::{Control, Lobby, Message, PlayerId};
+use probe_protocol::{Crew, Message, Started};
 use probe_sim::state::view::View;
 use probe_sim::step::fire::Shots;
-use probe_sim::{Retention, Rewound, SeatId, Session, Setup, Tick, Unseated};
+use probe_sim::{Retention, Rewound, SeatId, Session, Tick};
 
 use crate::net::controller::{Controller, Human};
 use crate::net::pace::{ACKNOWLEDGE_INTERVAL, Allowed, Pace, REPORT_INTERVAL};
@@ -20,25 +20,15 @@ pub struct Ticked {
     pub rewound: bool,
 }
 
-/// Why this machine cannot play the match it was given.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unplayable {
-    /// The setup does not seat a seat this machine owns.
-    NoSeat(Unseated),
-    /// The lobby holds no slot for the person at this machine.
-    NoSlot,
-}
-
 /// One match as this machine plays it: the session every seat is stepped
 /// in, one controller per seat, and the pace it keeps with its peers. The
 /// transport is the caller's, so a room outlives the match played in it.
 pub struct Machine {
-    seat: SeatId,
+    /// The seats this machine runs, and the one it watches.
+    crew: Crew,
     session: Session,
     controllers: Vec<Controller>,
     pace: Pace,
-    /// The seats this machine speaks for, in seat order.
-    local: Vec<SeatId>,
     /// How many other machines are in this match.
     peers: usize,
     /// Whether every machine has built the match and agreed its first hash.
@@ -50,44 +40,28 @@ pub struct Machine {
 }
 
 impl Machine {
-    /// The match `setup` names, as the person holding `me`'s slot of
-    /// `lobby` plays it, speaking to its peers through `transport`.
+    /// The match `started` names, as the machine `crew` is the seats of
+    /// plays it, speaking to its peers through `transport`.
     ///
     /// It reports its own hash at tick zero at once, which is what every
     /// machine agrees the match on before the first step.
-    pub fn of(
-        lobby: &Lobby,
-        setup: Setup,
-        me: PlayerId,
-        transport: &mut dyn Transport,
-    ) -> Result<Machine, Unplayable> {
-        let seat = lobby
-            .slot_of(me)
-            .and_then(|slot| lobby.seat_of(slot))
-            .ok_or(Unplayable::NoSlot)?;
-        let local: Vec<SeatId> = lobby
-            .slots()
-            .iter()
-            .enumerate()
-            .filter(|(_, slot)| mine(lobby, me, slot.control))
-            .filter_map(|(at, _)| lobby.seat_of(at))
-            .collect();
-        let session =
-            Session::new(setup, Retention::shipped(), &local).map_err(Unplayable::NoSeat)?;
-        let controllers = Controller::of(lobby, me, session.state().roster());
-        let peers = peers(lobby, me);
+    pub fn of(started: Started, crew: &Crew, transport: &mut dyn Transport) -> Machine {
+        let (setup, seating) = started.parts();
+        let session = Session::new(setup, Retention::shipped(), crew.seats())
+            .expect("a crew's seats are the seats of the setup it was frozen with");
+        let controllers = Controller::of(&seating, crew, session.state().roster());
+        let peers = seating.peers_of(crew.player());
         transport.report(Tick::ZERO, session.state().hash());
-        Ok(Machine {
-            seat,
+        Machine {
+            crew: crew.clone(),
             session,
             controllers,
             pace: Pace::shipped(),
-            local,
             peers,
             agreed: peers == 0,
             desynced: None,
             reported: Tick::ZERO,
-        })
+        }
     }
 
     /// Whether every machine has built the match and agreed its first hash,
@@ -110,7 +84,7 @@ impl Machine {
 
     /// The person at this machine, to take a command for the next tick.
     pub fn human(&mut self) -> Option<&mut Human> {
-        let seat = self.seat;
+        let seat = self.crew.watched();
         self.controllers
             .iter_mut()
             .find(|controller| controller.seat() == seat)
@@ -127,9 +101,10 @@ impl Machine {
         rewound
     }
 
-    /// The seat the person at this machine plays.
+    /// The seat this machine watches: the person's own where they hold one,
+    /// else the first seat the machine runs.
     pub fn seat(&self) -> SeatId {
-        self.seat
+        self.crew.watched()
     }
 
     /// The session at the tick it shows.
@@ -169,7 +144,7 @@ impl Machine {
             .session
             .outcome()
             .map_or(&quiet, |outcome| &outcome.shots);
-        View::of(self.session.state(), self.seat, shots)
+        View::of(self.session.state(), self.crew.watched(), shots)
     }
 
     /// The seats the match is waiting on: those acknowledged no further
@@ -253,7 +228,7 @@ impl Machine {
     fn tell(&mut self, transport: &mut dyn Transport) {
         let latest = self.session.state().tick();
         if latest.0.is_multiple_of(ACKNOWLEDGE_INTERVAL) {
-            for seat in &self.local {
+            for seat in self.crew.seats() {
                 transport.acknowledge(*seat, latest);
             }
         }
@@ -267,27 +242,52 @@ impl Machine {
     }
 }
 
-/// Whether the machine `me` is at plays `control`: its own slot, and every
-/// bot, which only a host seats and only a host runs.
-fn mine(lobby: &Lobby, me: PlayerId, control: Control) -> bool {
-    match control {
-        Control::Player { player, .. } => player == me,
-        Control::Bot(_) => lobby.host() == me,
-        Control::Open | Control::Closed => false,
-    }
-}
+#[cfg(test)]
+mod tests {
+    use probe_protocol::{Bot, Control, Lobby, LobbyEdit, PlayerId};
 
-/// How many other machines play the match `lobby` freezes into.
-fn peers(lobby: &Lobby, me: PlayerId) -> usize {
-    let mut players: Vec<PlayerId> = lobby
-        .slots()
-        .iter()
-        .filter_map(|slot| match slot.control {
-            Control::Player { player, .. } if player != me => Some(player),
-            Control::Player { .. } | Control::Bot(_) | Control::Open | Control::Closed => None,
-        })
-        .collect();
-    players.sort_unstable();
-    players.dedup();
-    players.len()
+    use super::*;
+    use crate::net::local::Local;
+
+    const GUEST: PlayerId = PlayerId(1);
+
+    #[test]
+    fn a_guest_of_a_host_that_runs_a_bot_from_a_closed_slot_waits_for_the_first_agreed_hash() {
+        let mut lobby = Lobby::room(PlayerId::HOST);
+        for edit in [
+            LobbyEdit::SetSlot {
+                slot: 1,
+                control: Control::Player {
+                    player: GUEST,
+                    ready: true,
+                },
+            },
+            LobbyEdit::SetSlot {
+                slot: 2,
+                control: Control::Bot(Bot::Turtle),
+            },
+            LobbyEdit::SetSlot {
+                slot: 0,
+                control: Control::Closed,
+            },
+        ] {
+            lobby.edit(PlayerId::HOST, edit).expect("the host's shape");
+        }
+        let started = lobby.freeze().expect("a ready guest and the host's bot");
+        let crew = started
+            .seating()
+            .run_by(GUEST)
+            .expect("the guest holds a seat");
+
+        let machine = Machine::of(started, &crew, &mut Local);
+
+        assert!(
+            !machine.alone(),
+            "the host's machine runs the bot, so the guest has a peer"
+        );
+        assert!(
+            !machine.agreed(),
+            "a match with a peer starts once both machines report the same first hash"
+        );
+    }
 }

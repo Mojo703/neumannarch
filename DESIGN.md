@@ -43,9 +43,12 @@ roster in `sim`, never here.
   owns its shape: the map's seed, the clock, the teams, and what holds
   each seat: a player, a bot with a personality, open, meaning a player
   may still take it, or closed, meaning the seat is not in the match. A guest owns only their own seat's team, within the host's
-  shape, and their readiness. The host starts the match when every player
-  is ready and every seat is held or closed. A skirmish is a lobby whose
-  seats are all on one machine.
+  shape, and their readiness. A seat a guest holds is the guest's until
+  the host removes them, which opens it. The host starts the match when
+  every player is ready, every seat is held or closed, and the host
+  holds a seat, its own or a bot's, so every machine in a match plays at
+  least one seat. A skirmish is a lobby whose seats are all on one
+  machine.
 
 ## World
 
@@ -176,25 +179,24 @@ composition per player. The verb sets one count.
   velocity. It is never an entity and never drawn. All seats at a place
   share its anchor.
 - **Sends.** Units re-homed in one tick from one place to another make one
-  flight. A flight is one solved transfer between the two anchors: two
-  impulses, the first at the departure tick and the second at the arrival
-  tick, each spread into a burn per row that thrusts at that row's movement
-  limit for as long as the impulse needs. The arrival tick is the earliest
-  at which every row's two burns fit inside the flight without overlapping,
-  so a send arrives together and the slowest row sets the tick. A flight's
-  own anchor is its departure state under the first impulse, propagated;
-  that anchor is what every ship of the send follows. A unit is flying from
-  the tick it joins a flight until it is within the arrival distance of its
-  destination anchor.
+  send. A send is one schedule of thrust per row in it, solved when the
+  send begins: a sequence of thrusts, one per tick, each within the row's
+  movement limit, whose integration by the sim's own propagation carries
+  a ship from the source anchor's orbit to the destination anchor's orbit
+  at the arrival tick, to within a stated tolerance. The arrival tick is
+  the earliest at which every row's schedule exists, so a send arrives
+  together and the slowest row sets the tick. Every ship of the send
+  departs at once; ships of one row fly one schedule, so their offsets
+  from each other at departure are carried to arrival. A unit is flying
+  from the tick it joins a send until its schedule ends, when it is on
+  its destination anchor's orbit and holds there.
 - **The attractor.** Each tick every unit has one attractor, a position and
-  a velocity, the first of these that applies: its flight's anchor, while
-  the arrival tick has not passed; its home anchor, once the arrival tick
-  has passed, and the flight ends for that ship when it is within the
-  arrival distance of that anchor; the point at half its longest weapon
-  range from the nearest enemy its seat can see inside the leash, on the
-  line from that enemy toward the ship, moving at that enemy's velocity;
-  otherwise its home anchor. It never retreats. Radar contacts are not
-  chased.
+  a velocity, the first of these that applies: nothing, while it flies a
+  schedule, when manoeuvring serves separation alone; the point at half
+  its longest weapon range from the nearest enemy its seat can see inside
+  the leash, on the line from that enemy toward the ship, moving at that
+  enemy's velocity; otherwise its home anchor. It never retreats. Radar
+  contacts are not chased.
 - **Manoeuvring.** Each tick a unit thrusts once, within its manoeuvring
   limit, by the sum of two terms. The first is a pull to its attractor,
   proportional to the offset from the unit's position to the attractor's
