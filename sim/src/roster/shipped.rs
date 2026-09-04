@@ -1,4 +1,4 @@
-use super::row::{Row, Weapon};
+use super::row::{Row, Weapon, Weights};
 use crate::ids::RowId;
 use crate::materials::Materials;
 use crate::real::Real;
@@ -15,6 +15,15 @@ const STORE: Materials = Materials::new(500.0, 500.0, 500.0);
 
 pub(super) const MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED: f64 = 4.0;
 
+const HELD: Weights = Weights {
+    wander: Real(0.3),
+    returning: Real(1.0),
+    separation: Real(20.0),
+    cohesion: Real(2.0),
+    caution: Real(8.0),
+    chase: Real(1.0),
+};
+
 pub(super) fn rows() -> Vec<Row> {
     vec![
         row(
@@ -22,6 +31,10 @@ pub(super) fn rows() -> Vec<Row> {
             Materials::new(30.0, 10.0, 10.0),
             50.0,
             1.0,
+            Weights {
+                caution: Real(12.0),
+                ..HELD
+            },
             vec![Weapon::Build { rate: Real(3.0) }],
         ),
         row(
@@ -29,6 +42,7 @@ pub(super) fn rows() -> Vec<Row> {
             Materials::new(40.0, 0.0, 10.0),
             120.0,
             0.0,
+            Weights::STILL,
             vec![Weapon::Extract { rate: Real(2.0) }],
         ),
         Row {
@@ -38,6 +52,7 @@ pub(super) fn rows() -> Vec<Row> {
                 Materials::new(30.0, 0.0, 10.0),
                 150.0,
                 0.0,
+                Weights::STILL,
                 vec![],
             )
         },
@@ -48,6 +63,7 @@ pub(super) fn rows() -> Vec<Row> {
                 Materials::new(100.0, 0.0, 40.0),
                 300.0,
                 0.0,
+                Weights::STILL,
                 vec![Weapon::Build { rate: Real(15.0) }],
             )
         },
@@ -56,6 +72,13 @@ pub(super) fn rows() -> Vec<Row> {
             Materials::new(20.0, 20.0, 5.0),
             40.0,
             2.0,
+            Weights {
+                wander: Real(0.5),
+                cohesion: Real(1.5),
+                caution: Real(5.0),
+                chase: Real(1.2),
+                ..HELD
+            },
             vec![Weapon::Damage {
                 range: Real(3.0),
                 rate: Real(4.0),
@@ -69,7 +92,11 @@ pub(super) fn rows() -> Vec<Row> {
                 "frigate",
                 Materials::new(80.0, 10.0, 30.0),
                 150.0,
-                0.5,
+                1.25,
+                Weights {
+                    cohesion: Real(2.5),
+                    ..HELD
+                },
                 vec![Weapon::Damage {
                     range: Real(6.0),
                     rate: Real(2.0),
@@ -83,6 +110,12 @@ pub(super) fn rows() -> Vec<Row> {
             Materials::new(40.0, 5.0, 40.0),
             60.0,
             0.75,
+            Weights {
+                cohesion: Real(3.0),
+                caution: Real(12.0),
+                chase: Real(0.8),
+                ..HELD
+            },
             vec![Weapon::Damage {
                 range: Real(14.0),
                 rate: Real(1.0),
@@ -98,13 +131,14 @@ fn row(
     cost: Materials,
     hp: f64,
     manoeuvring: f64,
+    steering: Weights,
     weapons: Vec<Weapon>,
 ) -> Row {
     Row {
         name,
         cost,
-        mass: Real(cost.metals),
         manoeuvring: Real(manoeuvring),
+        steering,
         hp: Real(hp),
         plating: Real(0.0),
         capacity: Materials::ZERO,
@@ -164,9 +198,18 @@ mod tests {
     }
 
     #[test]
-    fn mass_equals_the_metals_cost() {
-        for row in rows() {
-            assert_eq!(row.mass.0, row.cost.metals, "{}", row.name);
+    fn a_structure_holds_by_nothing_and_a_unit_by_every_term() {
+        for (_, row) in Roster::shipped().iter() {
+            match row.kind() {
+                Kind::Structure => assert_eq!(row.steering, Weights::STILL, "{}", row.name),
+                Kind::Unit => {
+                    assert!(row.steering.returning.0 > 0.0, "{}", row.name);
+                    assert!(row.steering.wander.0 > 0.0, "{}", row.name);
+                    assert!(row.steering.separation.0 > 0.0, "{}", row.name);
+                    assert!(row.steering.cohesion.0 > 0.0, "{}", row.name);
+                    assert!(row.steering.caution.0 > 0.0, "{}", row.name);
+                }
+            }
         }
     }
 }

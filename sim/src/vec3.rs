@@ -43,6 +43,14 @@ impl Vec3 {
     pub fn distance(self, other: Vec3) -> f64 {
         (self - other).length()
     }
+
+    pub fn capped(self, limit: f64) -> Vec3 {
+        let length = self.length();
+        match length > limit {
+            true => self * (limit / length),
+            false => self,
+        }
+    }
 }
 
 impl Add for Vec3 {
@@ -123,5 +131,15 @@ mod tests {
     #[test]
     fn negative_zero_is_a_different_value() {
         assert_ne!(Vec3::new(-0.0, 0.0, 0.0), Vec3::ZERO);
+    }
+
+    #[test]
+    fn capped_shortens_a_vector_past_the_limit_and_keeps_its_direction() {
+        let big = Vec3::new(3.0, 4.0, 0.0);
+        let cut = big.capped(2.5);
+        assert!((cut.length() - 2.5).abs() < 1e-12);
+        assert!(cut.distance(big * (2.5 / 5.0)) < 1e-12);
+        let small = Vec3::new(0.1, 0.0, 0.0);
+        assert_eq!(small.capped(1.0), small);
     }
 }

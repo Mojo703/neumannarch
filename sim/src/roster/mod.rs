@@ -1,6 +1,6 @@
 use core::ops::Index;
 
-pub use row::{Kind, Row, Weapon};
+pub use row::{Kind, Row, Weapon, Weights};
 pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
 
 use crate::ids::RowId;
@@ -23,6 +23,20 @@ impl Roster {
     pub fn moving_at(self, movement_limit: Real) -> Roster {
         Roster {
             movement_limit,
+            ..self
+        }
+    }
+
+    pub fn units_by(self, adjust: impl Fn(Row) -> Row) -> Roster {
+        Roster {
+            rows: self
+                .rows
+                .into_iter()
+                .map(|row| match row.kind() {
+                    Kind::Structure => row,
+                    Kind::Unit => adjust(row),
+                })
+                .collect(),
             ..self
         }
     }
@@ -90,6 +104,24 @@ mod tests {
         assert_eq!(slow.movement_limit(), Real(1e-6));
         assert_eq!(slow.len(), shipped.len());
         assert_eq!(slow[LANCER], shipped[LANCER]);
+    }
+
+    #[test]
+    fn units_by_adjusts_every_unit_row_and_leaves_the_structures_alone() {
+        let shipped = Roster::shipped();
+        let bolder = shipped.clone().units_by(|row| Row {
+            steering: Weights {
+                chase: Real(row.steering.chase.0 * 3.0),
+                ..row.steering
+            },
+            ..row
+        });
+        assert_eq!(
+            bolder[LANCER].steering.chase,
+            Real(shipped[LANCER].steering.chase.0 * 3.0)
+        );
+        assert_eq!(bolder[LANCER].hp, shipped[LANCER].hp);
+        assert_eq!(bolder[SHIPYARD].steering, Weights::STILL);
     }
 
     #[test]

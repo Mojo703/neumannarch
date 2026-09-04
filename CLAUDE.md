@@ -48,6 +48,14 @@ off on without comments.
 - Idiomatic Rust per the API Guidelines: precise names, newtypes over bare
   primitives where meaning exists, iterators over index loops, no `clone()`
   to dodge a borrow you could restructure.
+- No new type whose fields are copies of another type's fields (owner,
+  2026-09-05). A type is added only where it owns a fact no existing
+  type owns; a bag of values borrowed from an entity, a row or a rock is
+  not a type, it is a function over them. Before adding a type an agent
+  names the existing type that owns the nearest fact and extends it. A
+  replacement system is built from the existing types first: a brief
+  names the types the build must reuse, and a build that grows a
+  parallel set of them is a defect.
 - A function belongs to the type that is its primary subject; a subject
   with no type is a missing type — create it, then the function is its
   method. A free function stays only where no argument is the subject
@@ -90,6 +98,11 @@ off on without comments.
   message states the change's behavior in the game's vocabulary, never
   process nouns (milestones, units, reviews, verification). Design docs
   commit alongside code, never alone. Read-only git is always fine.
+- An ambiguity stops the work (owner, 2026-09-05): when a brief, a
+  design document or the code admits two readings that lead to different
+  work, the agent stops, reports the question with the readings it sees,
+  and waits; it never picks one and proceeds. Stopping to ask is never
+  a defect; guessing is.
 - Critique before building on unfinished work: an agent dispatched onto an
   in-flight tree first reports the defects, doubts and shapes it would not
   have chosen in what it inherits, and implements only after the overseer

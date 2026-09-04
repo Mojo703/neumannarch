@@ -26,7 +26,7 @@ document.
    `Orbit::at(t + dt)` equals `propagate(orbit.at(t), dt)` over a spread of
    orbits and spans. Every send is one solved transfer between two rocks,
    flown from a schedule the solver integrated to the tolerance the step
-   flies it to; beyond it the only code steering a ship is manoeuvring.
+   flies it to; beyond it the only code steering a ship is the holding rule.
 4. **Determinism by construction.** `f64` only, transcendentals through
    `libm`, ordered containers, id-ordered iteration, no clocks, no
    randomness. The state hash is derived from every field, never listed.
@@ -128,7 +128,7 @@ pub struct Entity {
 }
 pub enum Motion {
     Fixed,                          // a structure: its body is its rock's
-    Free { body: Body, flight: Option<Flight> },
+    Steered { body: Body, flight: Option<Flight> },
 }
 pub struct Body { pub pos: Vec3, pub vel: Vec3 }            // inertial frame
 
@@ -160,13 +160,24 @@ the two differ only for a unit whose send is still forming.
   at any tick is `Orbit::at`. Its `radius` is its own size, for drawing;
   `Belt::ZONE_RADIUS_METERS` is the zone, one constant of the belt for
   every rock, which `belt.rs` owns and one test holds against the belt's
-  own spacing.
+  own spacing. Beside it `belt.rs` owns the zone's other three constants,
+  which every rock shares and no row states: `FIELD_SCALE_METERS`, the
+  strength field's reach; `ARRIVAL_METERS`, the distance a term toward a
+  place must stop within; and `SPACING_METERS`, the distance a pair settles
+  at, which is also the step between two units spawning at one rock and,
+  above the rock's own radius, the floor holding keeps them off. One test
+  holds every shipped rock's floor inside its zone, so the zone is always a
+  shell.
 - `Roster` owns the movement limit and the rows. The shipped seven are built
-  by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`
-  and `Roster::moving_at(Real) -> Roster` serve harness variants.
-  `Roster::movement_limit()` is the one acceleration every unit transfers at,
-  so it hashes with the state and a faction can skew it. A row's kind is
-  `Row::kind()`: `Structure` when its manoeuvring limit is zero, else `Unit`.
+  by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`,
+  `Roster::moving_at(Real) -> Roster` and `Roster::units_by(impl Fn(Row) -> Row)
+  -> Roster`, which rewrites every unit row and leaves the structures alone,
+  build the variants a test or `harness sweep` plays. `Roster::movement_limit()` is the one acceleration
+  every unit transfers at, so it hashes with the state and a faction can skew
+  it. A row's kind is `Row::kind()`: `Structure` when its manoeuvring limit is
+  zero, else `Unit`; `Row::steering` is its `Weights`, one per term of the
+  holding rule, and `Row::standoff()` is half its longest weapon range, `None`
+  where it has no damage weapon, so an unarmed row cannot chase.
   No `Copy` of a row lives anywhere but the roster.
 - A `Frame`'s progress is the work done so far, in cost units. Nothing
   complete is ever scrapped, so no entity carries work of its own; surplus
@@ -301,7 +312,7 @@ on `State` is a missing type.
 ```rust
 let snap = &applied;                                   // commands applied
 let sweep = snap.sweep();                              // one spatial index a tick
-let thrusts = Maneuver::of(snap, &sweep).run();        // Thrusts: one per free unit
+let thrusts = Holding::of(snap, &sweep).run();         // Thrusts: one per steered unit
 let moved   = Propagation::of(snap, &thrusts).run();   // Moved: bodies one tick on, flights ended
 let filled  = Fulfilment::of(snap).run();              // Assigned: reserve, surplus, frames opened
 let income  = Extraction::of(snap).run();              // Income: per seat
@@ -327,12 +338,12 @@ since a read-only index of the snapshot is not an effect.
   reads the rock's orbit at the current tick, which costs one Kepler solve
   however old the tick is. `State::body_of(&Entity) -> Body` is the one
   query for where an entity is: its rock's body when `Fixed`, its stored
-  body when `Free`.
+  body when `Steered`.
 - **The zone.** Every rock's zone is `Belt::ZONE_RADIUS_METERS` about its
   own body, so a force at a rock is read off the rock's orbit and nothing
   else: `State::rock_body` is the whole of "where a force here is". The
-  zone is the chase's extent in `Attractor` and the circle `View::zone`
-  carries out for the display. Construction and `Fire` gate by the rock
+  zone is the chase's extent in the holding rule and the circle
+  `View::zone` carries out for the display. Construction and `Fire` gate by the rock
   a unit stands at rather than by a distance, which the zone is what
   justifies: holding keeps a unit inside its own rock's zone and no two
   zones overlap, so the set is the same one and no rule pays for a
@@ -383,26 +394,92 @@ since a read-only index of the snapshot is not an effect.
   the two states off that one tick: `is_flying` is true only from
   departure, and `Entity::standing` is the rock a unit is at — the rock
   it left while its send forms, its home otherwise, and `None` once it
-  flies. Fire, the attractor, construction and extraction ask
+  flies. Fire, holding, construction and extraction ask
   `standing`, so a forming unit is a shooter and a target where it
   stands; `State::holding` counts by the flight itself, so it counts
   toward its destination from the tick it joins.
-- **The attractor.** `Attractor::pulling(state, &Entity, &Sweep) ->
-  Option<Attractor>` reads the snapshot and applies DESIGN.md's order:
-  nothing while the unit flies a schedule, the half-range point off the
-  nearest enemy standing at the rock it stands at, else that rock. The
-  chase asks the sweep for the zone and then `Entity::standing`, the one
-  predicate for being at a rock that Fire asks too.
-- **Manoeuvring.** `Maneuver::of(&State, &Sweep).run() -> Thrusts` is one thrust
-  per free unit in id order, each the pull to its attractor plus one pair
-  term per ship within the cutoff, clamped to the row's `manoeuvring`. A
-  unit with no attractor has no pull, so in flight the rule serves
-  separation alone. Propagation adds the schedule's thrust for the tick on
-  top, so a flying ship spends both limits, its manoeuvring on keeping
-  apart as at home. The manoeuvring
-  constants are the stiffness, the damping, the spacing, the cutoff and the
-  pair strength; the module stores nothing in state and reads only the
-  snapshot, so it can be replaced whole.
+
+## Sim: holding
+
+DESIGN.md's holding rule is one phase and the only code that steers a unit
+at a rock. Nothing else in the sim names a term, so the rule is replaceable
+whole.
+
+```rust
+pub struct Holding<'a> { state: &'a State, sweep: &'a Sweep }
+pub struct Thrusts(BTreeMap<EntityId, Vec3>);      // one per steered unit
+
+pub struct Power(f64);                             // dps through no plating, times HP
+pub struct Fields(BTreeMap<EntityId, Sample>);     // what each unit reads of both fields
+pub struct Sample { own: f64, enemy: f64, own_gradient: Vec3, enemy_gradient: Vec3 }
+pub struct Fraction(f64);                          // 0..=1
+
+impl Holding<'_> { fn of(&State, &Sweep) -> Holding; fn run(self) -> Thrusts; }
+impl Power       { fn of(&Row, hp: f64) -> Power; }
+impl Fields      { fn of(&State) -> Fields; fn at(&self, EntityId) -> Sample; }
+impl Sample      { fn hostile(&self) -> Option<Fraction>;
+                   fn own_lean(&self) -> Vec3; fn retreat(&self) -> Vec3; }
+impl Rock        { fn strayed(&self, Body, pos: Vec3) -> f64; }
+impl Vec3        { fn capped(self, limit: f64) -> Vec3; }
+
+fn wander(&Row, Tick, EntityId) -> Vec3;
+fn separation(Body, &Row, impl Iterator<Item = Vec3>) -> Vec3;
+fn cohesion(&Row, Sample) -> Vec3;
+fn caution(&Row, Sample) -> Vec3;
+fn returning(Body, &Row, rock: Body, strayed: f64) -> Vec3;
+fn chase(Body, &Row, target: Body) -> Vec3;
+```
+
+- **The roll.** `Fields::of` groups the entities standing at each rock into
+  a roll once per tick, sorted by belt-plane `x` then id, and discards the
+  grouping once every rock's pair sums are folded in. Only a steered entity
+  enters it, since only a unit has power; a structure is still a target,
+  found through `State::standing_at` where the chase asks for one.
+- **The kernel** is `(1 - (r/R)^2)^2` over `Belt::FIELD_SCALE_METERS`, whose
+  value and gradient both vanish at `R`, so the two field terms are
+  continuous and a unit past the scale contributes nothing. The gradient is
+  analytic, never a difference. A field is summed pair by pair over one
+  rock's roll, each pair once: the kernel is symmetric and its gradient
+  antisymmetric, so one evaluation fills both units' own or enemy value and
+  gradient, and the `x` order lets the inner walk stop at `R`.
+- **No absolute strength leaves the field.** Caution scales by
+  `Sample::hostile`, a fraction, and cohesion by `Sample::own_lean`, the
+  gradient in units of the field's own value over the kernel's scale, capped
+  at one. So a unit reads who is strong here without reading a strength, and
+  the lean is near zero inside a crowd and near one at its edge, which is
+  what lets separation set the spacing while cohesion still gathers a
+  straggler.
+- **Arrival steering.** A term toward a place is `weight * (the place's
+  velocity + the direction to it times the arrival speed - the unit's own
+  velocity)`, the arrival speed being what the row's manoeuvring limit can
+  stop from within `Belt::ARRIVAL_METERS`. Every such term damps itself, so
+  the rule carries no damping constant. Return's place is the rock and its
+  miss, `Rock::strayed`, is signed: how far the unit is outside the zone,
+  less how deep it is inside the rock's own radius plus one spacing. So the
+  term pulls in past the zone, pushes out from inside the rock, and between
+  them is the damping alone: the zone is a soft shell and no ship moves
+  inside the rock. `step::spawn_body` starts its ladder at that floor, so
+  nothing spawns inside a rock either. The sum of the terms is cut to the
+  row's manoeuvring limit by `Vec3::capped`.
+- **The shared target.** `state::Threat` is the one threat rule. Holding
+  asks it over `State::standing_at` the rock, since the chase has no range
+  gate; Fire asks it per weapon over the sweep within that weapon's range
+  and against the damage already assigned this tick. They name the same
+  enemy once the fight is joined, which is what "the unit it chases is the
+  unit it fires at" means; before it, holding is closing on an enemy no
+  weapon reaches yet.
+- **The drift** is a pure function of the tick and the entity id: three fixed
+  frequencies whose phase offset comes from the id. Nothing is stored and
+  nothing is random, so a rewind reproduces a unit's wander exactly.
+- **In flight** a unit stands nowhere, so it takes separation and nothing
+  else; propagation adds its schedule's thrust on top, and it spends both
+  limits.
+- The weights are the row's, one per term (`roster::Weights`), and a
+  structure's are `Weights::STILL`. They are hypotheses set by
+  `harness sweep`, which plays two forces at one rock under roster variants
+  and reports how long the force takes to close, whether it spreads while
+  closing, how long the fight takes to decide and whether swapping the two
+  sides swaps the winner.
 
 ## Sim: the rules as code
 
@@ -435,15 +512,18 @@ since a read-only index of the snapshot is not an effect.
   rock it stands at, which is the zone by another name, since holding
   keeps everything homed at a rock inside that rock's zone.
   Completion spawns at the post: a structure `Fixed`, a unit
-  `Free` at the rock's body for the tick it first exists in, offset one
-  spacing along the rock's radial direction per unit already there.
+  `Steered` at the rock's body for the tick it first exists in, offset one
+  spacing along the rock's radial direction per unit already standing
+  there. `step::spawn_body` is that placement, beside the completion it
+  serves rather than inside the rule that steers afterwards.
 - **Fire** collects every ready damage weapon of an entity that is not
   flying, sorts by `(Moment, EntityId, weapon)`, and resolves each in
-  order against the snapshot plus a `BTreeMap<EntityId, f64>` of damage
-  assigned so far this tick, skipping targets whose assigned damage is
-  lethal. Target choice is DESIGN.md's threat rule over the enemies
-  standing at the shooter's own rock inside the weapon's range; range is
-  the only gate, since everything is visible. Standing at one rock is the
+  order against the snapshot plus an `Assigned` of the damage dealt so far
+  this tick, skipping targets whose assigned damage is
+  lethal. Target choice is `state::Threat`, DESIGN.md's threat rule, over the
+  enemies standing at the shooter's own rock inside the weapon's range; range
+  is the only gate, since everything is visible. Holding asks the same type,
+  so a ship goes where it shoots. Standing at one rock is the
   zone by another name, as no two zones overlap, and a flying entity
   stands nowhere and so is neither shooter nor target. Damage is the
   weapon's damage cut by its falloff over the range, less the target's
@@ -452,10 +532,12 @@ since a read-only index of the snapshot is not an effect.
   moment it has, so it fires the instant a target arrives. `Shots` is the
   list of hits and the new ready moments.
 - **The sweep** is the tick's one spatial index: entities sorted by their
-  belt-plane `x`, with range queries by window. `State::sweep` builds it
-  and `step` hands it to Fire and to Maneuver, whose chase and separation
-  are the other range queries; nothing scans every entity against every
-  other.
+  belt-plane `x` then their id, with range queries by window. `within`
+  yields its window in that order and allocates nothing, so a sum over it
+  is deterministic without a sort of its own; a caller that needs another
+  order sorts for itself. `State::sweep` builds it and `step` hands it to
+  Fire and to Holding, whose fields, chase and separation are the other
+  range queries; nothing scans every entity against every other.
 - **Deaths, reaping, elimination** live in `State::next`: entities at or
   below zero HP are removed, their `Ready` entries with them; a seat with
   no entities and an empty reserve
@@ -680,9 +762,14 @@ record reproduces the live hash and that the same match built twice from
 independent initial states hashes the same; `rollback` inserts every
 command late and scrambled and checks the settled hashes match the
 on-time match; `matrix` plays named compositions pairwise from symmetric
-starts and prints a table of rocks and the tie-break's verdict. Doubling
+starts and prints a table of rocks and the tie-break's verdict; `sweep`
+sets the holding rule's constants, playing two forces at one rock under
+roster variants and printing, per variant, how long the force takes to
+close to weapon range, how far it spreads while closing, how long the fight
+takes to decide, what the winner has left, and whether swapping the two
+sides swaps the winner. Doubling
 the tick rate and asserting the same outcome is a future check threading
-through flights, weapon intervals and the manoeuvring gains.
+through flights, weapon intervals and the holding rule's gains.
 
 ## Protocol
 
@@ -994,7 +1081,7 @@ list later.
 ```
 sim/src/
   lib.rs            TICKS_PER_SECOND, TICK; the public surface
-  belt.rs           Belt::fixed, Belt::ZONE_RADIUS_METERS, State::start
+  belt.rs           Belt::fixed, the zone's four constants, State::start
   setup.rs          Setup, MAX_SEATS, BadSetup
   real.rs           Real
   vec3.rs           Vec3
@@ -1004,7 +1091,7 @@ sim/src/
   post.rs           Post
   fixture.rs        the crate's one test world, behind cfg(test)
   roster/           mod.rs Roster and the movement limit; row.rs Row,
-                    Weapon, Kind; shipped.rs the seven
+                    Weapon, Kind, Weights; shipped.rs the seven
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
@@ -1012,16 +1099,19 @@ sim/src/
                     schedule.rs Flight, Schedule, Burn, the solve;
                     send.rs Send, its forming window and the search for
                     its arrival tick;
-                    attractor.rs;
                     wants.rs Wants; frame.rs Frame, its fraction and what
                     it went short of; ready.rs; command.rs Command,
                     Issued, Stamped, Batch, Sequence, Rejected, Refused,
                     apply; sweep.rs Sweep, the tick's spatial index;
+                    threat.rs Threat, Aim, Assigned: the one target rule;
                     view.rs View, Present; hash.rs;
                     standings.rs Standings
-  step/             mod.rs step, next; maneuver.rs; propagation.rs;
+  step/             mod.rs step, next, spawn_body; propagation.rs;
                     fulfilment.rs; extraction.rs; construction.rs;
-                    fire.rs Fire, Shots, Exchange
+                    fire.rs Fire, Shots, Exchange;
+                    holding/ mod.rs Holding and Thrusts; power.rs Power;
+                    field.rs Standing, Fields, Sample, Fraction and the
+                    kernel; terms.rs Steering, Place and the drift
   history/          mod.rs; snapshots.rs Retention and the ring behind it;
                     log.rs the stamped log by tick;
                     session.rs Session: advance, insert, acknowledge,
@@ -1135,6 +1225,15 @@ and the reason it was chosen over its alternatives.
 Tolerated runtime failures, each with the shape change that would delete
 it; a new one is added here in the unit that introduces it:
 
+- Two ships at exactly one point push each other nowhere, since a push has
+  no direction there. Their drift differs by id, so they part within a tick.
+  A spacing that could not be zero would delete it, which no placement rule
+  can promise once ships are free to move.
+- Holding's chase scans a rock's roll once per unit standing there, so one
+  rock holding a thousand units costs about 11.7 ms a tick against a budget
+  of 8.3; a hundred at one rock costs about 0.5 ms. Ranking the roll once per rock
+  and per plating, and breaking only the distance tie per unit, would delete
+  it, since the threat order depends on the unit through its plating alone.
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.

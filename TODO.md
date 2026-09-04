@@ -102,6 +102,39 @@ Measured: 2.8 ms per accepted candidate, 5.8 ms per row per send.
   key with per-team standings, a design conversation on its content
   before DISPLAY.md gains it (plan item 7 grows into it).
 
+- Owner notes from play, 2026-09-05, after 1b: ships move too slow;
+  combat takes a while to start and it feels random who wins (both
+  weighed in the holding unit's critique); the wheel has gaps, strange
+  movement behaviour and slices of the wrong colour (into 1d; a judge is
+  reading the look screenshots; suspect the row-id shift from the scout's
+  removal or the wheel's gap off the one ring). Also: bot behaviour of the
+  kind the fog removal changed (a bot builds an army, attacks when it
+  beats the defence) wants actual test cases, which is plan item 4's
+  per-tick invariant mode extended with bot-behaviour guarantees.
+
+- Design direction 2026-09-05, in conversation (DISPLAY.md follows once
+  ruled): the per-unit glyph run goes; a row at a rock is one glyph with
+  a count, in states present, leaving (only while the send forms),
+  building (one filling glyph), arriving, wanted (dashed when no
+  builder); zero entries not drawn; the count a numeral, the second
+  exception. The owner then proposed removing the small ring altogether
+  and putting the counts and states on the construction ring (the
+  wheel), with explicit +1 and -1 symbols on its bands and a larger
+  step on Shift; ships and structures are already drawn at their world
+  positions. Open: whether every rock shows its wheel always or only
+  the selected one; the Shift step; where the fight arc goes; whether
+  the wheel sits at a fixed screen radius or at the zone circle.
+
+- Defect found 2026-09-05 (the shrink agent, at the owner's ask, read
+  only): a drag that sends a unit while a frame of the same row builds
+  at the source destroys the frame. Fulfilment's unwanted-frames check
+  runs against the count before the sent unit leaves, sees want 1 with
+  1 present, and cancels the frame with only a partial refund. Fix in
+  fulfilment: decide unwanted frames after the tick's sends are known,
+  counting the units leaving as gone. A test from the guarantee: a send
+  never cancels a frame the want still covers. Unscheduled; the owner
+  decides where it goes.
+
 ## Docs ahead of code
 
 Rewritten 2026-09-05 for the play rulings, the code still on the old
@@ -111,9 +144,12 @@ the plan's item 2):
   place per rock; the zone; sends to the rock's orbit with a joining
   window; the holding rule; no scrap; one frame per row at a time;
   everything visible; range the only fire gate; standings always.
-- DISPLAY Rings, Glyph runs, Fights, Wheel, Sending, Ranges: one ring;
-  stacked glyphs shrink in place; no outer band anywhere; the two range
-  circles.
+- DISPLAY The wheel, Fights, Flights, Editing, Ranges, Words on screen
+  (confirmed by the owner 2026-09-05): the wheel as a rock's one HUD with
+  entries and counts in five states; no ring, no run, no stacking; bands
+  bearing +1 and -1, five on Shift; the arc inside the wheel; drawn only
+  where it stands clear; zone and weapon circles; short phrases only.
+  Unit 1d.
 
 
 One line per sentence of DESIGN.md, DISPLAY.md or ARCHITECTURE.md the
@@ -154,6 +190,31 @@ play, then the programme.
    fields, `Sight`, `Radar`, the fog in the view and the radar blips go;
    fire and the chase gate on range and the zone; standings in every
    view; the glyph's radar mark goes.
+   Holding built 2026-09-05, green on the overseer's run (295 tests),
+   uncommitted, held for the owner's review of the tree and of
+   DISPLAY.md. Key files: sim/src/step/holding/{mod,field,terms,power}.rs,
+   sim/src/state/threat.rs, agents/src/bin/harness.rs (the sweep).
+   Findings: a thousand units at one rock cost 11.7 ms against 8.3 (the
+   chase scans the roll per unit; rank once per rock and plating);
+   departure drift times flight time gives 19 m of arrival error on a
+   two-minute coast (zero a ship's drift at departure); the spacing is
+   where a pair settles, 0.49 m against 0.5; code +602, tests +617,
+   field.rs 368 lines and terms.rs 293, a simplification pass proposed
+   before commit; three things named holding (phase, row weights, the
+   state's count present and in transit: holdings and steering proposed).
+   Sweep: every variant mirrors when sides swap; frigate at 0.5 never
+   closes, at 1.25 closes in 7 s. Owner review 2026-09-05: terms.rs
+   duplicates state (Place is Body; Steering copies entity and row;
+   Shell is a rock; Standing re-indexes entities_at); a fresh Sonnet
+   shrink with those deletions and a 400-line code ceiling runs before
+   the commit, and reports where the same pattern lives elsewhere. Owner
+   ruling: builders following a fleet through cohesion is left alone,
+   enemies attack the combat ships; tune later if it shows. CLAUDE.md
+   gained the no-duplicate-types rule. Owner 2026-09-05 from play: ships move
+   inside the asteroid; DESIGN's return term now also pushes out from
+   inside the rock's radius plus one spacing (into the pass before
+   commit). The camera does not lock its reference frame to the
+   selection: deferred, plan item 10 (a selected rock owns the focus).
 1c. The holding rule, Opus (sim): `Attractor` and the pair term replaced
    by one module, DESIGN's Power, The fields and Holding (2026-09-05):
    per rock and side, a strength field computed once per tick (power =
@@ -166,14 +227,36 @@ play, then the programme.
    first constants as hypotheses with a harness sweep and two tests: a
    lone unit falls back to its allies, a group closes on its target as
    one body. `Motion::Free` renamed here. Replaceable whole.
-1d. Display follow-through, Sonnet: one ring per rock; stacked glyphs
-   shrink in place with no radial step; the two range circles (the view
-   carries the zone already); the wheel's gap off the one ring re-set;
-   a forming unit drawn where it stands (the view gains the rock a unit
-   stands at; today it shows solid on the destination ring for the
-   half-second the send forms); look scenes re-shot and re-judged.
-   Naming for the holding unit: `Motion::Free` covers standing, forming
-   and flying and reads as flying.
+1d. The wheel as the rock's HUD, Opus, critique stop: DISPLAY.md's The
+   wheel, Fights, Flights, Editing, Ranges and Words on screen as the
+   target; deletes the ring, the run, `ring::Layout`, the stacking and
+   the per-unit marks; the view gains per row per rock the counts
+   present, leaving (forming), arriving and wanted, and the rock a unit
+   stands at; the zone and weapon circles; every string on screen a
+   short phrase; the wheel's centre follows its rock under a pan; look
+   scenes re-shot and judged by fresh eyes against DISPLAY's questions
+   plus "read every count".
+   From the wheel judge 2026-09-05: the run's stacking depth recedes
+   uncapped to the rock's centre (the spiral the owner keeps seeing; it
+   was never fixed, only ruled, and this unit fixes it: no radial step,
+   shrink in place); the wheel's centre is frozen on open while the ring
+   moves under a pan, so the wheel detaches (the "strange movement");
+   the wrong-colour slices did not reproduce in a still, to be judged
+   again after this unit. Roster is three structures and four units;
+   the judge's shipyard finding was a miscount.
+1e. Contraction audit, read-only then units (owner, 2026-09-05: the
+   codebase is much larger than it has any right to be for this amount
+   of game). Seeded by the holding shrink's report of the same pattern
+   elsewhere: types whose fields copy another type's, parallel indexes
+   over what the state answers, per-tick bags of borrowed values. Each
+   finding becomes a deletion in the unit that next touches its file,
+   or its own Sonnet unit with a ceiling if none is queued. First
+   findings (the holding shrink's survey, 2026-09-05): `display::scene::
+   Client` passes two of Scene's own fields through a constructor from
+   four call sites (delete, pass the fields); four identical rank-by-
+   score-then-id sorts in agents/plan.rs and roles.rs (one `ranked`).
+   The shrink itself: holding module code 447 to 330 lines, Place,
+   Steering, Shell and Standing deleted, replay hash unchanged.
 2. Vectors, Sonnet: the connection's inboxes and both websockets' queues
    gain a stated cap on frame count, past which the connection closes
    (a peer past the cap has broken the protocol); the kept records as a
@@ -205,7 +288,10 @@ play, then the programme.
    scale check run before a sim commit. With it the test audit: every sim
    test mapped to the DESIGN.md sentence it pins, read-only report first,
    then the tests with no sentence deleted (the 2026-09-03 audit's ~185
-   lines are the floor).
+   lines are the floor). Owner ruling 2026-09-05: a test that verifies
+   the win-loss matrix against an expected table, not run on every
+   change: an ignored test or a harness command run before a sim commit
+   and after any balance change; the gate stays fast.
 5. The entity columns with one vision per step, Opus, on item 4's
    number: the entity store transposed to one column per field over a
    dense position with a sorted id index, an entity a view over the
@@ -276,6 +362,15 @@ play, then the programme.
     varies with composition; combat before the last third of a match;
     the tick-rate-doubling check; timeouts instead of iteration caps in
     the slow tests.
+   Owner notes 2026-09-05: a send in flight cannot be cancelled; a unit
+   in transit counts toward its destination and is not surplus anywhere
+   until it lands, so lowering the destination's want does nothing to it
+   until then. A design question for a ruling: whether a flying unit
+   can be re-sent, its schedule solved from its own body mid-flight,
+   when its destination's want falls (the surplus rule reaching into
+   transit), or whether a send is a commitment. Button text is not
+   vertically centred in the hand-painted controls: into the egui
+   screens unit, item 6, which deletes those controls.
 12. Held for the owner's play or ruling: rocks sub-pixel at region zoom;
     the ring inside the rock at close zoom and far from the ships it
     counts; the fight arc refilling on reinforcement; repair at 15 HP/s
@@ -283,6 +378,14 @@ play, then the programme.
     from a fogged view; crowd packing past half the spacing; a fresh-eyes
     judgement after every display change; the scout's manoeuvring at
     more than half the movement limit against DESIGN's "far below".
+   Owner notes 2026-09-05, future work: a rock's available resources
+   (its caps) cannot be seen; a wheel could carry them, three short bars
+   in the material hues or the numerals the wheel already allows (into
+   the wheel unit's critique as a question, not a requirement). Separate
+   extractor rows per material, three instead of one: a real per-rock
+   decision (what to pull) against two more slots and three wants per
+   rock; hangs on the harness question "do regional caps make three
+   materials distinct?" and on map generation; not before the belt.
 13. Later: fog in the display; gamepad; the twelve-slot wheel; hulls as
     meshes with a level-of-detail rule, the stencil icon, and a DESIGN
     line that a faction skews the hull's dialect and never the glyph
@@ -392,6 +495,15 @@ step/mod.rs and history/session.rs move.
   unit. The codebase sweep (plan) audits for duplicates crate by crate.
 - Match setup, bots included, is the start menu's job (owner,
   2026-09-03); the playable takes no command-line arguments.
+- Words on screen (owner, 2026-09-05): every user-facing string is a
+  short phrase, no full stop, semicolon or dash; a comma is escalated to
+  the owner before it is drawn (DISPLAY.md "Words on screen"). The
+  existing reason and hover strings are shortened in the display unit;
+  the one string with a comma today, "Shipyard, here", becomes the row
+  name alone. Reasons read "Waiting for Team 2", "Host only", "Cannot
+  host here", "Cannot quit here"; join outcomes "No room", "Room full",
+  "Version differs", "Room closed", "Host left", "Removed"; wheel
+  phrases "Short of metals", "No builder", "From Rock 3", "To Rock 5".
 - Store rule for every sim brief (overseer, 2026-09-05, for plan item 5):
   no rule holds an entity across a tick or indexes the entity store by
   anything but an id, so the columns land without touching a rule.

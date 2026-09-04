@@ -1,7 +1,6 @@
 use core::ops::Index;
 use std::collections::BTreeMap;
 
-pub use attractor::Attractor;
 pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
@@ -13,6 +12,7 @@ pub use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use send::Send;
 pub use standings::Standings;
+pub use threat::{Aim, Assigned, Threat};
 pub use view::View;
 pub use wants::Wants;
 
@@ -144,11 +144,11 @@ impl State {
     }
 
     pub fn count(&self, post: Post, row: RowId) -> u32 {
-        let held = self.holding(post, row);
+        let held = self.holdings(post, row);
         held.present + held.transit
     }
 
-    pub fn holding(&self, post: Post, row: RowId) -> Held {
+    pub fn holdings(&self, post: Post, row: RowId) -> Held {
         let mine = || {
             self.entities_at(post.rock)
                 .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
@@ -168,7 +168,7 @@ impl State {
     pub fn body_of(&self, entity: &Entity) -> Body {
         match entity.motion() {
             Motion::Fixed => self.rock_body(entity.home()),
-            Motion::Free { body, .. } => body,
+            Motion::Steered { body, .. } => body,
         }
     }
 
@@ -313,7 +313,6 @@ impl Index<SeatId> for State {
     }
 }
 
-mod attractor;
 mod command;
 mod entity;
 mod frame;
@@ -325,6 +324,7 @@ mod seat;
 mod send;
 pub mod standings;
 pub mod sweep;
+mod threat;
 pub mod view;
 mod wants;
 

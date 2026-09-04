@@ -2,12 +2,13 @@ use std::collections::BTreeMap;
 
 use probe_agents::{Mix, Personality, Scripted, Seated};
 use probe_protocol::Record;
-use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster};
-use probe_sim::state::State;
+use probe_sim::belt::Belt;
+use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
 use probe_sim::state::standings::Standings;
+use probe_sim::state::{Batch, Command, Issued, Seat, State};
 use probe_sim::{
-    Retention, RowId, SeatId, Session, Setup, Stamped, TICKS_PER_SECOND, TeamId, Tick,
-    WINDOW_SECONDS,
+    EntityId, Materials, Real, Retention, RockId, RowId, SeatId, Session, Setup, Stamped,
+    TICKS_PER_SECOND, TeamId, Tick, WINDOW_SECONDS,
 };
 
 const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
@@ -21,6 +22,33 @@ const TRACE_INTERVAL: u64 = 60;
 const SEATS: [SeatId; 2] = [SeatId(0), SeatId(1)];
 
 const SEED: u64 = 1;
+
+const AXES: [(&str, Axis); 6] = [
+    ("wander", |held, by| held.wander = Real(held.wander.0 * by)),
+    ("return", |held, by| {
+        held.returning = Real(held.returning.0 * by)
+    }),
+    ("separation", |held, by| {
+        held.separation = Real(held.separation.0 * by)
+    }),
+    ("cohesion", |held, by| {
+        held.cohesion = Real(held.cohesion.0 * by)
+    }),
+    ("caution", |held, by| {
+        held.caution = Real(held.caution.0 * by)
+    }),
+    ("chase", |held, by| held.chase = Real(held.chase.0 * by)),
+];
+
+const FACTORS: [(&str, f64); 2] = [("x3", 3.0), ("/3", 1.0 / 3.0)];
+
+const FORCE: u32 = 40;
+
+const ENGAGEMENT: Tick = Tick(90 * TICKS_PER_SECOND as u64);
+
+const FIELD: RockId = RockId(0);
+
+type Axis = fn(&mut Weights, f64);
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -36,9 +64,13 @@ fn main() {
             matrix();
             true
         }
+        ["sweep"] => {
+            swept();
+            true
+        }
         _ => {
             println!(
-                "usage: harness match [turtle|expand|none] [turtle|expand|none]\n       harness replay\n       harness rollback\n       harness matrix"
+                "usage: harness match [turtle|expand|none] [turtle|expand|none]\n       harness replay\n       harness rollback\n       harness matrix\n       harness sweep"
             );
             true
         }
@@ -373,4 +405,161 @@ fn report(state: &State) {
 fn check(what: &str, passed: bool) -> bool {
     println!("{} {what}", if passed { "ok  " } else { "FAIL" });
     passed
+}
+
+fn swept() {
+    println!(
+        "holding sweep: {FORCE} a side at one rock, {} seconds a run",
+        ENGAGEMENT.seconds()
+    );
+    println!(
+        "{:<16}{:>9}{:>9}{:>9}{:>9}",
+        "roster", "closed", "decided", "left", "mirrors"
+    );
+    for (name, roster) in variants() {
+        let ours = engage(roster.clone(), FRIGATE, LANCER);
+        let theirs = engage(roster, LANCER, FRIGATE);
+        println!(
+            "{name:<16}{:>9}{:>9}{:>9}{:>9}",
+            seconds(ours.closed),
+            seconds(ours.decided),
+            ours.survivors.0.max(ours.survivors.1),
+            match ours.winner() == theirs.winner().map(swapped) {
+                true => "yes",
+                false => "NO",
+            }
+        );
+    }
+}
+
+fn variants() -> Vec<(String, Roster)> {
+    let mut variants = vec![
+        ("shipped".to_string(), Roster::shipped()),
+        (
+            "frigate at 0.5".to_string(),
+            Roster::shipped().units_by(|row| match row.name {
+                "frigate" => Row {
+                    manoeuvring: Real(0.5),
+                    ..row
+                },
+                _ => row,
+            }),
+        ),
+    ];
+    for (name, axis) in AXES {
+        for (how, by) in FACTORS {
+            variants.push((
+                format!("{name} {how}"),
+                Roster::shipped().units_by(|row| {
+                    let mut held = row.steering;
+                    axis(&mut held, by);
+                    Row {
+                        steering: held,
+                        ..row
+                    }
+                }),
+            ));
+        }
+    }
+    variants
+}
+
+struct Engagement {
+    closed: Option<Tick>,
+    decided: Option<Tick>,
+    survivors: (usize, usize),
+}
+
+impl Engagement {
+    fn winner(&self) -> Option<SeatId> {
+        match self.survivors {
+            (ours, theirs) if ours > theirs => Some(SeatId(0)),
+            (ours, theirs) if theirs > ours => Some(SeatId(1)),
+            _ => None,
+        }
+    }
+}
+
+fn swapped(seat: SeatId) -> SeatId {
+    SeatId(1 - seat.0)
+}
+
+fn seconds(at: Option<Tick>) -> String {
+    at.map_or_else(|| "-".to_string(), |tick| format!("{:.1}", tick.seconds()))
+}
+
+fn engage(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
+    let seats = vec![
+        Seat::new(TeamId(0), Materials::ZERO, BTreeMap::from([(ours, FORCE)])),
+        Seat::new(
+            TeamId(1),
+            Materials::ZERO,
+            BTreeMap::from([(theirs, FORCE)]),
+        ),
+    ];
+    let mut state = State::new(
+        ENGAGEMENT,
+        SEED,
+        Belt::GRAVITY,
+        roster,
+        Belt::fixed(Belt::GRAVITY),
+        seats,
+    );
+    let mut engagement = Engagement {
+        closed: None,
+        decided: None,
+        survivors: (0, 0),
+    };
+    let mut placing = Batch::default();
+    for (at, row) in [ours, theirs].into_iter().enumerate() {
+        let seat = SeatId(u8::try_from(at).expect("two seats"));
+        let issued = Issued {
+            seat,
+            seq: 0,
+            command: Command::Want {
+                rock: FIELD,
+                row,
+                count: FORCE,
+            },
+        };
+        placing.insert(issued).expect("one want a seat");
+    }
+    let mut batch = placing;
+    while state.tick() < ENGAGEMENT && engagement.decided.is_none() {
+        let (next, _) = state.step(&batch);
+        batch = Batch::default();
+        state = next;
+        let living = force(&state, SeatId(0));
+        engagement.survivors = (living.len(), force(&state, SeatId(1)).len());
+        if engagement.closed.is_none() && closed(&state, &living) {
+            engagement.closed = Some(state.tick());
+        }
+        if engagement.survivors.0 == 0 || engagement.survivors.1 == 0 {
+            engagement.decided = Some(state.tick());
+        }
+    }
+    engagement
+}
+
+fn force(state: &State, seat: SeatId) -> Vec<EntityId> {
+    state
+        .entities()
+        .filter(|entity| entity.seat() == seat)
+        .map(|entity| entity.id())
+        .collect()
+}
+
+fn closed(state: &State, force: &[EntityId]) -> bool {
+    !force.is_empty()
+        && force.iter().all(|id| {
+            let Some(one) = state.entity(*id) else {
+                return false;
+            };
+            let range = state.roster()[one.row()].max_damage_range();
+            let from = state.body_of(one).pos;
+            state
+                .entities()
+                .filter(|other| other.seat() != one.seat())
+                .any(|other| state.body_of(other).pos.distance(from) <= range)
+        })
 }

@@ -12,7 +12,7 @@ use crate::setup::Setup;
 use crate::state::view::View;
 use crate::state::{Batch, Command, Flight, Issued, Motion, Rejected, Rock, Seat, State, view};
 use crate::step::fire::{Fire, Hit, Shots};
-use crate::step::maneuver::Maneuver;
+use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
 use crate::time::Tick;
 use crate::vec3::Vec3;
@@ -23,7 +23,7 @@ const RING_RADIUS_METERS: f64 = 1.0e7;
 
 const RING_SPACING_METERS: f64 = 1_000.0;
 
-const ROCK_RADIUS_METERS: f64 = 100.0;
+const ROCK_RADIUS_METERS: f64 = 1.5;
 
 const RING_CAPS: Materials = Materials::new(1.0, 1.0, 1.0);
 
@@ -97,15 +97,15 @@ impl World {
         }
     }
 
-    pub fn moves(&mut self, ticks: u64) {
+    pub fn steers(&mut self, ticks: u64) {
         for _ in 0..ticks {
             let sweep = self.state.sweep();
-            let thrusts = Maneuver::of(&self.state, &sweep).run();
+            let thrusts = Holding::of(&self.state, &sweep).run();
             let moved = Propagation::of(&self.state, &thrusts).run();
             for step in moved.iter() {
                 self.state.set_motion(
                     step.entity,
-                    Motion::Free {
+                    Motion::Steered {
                         body: step.body,
                         flight: step.flight,
                     },
@@ -136,8 +136,12 @@ impl World {
     }
 
     pub fn free(&mut self, seat: u8, row: RowId, rock: RockId, body: Body) -> EntityId {
-        self.state
-            .spawn(SeatId(seat), row, rock, Motion::Free { body, flight: None })
+        self.state.spawn(
+            SeatId(seat),
+            row,
+            rock,
+            Motion::Steered { body, flight: None },
+        )
     }
 
     pub fn launch(&mut self, entity: EntityId, from: RockId, out_meters: f64, flight: Flight) {
@@ -145,7 +149,7 @@ impl World {
         let radial = body.pos.normalized().expect("a radius");
         self.state.set_motion(
             entity,
-            Motion::Free {
+            Motion::Steered {
                 body: Body::new(body.pos + radial * out_meters, body.vel),
                 flight: Some(flight),
             },

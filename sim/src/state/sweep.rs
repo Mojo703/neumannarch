@@ -23,14 +23,10 @@ impl Sweep {
     }
 
     pub fn within(&self, center: Vec3, range: f64) -> impl Iterator<Item = EntityId> + '_ {
-        let mut found: Vec<EntityId> = self
-            .window(center, range)
+        self.window(center, range)
             .iter()
-            .filter(|item| item.pos.distance(center) <= range)
+            .filter(move |item| item.pos.distance(center) <= range)
             .map(|item| item.id)
-            .collect();
-        found.sort_unstable();
-        found.into_iter()
     }
 
     pub fn len(&self) -> usize {
@@ -51,6 +47,8 @@ impl Sweep {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     struct Lcg(u64);
@@ -96,7 +94,8 @@ mod tests {
         for _ in 0..64 {
             let center = lcg.point();
             let range = (lcg.coordinate() + 100.0) * 0.4;
-            let found: Vec<EntityId> = sweep.within(center, range).collect();
+            let mut found: Vec<EntityId> = sweep.within(center, range).collect();
+            found.sort_unstable();
             assert_eq!(
                 found,
                 brute_force(&cloud, center, range),
@@ -109,12 +108,17 @@ mod tests {
     }
 
     #[test]
-    fn results_are_in_ascending_id_order() {
+    fn results_come_back_in_the_sweeps_own_order() {
         let mut lcg = Lcg(11);
-        let sweep = Sweep::build(lcg.cloud());
+        let cloud = lcg.cloud();
+        let sweep = Sweep::build(cloud.clone());
+        let placed: BTreeMap<EntityId, Vec3> = cloud.into_iter().collect();
         let found: Vec<EntityId> = sweep.within(Vec3::ZERO, 80.0).collect();
         assert!(found.len() > 1);
-        assert!(found.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(found.windows(2).all(|pair| {
+            let (first, second) = (placed[&pair[0]], placed[&pair[1]]);
+            (first.x, pair[0]) < (second.x, pair[1])
+        }));
     }
 
     #[test]

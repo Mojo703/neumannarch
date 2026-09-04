@@ -184,7 +184,7 @@ impl Size {
 
 #[cfg(test)]
 mod tests {
-    use probe_sim::roster::Roster;
+    use probe_sim::roster::{Roster, Weights};
     use probe_sim::{Materials, Real};
 
     use super::*;
@@ -203,8 +203,8 @@ mod tests {
         Row {
             name: "test",
             cost: Materials::new(cost, 0.0, 0.0),
-            mass: Real(1.0),
             manoeuvring: Real(manoeuvring),
+            steering: Weights::STILL,
             hp: Real(1.0),
             plating: Real(0.0),
             capacity: Materials::ZERO,

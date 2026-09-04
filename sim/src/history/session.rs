@@ -191,7 +191,7 @@ mod tests {
     use crate::ids::{RockId, RowId, TeamId};
     use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD};
     use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion};
-    use crate::step::maneuver::Maneuver;
+    use crate::step::spawn_body;
 
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
@@ -422,12 +422,12 @@ mod tests {
             Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
             let place = rock(at % 21);
-            let body = Maneuver::spawn_body(&session.live, place, Tick::ZERO);
+            let body = spawn_body(&session.live, place, Tick::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
                 FRIGATE,
                 place,
-                Motion::Free { body, flight: None },
+                Motion::Steered { body, flight: None },
             );
         }
         let entities = session.live.entities().count();

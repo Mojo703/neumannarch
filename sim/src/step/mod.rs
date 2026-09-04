@@ -1,5 +1,7 @@
+use crate::belt::Belt;
 use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::materials::Materials;
+use crate::orbit::body::Body;
 use crate::post::Post;
 use crate::roster::Kind;
 use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
@@ -7,8 +9,10 @@ use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::{Extraction, Income};
 use crate::step::fire::{Fire, Shots};
 use crate::step::fulfilment::{Assigned, Fulfilment};
-use crate::step::maneuver::Maneuver;
+use crate::step::holding::Holding;
 use crate::step::propagation::{Moved, Propagation};
+use crate::time::Tick;
+use crate::vec3::Vec3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
@@ -25,7 +29,7 @@ impl State {
             .collect();
         let snap = &applied;
         let sweep = snap.sweep();
-        let thrusts = Maneuver::of(snap, &sweep).run();
+        let thrusts = Holding::of(snap, &sweep).run();
         let moved = Propagation::of(snap, &thrusts).run();
         let filled = Fulfilment::of(snap).run();
         let income = Extraction::of(snap).run();
@@ -62,7 +66,7 @@ fn move_bodies(next: &mut State, moved: &Moved) {
     for step in moved.iter() {
         next.set_motion(
             step.entity,
-            Motion::Free {
+            Motion::Steered {
                 body: step.body,
                 flight: step.flight,
             },
@@ -183,23 +187,37 @@ fn spawn(next: &mut State, post: Post, row: RowId) {
     let motion = if next[row].kind() == Kind::Structure {
         Motion::Fixed
     } else {
-        Motion::Free {
-            body: Maneuver::spawn_body(next, post.rock, next.tick().next()),
+        Motion::Steered {
+            body: spawn_body(next, post.rock, next.tick().next()),
             flight: None,
         }
     };
     next.spawn(post.seat, row, post.rock, motion);
 }
 
+pub(crate) fn spawn_body(state: &State, rock: RockId, tick: Tick) -> Body {
+    let home = state[rock].orbit().at(tick, state.gravity());
+    let already = state
+        .standing_at(rock)
+        .filter(|entity| entity.motion() != Motion::Fixed)
+        .count();
+    let radial = home.pos.normalized().unwrap_or(Vec3::ZERO);
+    let floor = state[rock].radius() + Belt::SPACING_METERS;
+    Body::new(
+        home.pos + radial * (floor + Belt::SPACING_METERS * already as f64),
+        home.vel,
+    )
+}
+
 fn join(next: &mut State, entity: EntityId, destination: RockId, flight: Flight) {
     let Some(target) = next.entity_mut(entity) else {
         return;
     };
-    let Motion::Free { body, .. } = target.motion() else {
+    let Motion::Steered { body, .. } = target.motion() else {
         return;
     };
     target.set_home(destination);
-    target.set_motion(Motion::Free {
+    target.set_motion(Motion::Steered {
         body,
         flight: Some(flight),
     });
@@ -224,7 +242,7 @@ pub mod construction;
 pub mod extraction;
 pub mod fire;
 pub mod fulfilment;
-pub mod maneuver;
+pub mod holding;
 pub mod propagation;
 
 #[cfg(test)]
@@ -235,6 +253,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::TeamId;
     use crate::materials::Material;
+    use crate::orbit::body::Gravity;
     use crate::real::Real;
     use crate::roster::Roster;
     use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
@@ -246,7 +265,7 @@ mod tests {
         RockId(at)
     }
 
-    fn holding(roster: Roster, reserve: BTreeMap<RowId, u32>) -> World {
+    fn stocked(roster: Roster, reserve: BTreeMap<RowId, u32>) -> World {
         World::crewed(
             roster,
             vec![Seat::new(TeamId(0), Materials::new(1e4, 1e4, 1e4), reserve)],
@@ -352,7 +371,7 @@ mod tests {
 
     #[test]
     fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
-        let mut world = holding(
+        let mut world = stocked(
             Roster::shipped(),
             BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
         );
@@ -384,7 +403,7 @@ mod tests {
 
     #[test]
     fn a_send_lands_on_its_destination_rocks_orbit() {
-        let mut world = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
+        let mut world = stocked(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
         world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
         let unit = world.state.entities().next().expect("the constructor").id();
 
@@ -394,23 +413,31 @@ mod tests {
         ]);
 
         let flight = world.state[unit].flight().expect("a flight");
+        world.run(flight.departs().0 - world.state.tick().0);
+        let left = world.off_rock(unit, rock(0));
         world.run(flight.arrive().0 - world.state.tick().0);
         assert!(
             !world.state[unit].is_flying(world.state.tick()),
             "it is still flying at its arrival tick"
         );
         let landed = world.off_rock(unit, rock(1));
-        assert!(landed < 1.0, "it arrived {landed} meters off its rock");
+        assert!(
+            landed < left + Schedule::ARRIVAL_POSITION_METERS,
+            "it left {left} meters off and arrived {landed} off"
+        );
 
         world.run(60 * u64::from(TICKS_PER_SECOND));
 
         let held = world.off_rock(unit, rock(1));
-        assert!(held < 1.0, "it holds {held} meters off its rock");
+        assert!(
+            held < Belt::ZONE_RADIUS_METERS,
+            "it holds {held} meters off its rock"
+        );
     }
 
     #[test]
     fn units_re_homed_within_the_window_fly_one_send() {
-        let mut world = holding(
+        let mut world = stocked(
             Roster::shipped(),
             BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
         );
@@ -453,7 +480,7 @@ mod tests {
 
     #[test]
     fn a_unit_re_homed_after_the_window_flies_its_own_send() {
-        let mut world = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
+        let mut world = stocked(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
         world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 2)]);
         world.tick(&[
             Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
@@ -523,7 +550,7 @@ mod tests {
 
     #[test]
     fn a_send_the_movement_limit_cannot_fly_leaves_its_units_home_and_opens_frames() {
-        let mut world = holding(
+        let mut world = stocked(
             Roster::shipped().moving_at(Real(1e-6)),
             BTreeMap::from([(CONSTRUCTOR, 1)]),
         );
@@ -803,35 +830,65 @@ mod tests {
     }
 
     #[test]
+    fn each_unit_spawns_one_spacing_further_out_than_the_last_clear_of_the_rock() {
+        let mut world = World::ring(Gravity::new(4.0e13), 1, &[TeamId(0)]);
+        let home = world.state.rock_body(rock(0));
+        let radial = home.pos.normalized().expect("a radius");
+        let floor = world.state[rock(0)].radius() + Belt::SPACING_METERS;
+        for already in 0..3 {
+            let spawn = spawn_body(&world.state, rock(0), world.state.tick());
+            let out = floor + Belt::SPACING_METERS * f64::from(already);
+            assert!(
+                spawn.pos.distance(home.pos + radial * out) < 1e-9,
+                "unit {already} spawns at {spawn:?}"
+            );
+            assert_eq!(spawn.vel, home.vel);
+            world.free(0, FRIGATE, rock(0), spawn);
+        }
+    }
+
+    #[test]
+    fn a_structure_at_the_rock_does_not_move_a_spawn() {
+        let mut world = World::ring(Gravity::new(4.0e13), 1, &[TeamId(0)]);
+        world.fix(0, FRIGATE, rock(0));
+        let home = world.state.rock_body(rock(0));
+        let floor = world.state[rock(0)].radius() + Belt::SPACING_METERS;
+
+        let spawn = spawn_body(&world.state, rock(0), world.state.tick());
+
+        assert!(spawn.pos.distance(home.pos) - floor < 1e-9);
+    }
+
+    #[test]
     #[ignore = "cost report: cargo test -p probe-sim --release -- --ignored --nocapture"]
-    fn one_tick_of_a_full_belt_fits_the_budget() {
-        let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        for at in 0..100u32 {
-            let home = rock(at % 21);
-            let body = Maneuver::spawn_body(&world.state, home, world.state.tick());
-            world.free((at / 21 % 2) as u8, FRIGATE, home, body);
-        }
-        let mut state = world.state;
-        let entities = state.entities().count();
-        let rocks = state.rocks().len();
-        let over = 200;
+    fn one_tick_of_a_crowded_rock_fits_the_budget() {
+        for units in [100u32, 1000] {
+            let mut world = World::started(&[TeamId(0), TeamId(1)]);
+            let home = rock(0);
+            for at in 0..units {
+                let body = spawn_body(&world.state, home, world.state.tick());
+                world.free((at % 2) as u8, FRIGATE, home, body);
+            }
+            let mut state = world.state;
+            let over = 100;
 
-        #[expect(
-            clippy::disallowed_types,
-            reason = "a test measuring wall time is not the sim reading a clock"
-        )]
-        let started = std::time::Instant::now();
-        let quiet = Batch::new();
-        for _ in 0..over {
-            let (next, _) = state.step(&quiet);
-            state = next;
-        }
-        let each = started.elapsed().as_secs_f64() / f64::from(over);
+            #[expect(
+                clippy::disallowed_types,
+                reason = "a test measuring wall time is not the sim reading a clock"
+            )]
+            let started = std::time::Instant::now();
+            let quiet = Batch::new();
+            for _ in 0..over {
+                let (next, _) = state.step(&quiet);
+                state = next;
+            }
+            let each = started.elapsed().as_secs_f64() / f64::from(over);
 
-        println!(
-            "{entities} entities on {rocks} rocks: {:.3} ms a tick, against a budget of {:.3} ms",
-            each * 1e3,
-            Tick(1).seconds() * 1e3
-        );
+            println!(
+                "{units} units at one rock: {:.3} ms a tick, against a budget of {:.3} ms",
+                each * 1e3,
+                Tick(1).seconds() * 1e3
+            );
+        }
     }
 }

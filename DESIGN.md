@@ -91,8 +91,8 @@ HP, and its home rock.
 
 | field | notes |
 |---|---|
-| mass | right of way in separation |
-| manoeuvring | the manoeuvring limit, far below the movement limit; zero for structures and rocks |
+| manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and rocks |
+| holding weights | one weight per term of the holding rule |
 | HP | |
 | plating | flat damage reduction per hit |
 | weapons | see Weapons |
@@ -132,8 +132,9 @@ work a frame has left. Lowering a count cancels frames and refunds what they
 consumed. Build targets: shortfalls, then repair. A completed
 frame becomes an entity at the rock: a structure at the rock's state, a
 unit at its rock's position, offset along the rock's radial direction by
-one spacing (Movement and combat) per unit already there, so no two spawn
-coincident.
+one spacing per unit already there, so no two spawn
+coincident. The
+spacing is one constant of the zone.
 
 **Target selection is by threat.** A weapon fires at the enemy in range
 with the highest damage per second through the shooter's plating per
@@ -202,8 +203,8 @@ sets one count.
   unit is flying from the tick its schedule departs until it ends. The tolerance is the schedule's. Separation in flight
   can push a ship in company off its schedule by arrival, and it holds
   from wherever it ends.
-- **Power.** Every unit has a power: its damage per second times its
-  remaining HP. It is the one number the fields below sum and it falls
+- **Power.** Every unit has a power: its damage per second, through no
+  plating, times its remaining HP. It is the one number the fields below sum and it falls
   as a unit is hurt.
 - **The fields.** Each tick, at each rock, each side has a strength
   field: at any point, the sum over that side's units at the rock of
@@ -214,11 +215,19 @@ sets one count.
   here without knowing any absolute number.
 - **Holding.** At its rock a unit moves by the holding rule. Each tick it
   sums the steering terms below and thrusts by the sum, capped at its
-  row's manoeuvring limit. Each term's weight is the row's. Wander: a
+  row's manoeuvring limit. Each term's weight is the row's. A term that
+  pulls toward a place pulls toward a desired velocity, the difference
+  between that velocity and the unit's own, so the rule damps itself and
+  a unit arrives without ringing. The desired speed toward a place is
+  the speed the row's manoeuvring limit can stop from within the arrival
+  distance, one constant of the zone, so a strong row is also a fast one
+  and no row states a speed. Wander: a
   held force drifts through the zone and never sits still. Return: a
-  pull back that grows with distance outside the zone, so the zone is a
-  soft edge. Separation: a weak push from any ship of any seat nearer
-  than the row's spacing, the distance a pair settles at; weak, since
+  pull back that grows with distance outside the zone, and a push out
+  that grows with depth inside the rock's own radius plus one spacing,
+  so the zone is a soft shell around the rock and no ship moves inside
+  the rock. Separation: a weak push from any ship of any seat nearer
+  than the spacing, the distance a pair settles at; weak, since
   space is large. Cohesion: a pull up the gradient of its own side's
   field, toward where its allies' strength is. Caution: a push down the
   gradient of the enemy's field, weighted by how outnumbered the unit is
@@ -226,7 +235,8 @@ sets one count.
   unit falls back toward its allies. Chase: a pull toward the enemy
   inside the zone its fire rule would choose (Weapons, Target
   selection), to half the unit's longest weapon range from it, holding
-  there; the unit it chases is the unit it fires at. Cohesion is
+  there; the unit it chases is the unit it fires at, and a unit with
+  no damage weapon has no chase and only its other terms. Cohesion is
   weighted so a force closes on its target as one body, which is what
   makes a battle predictable; there is no facing. The rule is one module
   and is replaceable whole. In flight a unit thrusts by its schedule and

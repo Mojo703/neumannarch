@@ -1,19 +1,20 @@
 # Probe Game — display language
 
 What the player sees, as the target. The only input is the sim's
-view. Nothing is a numeral, a label, or a panel, except the stockpile's bars
-(The stockpile, below); every other fact is a shape, a position, a
-colour, or a line in the belt. Inside a match the pause and
-results screens are the only panels; outside a match every screen is a
-panel in the game's style (Screens, below). Every control shows, while
+view. In the belt and on the HUD nothing is a numeral, a label or a
+panel except the wheels' counts and the stockpile's bars; every other
+fact is a shape, a position, a colour or a line. Screens are panels:
+every screen outside a match, and only pause and results inside one
+(Screens, below). Every control shows, while
 hovered, the change to a want it will make; what the sim does about that change is drawn in the next tick
 by the same rules as everything else, never predicted by the client.
 
 ## Ships are the truth
 
-Every ship is drawn where the sim has it, always. A held force is readable
-because the sim holds it inside its rock's zone (DESIGN.md, Movement and
-combat); the display never rearranges anything.
+Every ship and structure is drawn where the sim has it, always. A held
+force is readable because the sim holds it inside its rock's zone
+(DESIGN.md, Movement and combat); the display never rearranges anything,
+and no glyph stands for a ship anywhere but at the ship.
 
 ## The two layers
 
@@ -27,36 +28,49 @@ ships. Nothing on it is a widget or a panel; the painter is only a way to
 put pixels on screen. It draws after the belt and is never covered by it,
 and it changes with the sim and with the player's pointer, every frame.
 
-## The rings
+## The wheel
 
-Every rock carries one ring at a fixed screen radius, so it reads the
-same at every zoom. A run is one seat's glyphs on a ring (Glyph runs,
-below). Runs start at twelve o'clock and are laid clockwise, in seat
-order, and every seat present owns an equal share of the ring. Ownership is colour, and colour is the team's; a team's
-seats share it, and position tells them apart only where several share a
-ring, which is uncommon. An empty ring
-draws nothing.
+Every rock that holds a composition carries one wheel: an annulus at a
+fixed screen radius around the rock, so it reads the same at every zoom.
+The wheel is the whole HUD of a rock. Ships and structures are drawn at
+their world positions and never on it. A rock with no composition
+carries no wheel. A wheel is drawn only where it stands clear of every
+other wheel on screen: past the zoom at which two would overlap, none is
+drawn and a rock shows its ships, its structures and its zone circle
+alone, and zooming in brings the wheels back.
 
-## Glyph runs
+A wheel has one slot per roster row, structures in the left half and
+units in the right, each half ordered by cost from the top down. A slot
+always shows its row's glyph. Beside the glyph stand the row's entries
+at this rock, clockwise from the glyph in the order below. An entry is
+a glyph drawn in one state with a count, a numeral at the glyph's lower
+right, in the seat's colour, at the glyph's own size. An entry whose
+count is zero is not drawn, so a row at rest is its slot's glyph alone:
 
-One glyph per unit present, grouped by row, rows ordered by cost
-descending from the run's start. Glyphs of a row are laid consecutively
-along the ring. When a run would exceed its share of the ring, its glyphs
-shrink and overlap in place like fanned cards, every glyph on the ring's
-own radius, with no floor on the shrink; magnitude stays arc length.
+- **Present:** a solid glyph and its count.
+- **Leaving:** a dimmed solid glyph and its count, the units in a send
+  forming here, until the send departs; a ship in flight is on the belt
+  with its line and the wheel forgets it.
+- **Building:** one hollow glyph filling from the bottom to the frame's
+  progress, with no count, since a post builds one frame of a row at a
+  time.
+  A frame that spent nothing this second for want of a material carries
+  a belt mark along its base in that material's hue: metals, volatiles
+  or energy, three fixed hues named in the game crate.
+- **Arriving:** a dimmed hollow glyph and its count, the units in a send
+  toward here.
+- **Wanted:** a hollow glyph and its count, the want not covered by
+  present, arriving or building; dashed when no builder is at the rock.
 
-- A unit wanted but absent continues the run as a hollow glyph.
-- A frame in progress is a hollow glyph filling from the bottom to its
-  progress fraction.
-- A shortfall with no builder at its rock shows a dashed hollow glyph.
-- A unit that has left this ring and is still in flight stays on the run,
-  dimmed, until it arrives.
-- A frame that spent nothing this second for want of a material carries a
-  belt mark along its base in that material's hue: metals, volatiles or
-  energy, three fixed hues named in the game crate.
-- Hovering any glyph on a run shows one plain sentence beside it saying
-  what the glyph is and why it is in that state: "Building, short of
-  metals", "No builder here", "Arriving from Rock 3", "Leaving for Rock 5".
+When more than one seat holds a composition at a rock, the wheel splits
+into one equal sector per seat, by angle, seats in seat order clockwise
+from twelve o'clock, and each seat's slots and entries are drawn in its
+own sector. Ownership is colour, and colour is the team's; a team's
+seats share it.
+
+Hovering any entry shows one short phrase beside it saying what the
+entry is and why: "Short of metals", "No builder", "From Rock 3", "To
+Rock 5".
 
 ## The glyph
 
@@ -91,14 +105,14 @@ icon in its hue at the left; a bar filled to the stock over the capacity;
 two numerals stacked at the bar's right, the stock above the capacity;
 and after them the income and the spend per second as two signed
 numerals, "+3" and "-5", income above spend. A bar at capacity shows the
-loss as a faint overflow running off its right end. These are the only
-numerals on the HUD. A wheel slot whose row the stock cannot fund one of
-dims, and its hover names the short material.
+loss as a faint overflow running off its right end. A wheel slot whose
+row the stock cannot fund one of dims, and its hover names the short
+material.
 
 ## Fights
 
-While shots are exchanged at a rock, each engaged seat's run on its ring
-gains an arc just inside it. The arc is full at the fight's start and
+While shots are exchanged at a rock, each engaged seat's sector of the
+wheel gains an arc just inside the wheel's inner edge. The arc is full at the fight's start and
 drains clockwise as that player's total HP at the rock falls. Damage from
 the last second and a half trails the drain as a red segment that catches
 up. Arcs disappear ten seconds after the last shot. Ships carry no health
@@ -111,44 +125,40 @@ A ship between rocks carries its glyph as a billboard, with a line ahead
 to its destination rock. The line is faint at the ship and full at the
 destination, and its dashes roll toward the destination, so its direction
 reads from a still frame and from motion alike. Arrival moves the glyph
-from the ship onto the ring.
+from the ship into the wheel's present count.
 
-## Editing: the roster wheel
+## Editing: the wheel's bands
 
 Build is flow, so there is no queue; the player edits wants. Selecting a
-ring opens a wheel outside it at a fixed screen radius, editing that rock:
-one slot per roster row, drawn as the row's glyph by the same three rules.
-Structures fill the left half and units the right, each half ordered by
-cost from the top down. The selected ring brightens.
+rock brightens its wheel and adds its interactions: each slot gains two
+bands, an outer band bearing "+1" and an inner band bearing "-1"; while
+Shift is held they bear "+5" and "-5" and add or remove five. A hovered
+band brightens. A click adds or removes that many wants. Holding repeats
+after a third of a second. A selected wheel takes input through its
+bands and through the drag under Sending, and nothing else; an
+unselected wheel takes none and shows no bands.
 
-A slot is a sector of the wheel's annulus with the glyph at mid radius. Its
-outer band is plus and its inner band is minus; neither carries a symbol,
-since a plus mark inside a glyph already means a build weapon. A hovered
-band brightens. A click adds or removes one want. Holding repeats after a
-third of a second. There is no other input on the wheel, and the inner run
-is display only.
+Hovering a plus band shows the slot's wanted entry with its count raised
+by the band's step, at half alpha. Hovering a minus band shows the
+entries the step would take from, dimmed, wanted first, then building,
+then present. The click lands the change, and the next tick draws the
+sim's response by the rules above: a count rising, a frame filling, a
+dashed entry, a ship lifting out toward its new home. The client
+predicts nothing.
 
-Hovering plus shows one hollow glyph at half alpha at the end of that row's
-run. Hovering minus dims the last glyph of that row: a hollow one means the
-click cancels a frame, a solid one means the unit becomes surplus, which
-leaves for a shortfall elsewhere or stays. The click
-lands the change, and the next tick draws the sim's response by the rules
-above: a line from the rock a surplus ship is coming from, a glyph filling,
-a dashed glyph, a ship lifting out toward its new home. The client predicts
-nothing.
+Gamepad: the stick points at a slot, one face button is plus and another
+is minus, a shoulder button is Shift, holding a button shows its preview
+and releasing commits, and a held button repeats as with the mouse.
 
-Gamepad: the stick points at a slot, one face button is plus and another is
-minus, holding a button shows its preview and releasing commits, and a held
-button repeats as with the mouse.
+A wheel shows at most twelve slots. A larger roster collapses to two, a
+square and a triangle, and choosing one opens that category's own wheel
+in its place, which does not collapse again.
 
-A wheel holds at most twelve slots. Past that, the first level is two
-slots, a square and a triangle, and choosing one opens that category's
-wheel in its place. There is no deeper level.
-
-Sending: drag from one rock's ring to another's. The
-source run dims the glyphs that would go and the destination run shows them
-hollow; the mouse wheel adjusts how many; release issues the two count
-edits, and the flight is the sim's response.
+Sending: drag from one rock's wheel to another's. While the drag is
+held, the source wheel dims the entries that would go and the
+destination wheel shows them as arriving entries at half alpha, a hover
+preview like the plus band's; the mouse wheel adjusts how many; release
+issues the two count edits, and the flight is the sim's response.
 
 ## Camera
 
@@ -156,17 +166,22 @@ A sixty-degree tilt from above, pan and zoom, no rotation. The camera is
 attached to a focus point that moves at the local orbital velocity, so the
 player's region stays on screen while the belt turns. The focus starts at
 the belt's centre until the player's first placement, then at that rock;
-clicking a rock's ring makes it the focus.
+clicking a rock's wheel makes it the focus.
 
 ## Ranges
 
 Every rock's zone is drawn as one faint circle at the zone's radius in
-the belt, always, in the rock's own tint, the tint its ring is stroked
-in. Every armed ship at a rock carries one faint circle at its longest
+the belt, always, in the rock's own tint from its caps. Every armed ship at a rock carries one faint circle at its longest
 weapon range in its owner's colour; a ship in flight carries none, since
 it is not a shooter. Both are painted on the HUD over the belt camera's
-projection, thin, at low alpha, and are never brighter than a ring.
+projection, thin, at low alpha, and are never brighter than a wheel.
 Nothing else on the HUD states a distance.
+
+## Words on screen
+
+Every string the player reads is a short phrase, never a sentence: no
+full stop, no semicolon, no dash. A comma in a string is a sign the
+screen says too much and is brought to the owner before it is drawn.
 
 ## Controls
 
@@ -201,19 +216,15 @@ now.
 Enabled means it will work. A control is enabled only when the rule
 behind it, evaluated on this machine against the state shown, says the
 action succeeds; otherwise it is disabled, and hovering it shows the
-reason in one plain sentence beside it: "Waiting for Team 2 to be
-ready", "Only the host changes the clock", "This version cannot host",
-"Closing is not available in this version". The rules are the same
+reason as a short phrase beside it: "Waiting for Team 2", "Host only",
+"Cannot host here", "Cannot quit here". The rules are the same
 values the sim and the lobby apply, so a control is never enabled and
 then refused.
 
-The one place a fact cannot be known before the click is joining an
-address. The join field shows the outcome inside itself: "Connecting",
-"No room at this address", "The room is full", "That version differs",
-and stays editable. It is also the one home for a fact about a room this
-machine was in and is no longer: "The room closed", "The host left",
-"Removed by the host", shown with the address kept when the title
-returns. No other screen has an error, a notice or a log.
+The join field shows its own outcome while staying editable:
+"Connecting", "No room", "Room full", "Version differs". It also shows
+why a return to the title happened, keeping the address: "Room closed",
+"Host left", "Removed". No other screen has an error, a notice or a log.
 
 ## Screens
 
@@ -232,7 +243,7 @@ follows Controls, above.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
-  zoom whose rings stand apart, each ring's stroke tinted by its rock's
+  zoom whose zone circles stand apart, each tinted by its rock's
   caps; it redraws the instant the seed changes, and it pans and zooms
   under the same controls as the match. Over it, at the left, the seats
   as a table of four rows, one per seat the match can hold, under column
@@ -265,7 +276,7 @@ follows Controls, above.
   returns to the title; it never resumes.
 - **Results.** At the clock: the final belt, held still, under a panel
   titled Results: one row per team in the match's colours, its rocks held
-  as a count of ring glyphs and its army value, the winning row marked;
+  as a count of rock glyphs and its army value, the winning row marked;
   then Rematch, which returns to the lobby with its shape kept, and Leave
   to the title. The word standings appears nowhere on screen.
 

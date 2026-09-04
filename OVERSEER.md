@@ -5,6 +5,13 @@ for the one that talks to the owner. Project state lives in TODO.md.
 
 ## How to work with the owner (2026-09-02)
 
+- Slow and steady, in every session (owner, 2026-09-05). There is no
+  rush. Confirm design with the owner before building on it: a design
+  change is stated as mechanism, read by the owner, and ruled, before a
+  brief carries it. Agents must stop and ask more often than they do: an
+  agent's question comes to the overseer as a stop-and-report, and the
+  overseer puts it to the owner through the question tool; the overseer
+  never answers a design question on the owner's behalf.
 - Ask questions only through the AskUserQuestion tool. Never leave a question,
   an "I would want to know X first", or an undecided option list in a response.
 - Push back on every decision where a better option exists, even a slightly

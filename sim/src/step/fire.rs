@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ids::{EntityId, RockId, SeatId};
 use crate::roster::Weapon;
 use crate::state::sweep::Sweep;
-use crate::state::{Entity, Ready, State};
+use crate::state::{Aim, Assigned, Entity, Ready, State, Threat};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,7 +40,7 @@ impl<'a> Fire<'a> {
 
     pub fn run(self) -> Shots {
         let mut shots = Shots::default();
-        let mut assigned: BTreeMap<EntityId, f64> = BTreeMap::new();
+        let mut assigned = Assigned::default();
         for ready in self.ready() {
             let Some(shooter) = self.state.entity(ready.entity()) else {
                 continue;
@@ -57,16 +57,16 @@ impl<'a> Fire<'a> {
             else {
                 continue;
             };
-            let Some((target, distance)) = self.target(shooter, range.0, &assigned) else {
+            let Some(aim) = self.aim(shooter, range.0, &assigned) else {
                 continue;
             };
-            let plating = self.state[self.state[target].row()].plating.0;
-            let dealt = (damage.0 * (1.0 - falloff.0 * distance / range.0) - plating).max(0.0);
-            *assigned.entry(target).or_default() += dealt;
+            let plating = self.state[self.state[aim.target].row()].plating.0;
+            let dealt = (damage.0 * (1.0 - falloff.0 * aim.distance / range.0) - plating).max(0.0);
+            assigned.take(aim.target, dealt);
             shots.hits.push(Hit {
                 shooter: shooter.id(),
                 weapon: ready.weapon(),
-                target,
+                target: aim.target,
                 damage: dealt,
             });
             shots.ready.push(Ready::new(
@@ -106,36 +106,14 @@ impl<'a> Fire<'a> {
         at.after(interval).max(Moment::at(self.state.tick()))
     }
 
-    fn target(
-        &self,
-        shooter: &Entity,
-        range: f64,
-        assigned: &BTreeMap<EntityId, f64>,
-    ) -> Option<(EntityId, f64)> {
-        let team = self.state[shooter.seat()].team();
+    fn aim(&self, shooter: &Entity, range: f64, assigned: &Assigned) -> Option<Aim> {
         let from = self.state.body_of(shooter).pos;
-        let plating = self.state[shooter.row()].plating.0;
-        let now = self.state.tick();
-        let here = shooter.standing(now)?;
-        self.sweep
-            .within(from, range)
-            .filter_map(|id| self.state.entity(id))
-            .filter(|target| {
-                self.state[target.seat()].team() != team
-                    && target.standing(now) == Some(here)
-                    && target.hp() > assigned.get(&target.id()).copied().unwrap_or(0.0)
-            })
-            .map(|target| {
-                let threat = self.state[target.row()].dps_through(plating) / target.hp();
-                let distance = self.state.body_of(target).pos.distance(from);
-                (target.id(), threat, distance)
-            })
-            .max_by(|a, b| {
-                a.1.total_cmp(&b.1)
-                    .then(b.2.total_cmp(&a.2))
-                    .then(b.0.cmp(&a.0))
-            })
-            .map(|(id, _, distance)| (id, distance))
+        Threat::of(self.state, shooter)?.best(
+            self.sweep
+                .within(from, range)
+                .filter_map(|id| self.state.entity(id)),
+            assigned,
+        )
     }
 }
 

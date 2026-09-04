@@ -11,12 +11,33 @@ pub enum Kind {
 pub struct Row {
     pub name: &'static str,
     pub cost: Materials,
-    pub mass: Real,
     pub manoeuvring: Real,
+    pub steering: Weights,
     pub hp: Real,
     pub plating: Real,
     pub capacity: Materials,
     pub weapons: Vec<Weapon>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Weights {
+    pub wander: Real,
+    pub returning: Real,
+    pub separation: Real,
+    pub cohesion: Real,
+    pub caution: Real,
+    pub chase: Real,
+}
+
+impl Weights {
+    pub const STILL: Weights = Weights {
+        wander: Real(0.0),
+        returning: Real(0.0),
+        separation: Real(0.0),
+        cohesion: Real(0.0),
+        caution: Real(0.0),
+        chase: Real(0.0),
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -46,6 +67,11 @@ impl Row {
 
     pub fn is_armed(&self) -> bool {
         self.weapons.iter().any(|weapon| weapon.range().is_some())
+    }
+
+    pub fn standoff(&self) -> Option<f64> {
+        let range = self.max_damage_range();
+        (range > 0.0).then_some(0.5 * range)
     }
 
     pub fn max_damage_range(&self) -> f64 {
@@ -117,8 +143,8 @@ mod tests {
         Row {
             name: "test",
             cost: Materials::new(1.0, 0.0, 0.0),
-            mass: Real(1.0),
             manoeuvring: Real(manoeuvring),
+            steering: Weights::STILL,
             hp: Real(1.0),
             plating: Real(0.0),
             capacity: Materials::ZERO,

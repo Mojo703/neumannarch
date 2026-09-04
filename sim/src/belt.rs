@@ -38,6 +38,12 @@ impl Belt {
 
     pub const ZONE_RADIUS_METERS: f64 = 30.0;
 
+    pub const FIELD_SCALE_METERS: f64 = 15.0;
+
+    pub const ARRIVAL_METERS: f64 = 7.5;
+
+    pub const SPACING_METERS: f64 = 0.5;
+
     pub fn fixed(gravity: Gravity) -> Vec<Rock> {
         (0..3 * REGION).map(|at| rock(at, gravity)).collect()
     }
@@ -98,6 +104,18 @@ fn caps(at: usize) -> Materials {
 mod tests {
     use super::*;
     use crate::TICKS_PER_SECOND;
+
+    #[test]
+    fn every_rock_of_the_shipped_belt_has_a_floor_well_inside_its_zone() {
+        for rock in Belt::fixed(Belt::GRAVITY) {
+            let floor = rock.radius() + Belt::SPACING_METERS;
+            assert!(
+                floor < Belt::ZONE_RADIUS_METERS,
+                "a rock of {} leaves no shell",
+                rock.radius()
+            );
+        }
+    }
 
     #[test]
     fn no_two_zones_of_the_shipped_belt_overlap() {

@@ -17,7 +17,7 @@ pub struct Entity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Motion {
     Fixed,
-    Free { body: Body, flight: Option<Flight> },
+    Steered { body: Body, flight: Option<Flight> },
 }
 
 impl Entity {
@@ -81,8 +81,8 @@ impl Entity {
 
     pub fn flight(&self) -> Option<Flight> {
         match self.motion {
-            Motion::Fixed | Motion::Free { flight: None, .. } => None,
-            Motion::Free {
+            Motion::Fixed | Motion::Steered { flight: None, .. } => None,
+            Motion::Steered {
                 flight: Some(flight),
                 ..
             } => Some(flight),

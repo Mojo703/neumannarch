@@ -129,7 +129,7 @@ fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
 }
 
 fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
-    let held = state.holding(post, row);
+    let held = state.holdings(post, row);
     Wanted {
         row,
         want,
