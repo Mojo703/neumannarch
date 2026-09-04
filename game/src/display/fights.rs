@@ -82,8 +82,11 @@ impl Fight {
 
 fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
     let mut totals: BTreeMap<(RockId, SeatId), f64> = BTreeMap::new();
-    for held in view.present.iter().filter(|held| held.from.is_none()) {
-        *totals.entry((held.home, held.seat)).or_insert(0.0) += held.hp;
+    for held in &view.present {
+        let Some(rock) = held.at.standing() else {
+            continue;
+        };
+        *totals.entry((rock, held.seat)).or_insert(0.0) += held.hp;
     }
     totals
 }
@@ -93,7 +96,7 @@ mod tests {
     use probe_sim::belt::Belt;
     use probe_sim::orbit::Body;
     use probe_sim::state::Standings;
-    use probe_sim::state::view::Present;
+    use probe_sim::state::view::{Berth, Present};
     use probe_sim::step::fire::Exchange;
     use probe_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
 
@@ -112,6 +115,7 @@ mod tests {
             stockpile: Stockpile::new(Materials::ZERO, Materials::ZERO),
             reserve: BTreeMap::new(),
             compositions: Vec::new(),
+            plans: Vec::new(),
             present: vec![Present {
                 id: EntityId(0),
                 row: RowId(0),
@@ -119,7 +123,7 @@ mod tests {
                 body: Body::new(Vec3::ZERO, Vec3::ZERO),
                 hp,
                 home: ROCK,
-                from: None,
+                at: Berth::Standing(ROCK),
             }],
             teams: Box::new([TeamId(0)]),
             exchanges: match shooting {

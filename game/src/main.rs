@@ -53,16 +53,16 @@ mod tests {
     use mirage_engine::egui;
     use mirage_engine::headless::Session as Offscreen;
     use mirage_engine::math::Vec2;
-    use probe_game::display::hud;
-    use probe_game::display::scene::{Fill, Scene, WheelBand};
+    use probe_game::display::ease;
+    use probe_game::display::scene::WheelBand;
     use probe_game::display::viewport::Viewport;
-    use probe_game::display::wheel::Wheel;
+    use probe_game::display::wheels::Still;
     use probe_game::screens::flow::Screen;
     use probe_game::screens::play::Play;
     use probe_game::screens::{control, lobby, title};
     use probe_protocol::Notice;
-    use probe_sim::RockId;
     use probe_sim::roster::SHIPYARD;
+    use probe_sim::{RockId, RowId};
 
     use super::*;
 
@@ -140,17 +140,10 @@ mod tests {
         }
     }
 
-    fn plus_band(wheel: &Wheel, centre: egui::Pos2, row: probe_sim::RowId) -> egui::Pos2 {
-        (0..3_600)
-            .map(|step| {
-                let angle = core::f32::consts::TAU * step as f32 / 3_600.0;
-                let (sin, cos) = angle.sin_cos();
-                let out = probe_game::display::wheel::RADIUS
-                    + probe_game::display::wheel::BAND_WIDTH * 0.5;
-                egui::pos2(centre.x + out * sin, centre.y - out * cos)
-            })
-            .find(|at| wheel.slot_at(*at) == Some((row, WheelBand::Plus)))
-            .expect("the row has a slot")
+    fn settled(session: &mut Offscreen<Probe>) {
+        let ticks = (ease::SPAN_SECONDS / probe_sim::TICK.as_secs_f64()).ceil() as u64;
+        advance(session, ticks);
+        session.step();
     }
 
     fn save(session: &Offscreen<Probe>, name: &str) -> PathBuf {
@@ -327,52 +320,42 @@ mod tests {
     }
 
     fn placed(session: &mut Offscreen<Probe>) {
-        let at = viewport(session)
-            .point_of(
-                play(session)
-                    .rock_pos(ROCK)
-                    .expect("the rock is on the map"),
-            )
-            .expect("the rock is in front of the eye");
-        click_at(session, at);
-        let selected = play(session).selection().expect("the ring was selected");
-        assert_eq!(selected, ROCK);
+        let centre = rock_at(session);
+        click_at(session, centre);
+        assert_eq!(
+            play(session).selection(),
+            Some(ROCK),
+            "clicking a rock selects it"
+        );
+        settled(session);
 
-        let centre = viewport(session)
-            .point_of(play(session).rock_pos(ROCK).expect("the rock"))
-            .expect("the rock is in front of the eye");
-        let wheel = play(session)
-            .wheel(&viewport(session))
-            .expect("the wheel is open on the selection");
-        click_at(session, plus_band(&wheel, centre, SHIPYARD));
+        let band = band_of(session, centre, SHIPYARD);
+        click_at(session, band);
         advance(session, 2);
         session.step();
 
-        let view = play(session).view();
         let mine = play(session).seat();
-        let shipyard = view
+        let shipyard = play(session)
+            .view()
             .present
             .iter()
             .find(|present| present.row == SHIPYARD && present.seat == mine)
             .expect("the reserve placed the shipyard");
-        assert_eq!(shipyard.home, selected);
-        assert!(
-            has_a_solid_glyph(session, selected),
-            "the shipyard's glyph is on the ring"
-        );
+        assert_eq!(shipyard.home, ROCK);
 
-        let glyph = egui::pos2(centre.x, centre.y - hud::RING_RADIUS);
-        let scene = scene_of(session);
-        let (_, mark) = hud::glyph_at(&scene, &viewport(session), glyph)
-            .expect("the glyph on the ring is under the pointer");
-        assert_eq!(
-            mark.reason
-                .sentence(play(session).session().state().roster()),
-            "Shipyard, here"
-        );
-        session.set_pointer(Vec2::new(glyph.x, glyph.y));
+        session.set_pointer(Vec2::new(centre.x, centre.y));
         session.step();
-        save(session, "glyph_reason");
+        save(session, "wheel");
+    }
+
+    fn band_of(session: &Offscreen<Probe>, pointer: egui::Pos2, row: RowId) -> egui::Pos2 {
+        let wheels = play(session).wheels(&viewport(session), Some(pointer), false, &mut Still);
+        wheels
+            .iter()
+            .find(|wheel| wheel.rock() == ROCK)
+            .expect("the selected rock carries a wheel")
+            .band(row, WheelBand::Plus(1))
+            .expect("the row's band is on the wheel")
     }
 
     fn paused(session: &mut Offscreen<Probe>) {
@@ -390,33 +373,6 @@ mod tests {
         assert!(!play(session).paused());
         advance(session, 4);
         assert!(play(session).session().state().tick() > before);
-    }
-
-    fn scene_of(session: &Offscreen<Probe>) -> Scene {
-        let play = play(session);
-        Scene::from_view(
-            play.view(),
-            play.session().state().roster(),
-            probe_game::display::scene::Client {
-                selection: play.selection(),
-                hover: play.hover().cloned(),
-                fights: &probe_game::display::fights::Fights::default(),
-            },
-        )
-    }
-
-    fn has_a_solid_glyph(session: &Offscreen<Probe>, rock: RockId) -> bool {
-        scene_of(session)
-            .rings
-            .iter()
-            .find(|ring| ring.rock == rock)
-            .is_some_and(|ring| {
-                ring.runs.iter().any(|run| {
-                    run.marks
-                        .iter()
-                        .any(|mark| mark.fill == Fill::Solid && !mark.dim)
-                })
-            })
     }
 
     #[test]
@@ -455,7 +411,7 @@ mod tests {
 
         assert!(
             framed > 1,
-            "the opening zoom shows {framed} rings, so there is nothing to choose between"
+            "the opening zoom shows {framed} rocks, so there is nothing to choose between"
         );
     }
 
@@ -482,6 +438,7 @@ mod tests {
         session.press(MouseButton::Right);
         session.set_pointer(Vec2::new(from.x + dragged.x, from.y + dragged.y));
         session.step();
+        settled(&mut session);
 
         let now = rock_at(&session);
         assert!(

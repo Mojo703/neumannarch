@@ -10,7 +10,7 @@ use crate::net::listener::{Listener, NoListener};
 use crate::net::local::Local;
 use crate::net::transport::Transport;
 use crate::screens::Playable;
-use crate::screens::control::Rule;
+use crate::screens::control::{HOST_ONLY, Rule};
 use crate::screens::field::Typed;
 use crate::screens::loading::Loading;
 use crate::screens::lobby::{self, LobbyScreen};
@@ -153,10 +153,7 @@ impl Screen {
                 },
             },
             Screen::Results { mut results, room } => {
-                let rematch = Rule::only_if(
-                    room.hosts(results.lobby()),
-                    "Only the host starts a rematch",
-                );
+                let rematch = Rule::only_if(room.hosts(results.lobby()), HOST_ONLY);
                 match results.frame(ctx, &rematch) {
                     Some(results::Picked::Leave) => Screen::leaves(room, None),
                     Some(results::Picked::Rematch) => Screen::rematches(results, room),
@@ -317,11 +314,11 @@ impl Screen {
 }
 
 impl Join {
-    fn sentence(&self) -> Option<&'static str> {
+    fn phrase(&self) -> Option<&'static str> {
         match self {
             Join::Idle => None,
             Join::Connecting { .. } => Some("Connecting"),
-            Join::Failed(outcome) => Some(outcome.sentence()),
+            Join::Failed(outcome) => Some(outcome.phrase()),
         }
     }
 }
@@ -417,7 +414,7 @@ where
     G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
 {
     let hosts = Rule::unless(listener.as_ref().err().map(|why| why.reason().to_string()));
-    let outcome = join.sentence();
+    let outcome = join.phrase();
     let pixel = ctx.pointer();
     let size = ctx.window_size();
     let clicked = ctx.pressed(Button::Select);

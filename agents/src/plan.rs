@@ -59,10 +59,8 @@ impl Plan {
 
     pub fn commands(&self, view: &View) -> Vec<Command> {
         let mut standing: BTreeMap<(RockId, RowId), u32> = BTreeMap::new();
-        for composition in &view.compositions {
-            for row in &composition.rows {
-                standing.insert((composition.rock, row.row), row.want);
-            }
+        for plan in &view.plans {
+            standing.insert((plan.rock, plan.row), plan.want);
         }
         let dropped = standing
             .iter()

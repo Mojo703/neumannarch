@@ -8,9 +8,13 @@ const LOOPBACK: &str = "127.0.0.1";
 
 const WIDTH: f32 = 420.0;
 
-const NO_SETTINGS: &str = "Settings are not available in this version";
+pub(crate) const TITLE: &str = "Probe";
 
-const NO_QUIT: &str = "Closing is not available in this version";
+pub(crate) const TAGLINE: &str = "Two to four players in a belt";
+
+pub(crate) const NO_SETTINGS: &str = "Cannot open settings here";
+
+pub(crate) const NO_QUIT: &str = "Cannot quit here";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -42,15 +46,26 @@ pub struct Places {
 }
 
 impl Outcome {
-    pub fn sentence(self) -> &'static str {
+    pub fn phrase(self) -> &'static str {
         match self {
-            Outcome::NoRoom => "No room at this address",
-            Outcome::Full => "The room is full",
-            Outcome::Version => "That version differs",
-            Outcome::Closed => "The room closed",
-            Outcome::HostLeft => "The host left",
-            Outcome::Removed => "Removed by the host",
+            Outcome::NoRoom => "No room",
+            Outcome::Full => "Room full",
+            Outcome::Version => "Version differs",
+            Outcome::Closed => "Room closed",
+            Outcome::HostLeft => "Host left",
+            Outcome::Removed => "Removed",
         }
+    }
+
+    pub fn every() -> [Outcome; 6] {
+        [
+            Outcome::NoRoom,
+            Outcome::Full,
+            Outcome::Version,
+            Outcome::Closed,
+            Outcome::HostLeft,
+            Outcome::Removed,
+        ]
     }
 }
 
@@ -94,9 +109,9 @@ impl Title {
         panel.backdrop();
         let window = panel.window();
         let heading = Pos2::new(window.center().x, window.top() + panel::MARGIN * 2.0);
-        panel.heading("Probe", heading);
+        panel.heading(TITLE, heading);
         panel.text(
-            "A two-to-four-player space RTS",
+            TAGLINE,
             heading + Vec2::new(0.0, panel::HEADING_SIZE),
             Align2::CENTER_CENTER,
             panel::DIM_INK,

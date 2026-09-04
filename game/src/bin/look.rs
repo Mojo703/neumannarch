@@ -9,16 +9,21 @@ use probe_game::display::camera::BeltCamera;
 use probe_game::display::glyph::Glyph;
 use probe_game::display::glyph_quad::GlyphQuad;
 use probe_game::display::scene::{
-    Arc, EntityView, Fill, FlightLine, Mark, Reason, RingView, RockView, Run, Scene,
+    Arc, EntityView, Entry, FlightLine, Hover, RockView, RowView, Scene, SectorView, Shown,
+    WheelBand, WheelView,
 };
 use probe_game::display::viewport::Viewport;
+use probe_game::display::wheels::{Aim, Still, Wheels};
 use probe_game::display::{belt, hud};
-use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD};
-use probe_sim::{Materials, RockId, RowId, SeatId, Vec3};
+use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD, STORAGE};
+use probe_sim::state::view::Building;
+use probe_sim::{Material, Materials, RockId, RowId, SeatId, Vec3};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
 const WINDOW: UVec2 = UVec2::new(1280, 720);
+
+const ZONE: f64 = probe_sim::belt::Belt::ZONE_RADIUS_METERS;
 
 fn glyph_of(row: RowId) -> Glyph {
     Glyph::of(&Roster::shipped()[row])
@@ -59,8 +64,31 @@ impl Game for Looker {
 
         belt::draw(&self.scene, &viewport, ctx);
 
+        let roster = Roster::shipped();
+        let wheels = Wheels::over(
+            &self.scene,
+            &roster,
+            &viewport,
+            &aim(&self.scene),
+            &mut Still,
+        );
         let scene = &self.scene;
-        ctx.ui(|ui| hud::paint(scene, &viewport, None, ui.painter()));
+        ctx.ui(|ui| {
+            hud::paint(scene, &viewport, ui.painter());
+            wheels.paint(ui.painter(), scene.hover.as_ref());
+        });
+    }
+}
+
+fn aim(scene: &Scene) -> Aim {
+    Aim {
+        viewer: scene.seat,
+        pointer: None,
+        hovered: None,
+        step: 1,
+        wants: [((RockId(0), FRIGATE), 1), ((RockId(0), RAIDER), 1)]
+            .into_iter()
+            .collect(),
     }
 }
 
@@ -103,105 +131,165 @@ fn caps_of(id: u32) -> Materials {
     }
 }
 
-fn ring(rock: RockId, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
-    RingView {
-        rock,
-        caps: caps_of(rock.0),
-        runs,
-        arcs,
-    }
-}
-
 fn ship(seat: u8, row: RowId, pos: Vec3) -> EntityView {
     EntityView {
         seat: SeatId(seat),
         glyph: glyph_of(row),
         pos,
+        range: Roster::shipped()[row]
+            .is_armed()
+            .then(|| Roster::shipped()[row].max_damage_range()),
     }
 }
 
-fn present(seat: u8, rows: &[RowId]) -> Run {
-    Run {
-        seat: SeatId(seat),
-        marks: rows
-            .iter()
-            .map(|&row| Mark {
-                glyph: glyph_of(row),
-                fill: Fill::Solid,
-                dim: false,
-                reason: Reason::Here(row),
-            })
-            .collect(),
+fn flier(seat: u8, row: RowId, pos: Vec3) -> EntityView {
+    EntityView {
+        range: None,
+        ..ship(seat, row, pos)
     }
+}
+
+fn shown(entry: Entry) -> Shown {
+    Shown {
+        entry,
+        previewed: false,
+    }
+}
+
+fn row(row: RowId, entries: Vec<Entry>) -> RowView {
+    RowView {
+        row,
+        entries: entries.into_iter().map(shown).collect(),
+    }
+}
+
+fn sector(seat: u8, rows: Vec<RowView>, arc: Option<Arc>) -> SectorView {
+    SectorView {
+        seat: SeatId(seat),
+        rows,
+        arc,
+    }
+}
+
+fn wheel(rock: u32, sectors: Vec<SectorView>) -> WheelView {
+    WheelView {
+        rock: RockId(rock),
+        sectors,
+    }
+}
+
+fn arc(seat: u8, fraction: f32, trailing: f32) -> Option<Arc> {
+    Some(Arc {
+        seat: SeatId(seat),
+        fraction,
+        trailing,
+    })
 }
 
 fn region_scene() -> Scene {
     let rocks = vec![
         rock(0, Vec3::new(0.0, 0.0, 0.0), 6.0),
-        rock(1, Vec3::new(60.0, 0.0, -20.0), 5.0),
-        rock(2, Vec3::new(-50.0, 0.0, 40.0), 4.0),
+        rock(1, Vec3::new(320.0, 0.0, -110.0), 5.0),
+        rock(2, Vec3::new(-280.0, 0.0, 220.0), 4.0),
     ];
-
-    let inner_a = RockId(0);
-    let inner_b = RockId(1);
-    let inner_c = RockId(2);
 
     let entities = vec![
         ship(0, RAIDER, Vec3::new(4.0, 0.0, 2.0)),
         ship(0, FRIGATE, Vec3::new(-4.0, 0.0, 3.0)),
         ship(1, RAIDER, Vec3::new(2.0, 0.0, -4.0)),
         ship(1, LANCER, Vec3::new(-2.0, 0.0, -5.0)),
-        ship(0, SHIPYARD, Vec3::new(60.0, 0.0, -14.0)),
-        ship(0, FRIGATE, Vec3::new(65.0, 0.0, -22.0)),
-        ship(1, RAIDER, Vec3::new(-15.0, 0.0, 15.0)),
+        ship(0, SHIPYARD, Vec3::new(320.0, 0.0, -104.0)),
+        ship(0, FRIGATE, Vec3::new(325.0, 0.0, -112.0)),
+        flier(1, RAIDER, Vec3::new(-90.0, 0.0, 80.0)),
     ];
 
-    let rings = vec![
-        ring(
-            inner_a,
+    let wheels = vec![
+        wheel(
+            0,
             vec![
-                present(0, &[FRIGATE, RAIDER]),
-                present(1, &[LANCER, RAIDER]),
-            ],
-            vec![
-                Arc {
-                    seat: SeatId(0),
-                    fraction: 0.7,
-                    trailing: 0.85,
-                },
-                Arc {
-                    seat: SeatId(1),
-                    fraction: 0.4,
-                    trailing: 0.4,
-                },
+                sector(
+                    0,
+                    vec![
+                        row(FRIGATE, vec![Entry::Present(1)]),
+                        row(RAIDER, vec![Entry::Present(1)]),
+                    ],
+                    arc(0, 0.7, 0.85),
+                ),
+                sector(
+                    1,
+                    Roster::shipped()
+                        .iter()
+                        .map(|(id, _)| row(id, vec![Entry::Present(1)]))
+                        .collect(),
+                    arc(1, 0.4, 0.4),
+                ),
             ],
         ),
-        ring(inner_b, vec![present(0, &[SHIPYARD, FRIGATE])], vec![]),
-        ring(inner_c, vec![], vec![]),
+        wheel(
+            1,
+            vec![sector(
+                0,
+                vec![
+                    row(SHIPYARD, vec![Entry::Present(1), Entry::Surplus(1)]),
+                    row(
+                        FRIGATE,
+                        vec![
+                            Entry::Present(1),
+                            Entry::Building(Building {
+                                progress: 0.45,
+                                starved_of: Some(Material::Metals),
+                            }),
+                            Entry::Wanted {
+                                count: 1,
+                                dashed: false,
+                            },
+                        ],
+                    ),
+                ],
+                None,
+            )],
+        ),
+        wheel(
+            2,
+            vec![sector(
+                1,
+                vec![row(
+                    RAIDER,
+                    vec![Entry::Arriving {
+                        count: 1,
+                        from: RockId(0),
+                    }],
+                )],
+                None,
+            )],
+        ),
     ];
-
-    let flights = vec![FlightLine {
-        from: Vec3::new(-15.0, 0.0, 15.0),
-        to: RockId(2),
-    }];
 
     Scene {
         rocks,
         entities,
-        rings,
-        flights,
-        selection: None,
-        hover: None,
+        wheels,
+        flights: vec![FlightLine {
+            from: Vec3::new(-90.0, 0.0, 80.0),
+            to: RockId(2),
+        }],
+        zone: ZONE,
+        seat: SeatId(0),
+        selection: Some(RockId(0)),
+        hover: Some(Hover::Wheel {
+            rock: RockId(0),
+            row: RAIDER,
+            band: WheelBand::Plus(1),
+        }),
     }
 }
 
 fn region_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::new(3.0, 0.0, 7.0), 140.0)
+    BeltCamera::new(Vec3::new(10.0, 0.0, 30.0), 620.0)
 }
 
 fn fight_scene() -> Scene {
     let rocks = vec![rock(0, Vec3::ZERO, 6.0)];
-    let inner = RockId(0);
 
     let entities = vec![
         ship(0, FRIGATE, Vec3::new(5.0, 0.0, 1.0)),
@@ -211,47 +299,61 @@ fn fight_scene() -> Scene {
         ship(1, RAIDER, Vec3::new(-6.0, 0.0, -2.0)),
     ];
 
-    let rings = vec![ring(
-        inner,
+    let wheels = vec![wheel(
+        0,
         vec![
-            present(0, &[FRIGATE, LANCER, RAIDER]),
-            present(1, &[FRIGATE, RAIDER]),
-        ],
-        vec![
-            Arc {
-                seat: SeatId(0),
-                fraction: 0.85,
-                trailing: 0.9,
-            },
-            Arc {
-                seat: SeatId(1),
-                fraction: 0.3,
-                trailing: 0.55,
-            },
+            sector(
+                0,
+                vec![
+                    row(FRIGATE, vec![Entry::Present(1)]),
+                    row(LANCER, vec![Entry::Present(1)]),
+                    row(
+                        RAIDER,
+                        vec![
+                            Entry::Present(1),
+                            Entry::Leaving {
+                                count: 2,
+                                to: RockId(1),
+                            },
+                        ],
+                    ),
+                ],
+                arc(0, 0.85, 0.9),
+            ),
+            sector(
+                1,
+                vec![
+                    row(FRIGATE, vec![Entry::Present(1)]),
+                    row(RAIDER, vec![Entry::Present(1)]),
+                ],
+                arc(1, 0.3, 0.55),
+            ),
         ],
     )];
 
     Scene {
         rocks,
         entities,
-        rings,
-        flights: vec![],
-        selection: Some(inner),
+        wheels,
+        flights: Vec::new(),
+        zone: ZONE,
+        seat: SeatId(0),
+        selection: Some(RockId(0)),
         hover: None,
     }
 }
 
 fn fight_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::ZERO, 40.0)
+    BeltCamera::new(Vec3::ZERO, 60.0)
 }
 
 fn belt_scene() -> Scene {
     let positions = [
         Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(140.0, 0.0, 40.0),
-        Vec3::new(-120.0, 0.0, 80.0),
-        Vec3::new(60.0, 0.0, -150.0),
-        Vec3::new(-90.0, 0.0, -100.0),
+        Vec3::new(1_400.0, 0.0, 400.0),
+        Vec3::new(-1_200.0, 0.0, 800.0),
+        Vec3::new(600.0, 0.0, -1_500.0),
+        Vec3::new(-900.0, 0.0, -1_000.0),
     ];
     let rocks: Vec<RockView> = positions
         .iter()
@@ -260,23 +362,29 @@ fn belt_scene() -> Scene {
         .collect();
 
     let seats = [0, 1, 0, 1, 0];
-    let flight_from = Vec3::new(70.0, 0.0, 20.0);
+    let flight_from = Vec3::new(700.0, 0.0, 200.0);
     let mut entities: Vec<EntityView> = positions
         .iter()
         .zip(seats)
         .map(|(&pos, seat)| ship(seat, FRIGATE, pos + Vec3::new(4.0, 0.0, 0.0)))
         .collect();
-    entities.push(ship(1, RAIDER, flight_from));
+    entities.push(flier(1, RAIDER, flight_from));
 
-    let rings: Vec<RingView> = positions
+    let wheels = positions
         .iter()
         .zip(seats)
         .enumerate()
         .map(|(index, (_, seat))| {
-            ring(
-                RockId(index as u32),
-                vec![present(seat, &[FRIGATE])],
-                vec![],
+            wheel(
+                index as u32,
+                vec![sector(
+                    seat,
+                    vec![
+                        row(STORAGE, vec![Entry::Present(1)]),
+                        row(FRIGATE, vec![Entry::Present(1)]),
+                    ],
+                    None,
+                )],
             )
         })
         .collect();
@@ -284,16 +392,18 @@ fn belt_scene() -> Scene {
     Scene {
         rocks,
         entities,
-        rings,
+        wheels,
         flights: vec![FlightLine {
             from: flight_from,
             to: RockId(1),
         }],
+        zone: ZONE,
+        seat: SeatId(0),
         selection: None,
         hover: None,
     }
 }
 
 fn belt_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::new(0.0, 0.0, -20.0), 420.0)
+    BeltCamera::new(Vec3::new(0.0, 0.0, -200.0), 4_200.0)
 }

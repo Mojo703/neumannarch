@@ -5,7 +5,7 @@ use crate::screens::panel::{self, Panel};
 
 const WIDTH: f32 = 220.0;
 
-const NO_SURRENDER: &str = "Surrendering is not available in this version";
+pub(crate) const NO_SURRENDER: &str = "Cannot surrender here";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {

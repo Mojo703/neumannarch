@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use mirage_engine::egui;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
@@ -8,17 +10,19 @@ use probe_sim::{RockId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
+use crate::display::ease::Clock;
 use crate::display::fights::Fights;
 use crate::display::glyph_quad::GlyphQuad;
+use crate::display::label::titled;
 use crate::display::scene::{Client, Hover, Scene, WheelBand};
 use crate::display::send::Sending;
 use crate::display::viewport::Viewport;
-use crate::display::wheel::Wheel;
+use crate::display::wheels::{Aim, Ease, Motion, Wheels};
 use crate::display::{belt, hud};
 use crate::net::machine::Machine;
 use crate::net::pace::Allowed;
 use crate::net::transport::Transport;
-use crate::screens::control::{self, Rule};
+use crate::screens::control;
 use crate::screens::held::{self, Held};
 use crate::screens::panel::{self, Panel};
 use crate::screens::panning::Panning;
@@ -30,6 +34,8 @@ const OPENING_ZOOM: f64 = 6_000.0;
 const REPEAT_DELAY: f32 = 1.0 / 3.0;
 
 const REPEAT_INTERVAL: f32 = 0.1;
+
+const SHIFT_STEP: u32 = 5;
 
 struct Drag {
     from: RockId,
@@ -51,7 +57,10 @@ pub enum Picked {
 }
 
 enum Mode {
-    Playing { gesture: Gesture, preview: Preview },
+    Playing {
+        gesture: Gesture,
+        hover: Option<Hover>,
+    },
     Paused,
     Held(Held),
 }
@@ -64,18 +73,6 @@ enum Gesture {
     Editing(Repeat),
 }
 
-struct Hovered {
-    slot: Option<(RockId, RowId, WheelBand)>,
-    refused: Option<String>,
-    ring: Option<RockId>,
-}
-
-#[derive(Default)]
-struct Preview {
-    hover: Option<Hover>,
-    refused: Option<String>,
-}
-
 pub struct Play {
     lobby: Lobby,
     machine: Machine,
@@ -83,9 +80,12 @@ pub struct Play {
     fights: Fights,
     camera: BeltCamera,
     selection: Option<RockId>,
+    hovered: Option<RockId>,
     doing: Mode,
     followed: bool,
     panning: Panning,
+    motion: Motion,
+    clock: Clock,
 }
 
 impl Play {
@@ -97,6 +97,7 @@ impl Play {
                 machine.session().state().roster(),
                 Client {
                     selection: None,
+                    pointed: None,
                     hover: None,
                     fights: &Fights::default(),
                 },
@@ -111,9 +112,12 @@ impl Play {
             fights: Fights::default(),
             camera,
             selection: None,
+            hovered: None,
             doing: Mode::played(),
             followed: false,
             panning: Panning::still(),
+            motion: Motion::default(),
+            clock: Clock::default(),
         }
     }
 
@@ -135,7 +139,7 @@ impl Play {
 
     pub fn hover(&self) -> Option<&Hover> {
         match &self.doing {
-            Mode::Playing { preview, .. } => preview.hover.as_ref(),
+            Mode::Playing { hover, .. } => hover.as_ref(),
             Mode::Paused | Mode::Held(_) => None,
         }
     }
@@ -169,17 +173,6 @@ impl Play {
             .map(|terrain| terrain.orbit.at(self.view.tick, self.view.gravity).pos)
     }
 
-    pub fn wheel(&self, viewport: &Viewport) -> Option<Wheel> {
-        let rock = self.selection?;
-        let centre = viewport.point_of(self.rock_pos(rock)?)?;
-        Some(Wheel::open(
-            rock,
-            self.machine.seat(),
-            self.machine.session().state().roster(),
-            centre,
-        ))
-    }
-
     pub fn tick(&mut self, transport: &mut dyn Transport) {
         if (self.paused() && self.machine.alone()) || self.over() {
             return;
@@ -208,29 +201,48 @@ impl Play {
 
         let mut points_per_pixel = 1.0;
         ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let dt = self.clock.frame(ctx.elapsed());
+        let mut motion = core::mem::take(&mut self.motion);
+        motion.begin(dt);
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
-        let aimed = self.wheel(&viewport);
-        self.read_input(ctx, &viewport, aimed.as_ref());
+        let shifted = ctx.down(Button::Shift);
+        let aimed = self.wheels(
+            &viewport,
+            Some(viewport.point_at(ctx.pointer())),
+            shifted,
+            &mut motion,
+        );
+        self.read_input(ctx, &viewport, &aimed);
+        self.camera.settle(dt);
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
-        let wheel = self.wheel(&viewport);
+        let pointer = viewport.point_at(ctx.pointer());
         let scene = self.scene();
+        let wheels = Wheels::over(
+            &scene,
+            self.roster(),
+            &viewport,
+            &self.aim(Some(pointer), shifted),
+            &mut motion,
+        );
+        self.motion = motion;
 
         belt::draw(&scene, &viewport, ctx);
-        let pointer = viewport.point_at(ctx.pointer());
         let clicked = ctx.pressed(Button::Select);
         let over = panel::window_of(window, points_per_pixel);
-        let sentence = self.sentence(&scene, &viewport, pointer);
+        let phrase = self.phrase(&wheels, pointer);
+        let hover = self.hover().copied();
         let doing = &self.doing;
         let mut left = None;
         let mut resumed = false;
         ctx.ui(|ui| {
-            hud::paint(&scene, &viewport, wheel.as_ref(), ui.painter());
+            hud::paint(&scene, &viewport, ui.painter());
+            wheels.paint(ui.painter(), hover.as_ref());
             let panel = Panel::new(ui.painter(), over, pointer, clicked);
-            if let Some((beside, sentence)) = sentence {
+            if let Some((beside, phrase)) = phrase {
                 let mut controls = control::Controls::over(&panel);
-                controls.note(beside, sentence);
+                controls.note(beside, phrase);
                 controls.finish();
             }
             match doing {
@@ -256,32 +268,67 @@ impl Play {
     fn scene(&self) -> Scene {
         Scene::from_view(
             &self.view,
-            self.machine.session().state().roster(),
+            self.roster(),
             Client {
                 selection: self.selection,
-                hover: self.hover().cloned(),
+                pointed: self.hovered,
+                hover: self.hover().copied(),
                 fights: &self.fights,
             },
         )
     }
 
-    fn sentence(
+    fn roster(&self) -> &probe_sim::roster::Roster {
+        self.machine.session().state().roster()
+    }
+
+    pub fn wheels(
         &self,
-        scene: &Scene,
         viewport: &Viewport,
-        pointer: egui::Pos2,
-    ) -> Option<(egui::Rect, String)> {
-        let beside = |at: egui::Pos2| {
-            egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * crate::display::glyph::HALF))
-        };
-        if let Mode::Playing { preview, .. } = &self.doing
-            && let Some(refused) = &preview.refused
-        {
-            return Some((beside(pointer), refused.clone()));
+        pointer: Option<egui::Pos2>,
+        shifted: bool,
+        ease: &mut impl Ease,
+    ) -> Wheels {
+        Wheels::over(
+            &self.scene(),
+            self.roster(),
+            viewport,
+            &self.aim(pointer, shifted),
+            ease,
+        )
+    }
+
+    fn aim(&self, pointer: Option<egui::Pos2>, shifted: bool) -> Aim {
+        Aim {
+            viewer: self.machine.seat(),
+            pointer,
+            hovered: self.hovered,
+            step: match shifted {
+                true => SHIFT_STEP,
+                false => 1,
+            },
+            wants: self.wants(),
         }
-        let (at, mark) = hud::glyph_at(scene, viewport, pointer)?;
-        let roster = self.machine.session().state().roster();
-        Some((beside(at), mark.reason.sentence(roster)))
+    }
+
+    fn wants(&self) -> BTreeMap<(RockId, RowId), u32> {
+        self.view
+            .plans
+            .iter()
+            .map(|plan| ((plan.rock, plan.row), plan.want))
+            .collect()
+    }
+
+    fn phrase(&self, wheels: &Wheels, pointer: egui::Pos2) -> Option<(egui::Rect, String)> {
+        let (at, row, shown) = wheels.spoken_at(pointer)?;
+        let beside =
+            egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * crate::display::glyph::HALF));
+        let name = titled(self.roster()[row].name);
+        let phrase = match shown {
+            Some(shown) => shown.entry.phrase(&name),
+            None => name,
+        };
+        Some((beside, phrase))
     }
 
     fn holds(&mut self, pace: Allowed) {
@@ -296,8 +343,8 @@ impl Play {
     }
 
     fn forgets(&mut self) {
-        if let Mode::Playing { preview, .. } = &mut self.doing {
-            preview.hover = None;
+        if let Mode::Playing { hover, .. } = &mut self.doing {
+            *hover = None;
         }
     }
 
@@ -328,29 +375,6 @@ impl Play {
         }
     }
 
-    fn ring_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<RockId> {
-        self.view
-            .terrain
-            .iter()
-            .filter_map(|terrain| {
-                let centre = viewport.point_of(self.rock_pos(terrain.rock)?)?;
-                let away = centre.distance(at);
-                (away <= hud::RING_RADIUS).then_some((away, terrain.rock))
-            })
-            .min_by(|(a, _), (b, _)| a.total_cmp(b))
-            .map(|(_, rock)| rock)
-    }
-
-    fn wanted(&self, rock: RockId, row: RowId) -> u32 {
-        self.view
-            .compositions
-            .iter()
-            .filter(|composition| composition.rock == rock)
-            .flat_map(|composition| &composition.rows)
-            .find(|wanted| wanted.row == row)
-            .map_or(0, |wanted| wanted.want)
-    }
-
     fn issue(&mut self, command: Command) {
         if let Some(human) = self.machine.human() {
             human.want(command);
@@ -361,7 +385,7 @@ impl Play {
         &mut self,
         ctx: &mut FrameCtx<'_, G>,
         viewport: &Viewport,
-        aimed: Option<&Wheel>,
+        wheels: &Wheels,
     ) {
         if ctx.pressed(Button::Pause)
             && let Some(doing) = self.doing.pausing()
@@ -371,67 +395,35 @@ impl Play {
         let Mode::Playing { gesture, .. } = &mut self.doing else {
             return;
         };
-        let gesture = core::mem::take(gesture);
+        let mut gesture = core::mem::take(gesture);
         let at = viewport.point_at(ctx.pointer());
+        self.hovered = wheels.hovered().or_else(|| self.rock_at(viewport, at));
         let dt = ctx.dt().as_secs_f32();
-
         let sending = matches!(gesture, Gesture::Sending(_));
         let notches = self
             .panning
             .drag(ctx, &mut self.camera, viewport.window(), !sending);
-        let under = self.under(viewport, aimed, at);
-        let (gesture, preview) = self.pointed(ctx, under, gesture, dt, notches);
-        self.doing = Mode::Playing { gesture, preview };
-    }
 
-    fn under(&self, viewport: &Viewport, aimed: Option<&Wheel>, at: egui::Pos2) -> Hovered {
-        let aimed_at = aimed.and_then(|wheel| {
-            wheel
-                .slot_at(at)
-                .map(|(row, band)| (wheel.rock(), row, band))
-        });
-        let refused = aimed_at
-            .map(|(rock, row, band)| self.band_rule(rock, row, band))
-            .and_then(|rule| rule.why().map(str::to_string));
-        Hovered {
-            slot: aimed_at.filter(|_| refused.is_none()),
-            refused,
-            ring: self.ring_at(viewport, at),
-        }
-    }
-
-    fn pointed<G: Game<Actions = Controls>>(
-        &mut self,
-        ctx: &mut FrameCtx<'_, G>,
-        under: Hovered,
-        gesture: Gesture,
-        dt: f32,
-        notches: f32,
-    ) -> (Gesture, Preview) {
-        let Hovered {
-            slot,
-            refused,
-            ring,
-        } = under;
-        let mut gesture = gesture;
+        let band = wheels.band_at(at);
+        let over = wheels.at(at).or_else(|| self.rock_at(viewport, at));
         if let Gesture::Sending(drag) = &mut gesture {
             drag.adjust(notches);
         }
         if ctx.pressed(Button::Select) {
-            gesture = self.pressed(slot, ring);
+            gesture = self.pressed(band, over);
         }
         if ctx.released(Button::Select) {
-            gesture = self.released(gesture, ring);
+            gesture = self.released(gesture, over);
         }
         if let Gesture::Editing(holding) = &mut gesture
-            && holding.repeats(slot, dt)
+            && holding.repeats(band, dt)
         {
             let (rock, row, band) = (holding.rock, holding.row, holding.band);
             self.edit(rock, row, band);
         }
 
-        let hover = match (&gesture, slot) {
-            (Gesture::Sending(drag), _) => ring.filter(|to| *to != drag.from).map(|to| {
+        let hover = match (&gesture, band) {
+            (Gesture::Sending(drag), _) => over.filter(|to| *to != drag.from).map(|to| {
                 Hover::Send(Sending {
                     from: drag.from,
                     to,
@@ -441,16 +433,17 @@ impl Play {
             (_, Some((rock, row, band))) => Some(Hover::Wheel { rock, row, band }),
             (Gesture::Still | Gesture::Editing(_), None) => None,
         };
-        (gesture, Preview { hover, refused })
+        self.doing = Mode::Playing { gesture, hover };
     }
 
     fn pressed(
         &mut self,
-        slot: Option<(RockId, RowId, WheelBand)>,
-        ring: Option<RockId>,
+        band: Option<(RockId, RowId, WheelBand)>,
+        over: Option<RockId>,
     ) -> Gesture {
-        match (slot, ring) {
+        match (band, over) {
             (Some((rock, row, band)), _) => {
+                self.selection = Some(rock);
                 self.edit(rock, row, band);
                 Gesture::Editing(Repeat {
                     rock,
@@ -462,7 +455,7 @@ impl Play {
             }
             (None, Some(from)) => Gesture::Sending(Drag {
                 from,
-                count: Sending::present(&self.view, from, self.machine.session().state().roster()),
+                count: Sending::present(&self.view, from, self.roster()),
                 adjusted: 0.0,
             }),
             (None, None) => {
@@ -472,17 +465,16 @@ impl Play {
         }
     }
 
-    fn released(&mut self, gesture: Gesture, ring: Option<RockId>) -> Gesture {
+    fn released(&mut self, gesture: Gesture, over: Option<RockId>) -> Gesture {
         if let Gesture::Sending(drag) = gesture {
-            match ring {
+            match over {
                 Some(to) if to != drag.from => {
                     let sending = Sending {
                         from: drag.from,
                         to,
                         count: drag.count,
                     };
-                    let roster = self.machine.session().state().roster();
-                    for command in sending.commands(&self.view, roster) {
+                    for command in sending.commands(&self.view, self.roster()) {
                         self.issue(command);
                     }
                 }
@@ -493,27 +485,31 @@ impl Play {
         Gesture::Still
     }
 
+    fn edit(&mut self, rock: RockId, row: RowId, band: WheelBand) {
+        let want = self.view.plan_of(rock, row).map_or(0, |plan| plan.want);
+        if band.wanted(want) != want {
+            self.issue(band.edit(rock, row, want));
+        }
+    }
+
+    fn rock_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<RockId> {
+        self.view
+            .terrain
+            .iter()
+            .filter_map(|terrain| {
+                let centre = viewport.point_of(self.rock_pos(terrain.rock)?)?;
+                let away = centre.distance(at);
+                (away <= crate::display::wheel::PICK_RADIUS).then_some((away, terrain.rock))
+            })
+            .min_by(|(a, _), (b, _)| a.total_cmp(b))
+            .map(|(_, rock)| rock)
+    }
+
     fn focuses(&mut self, rock: RockId) {
         self.selection = Some(rock);
         if let Some(pos) = self.rock_pos(rock) {
             self.camera.set_focus(pos);
             self.followed = true;
-        }
-    }
-
-    fn edit(&mut self, rock: RockId, row: RowId, band: WheelBand) {
-        let command = band.edit(rock, row, self.wanted(rock, row));
-        self.issue(command);
-    }
-
-    fn band_rule(&self, rock: RockId, row: RowId, band: WheelBand) -> Rule {
-        let wanted = self.wanted(rock, row);
-        match band {
-            WheelBand::Plus => Rule::only_if(
-                wanted < probe_sim::state::MAX_WANT,
-                "This is the most you can want here",
-            ),
-            WheelBand::Minus => Rule::only_if(wanted > 0, "You want none here"),
         }
     }
 }
@@ -522,7 +518,7 @@ impl Mode {
     fn played() -> Mode {
         Mode::Playing {
             gesture: Gesture::Still,
-            preview: Preview::default(),
+            hover: None,
         }
     }
 
@@ -583,14 +579,11 @@ mod tests {
                 count: 1,
                 adjusted: 0.0,
             }),
-            preview: Preview {
-                hover: Some(Hover::Send(Sending {
-                    from,
-                    to: RockId(1),
-                    count: 1,
-                })),
-                refused: None,
-            },
+            hover: Some(Hover::Send(Sending {
+                from,
+                to: RockId(1),
+                count: 1,
+            })),
         };
         play
     }

@@ -16,6 +16,8 @@ use crate::screens::panel::{self, Panel};
 use crate::screens::play::Play;
 use crate::screens::{Playable, lobby};
 
+pub(crate) const BUILDING: &str = "Building the match";
+
 pub struct Loading {
     lobby: Lobby,
     machine: Machine,
@@ -45,10 +47,10 @@ impl Loading {
         let window = panel::window_of(size, points_per_pixel);
         let scene = &self.scene;
         ctx.ui(|ui| {
-            hud::paint(scene, &viewport, None, ui.painter());
+            hud::paint(scene, &viewport, ui.painter());
             let panel = Panel::new(ui.painter(), window, Pos2::ZERO, false);
             panel.text(
-                "Building the match",
+                BUILDING,
                 Pos2::new(window.center().x, window.bottom() - panel::MARGIN),
                 Align2::CENTER_CENTER,
                 panel::INK,

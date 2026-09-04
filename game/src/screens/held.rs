@@ -9,6 +9,12 @@ const SWATCH: f32 = 22.0;
 
 const WIDTH: f32 = 220.0;
 
+pub(crate) const WAITING: &str = "Waiting for the other machines";
+
+pub(crate) fn parted(tick: Tick) -> String {
+    format!("Parted at tick {}", tick.0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {
     Leave,
@@ -27,7 +33,7 @@ impl Held {
         match self {
             Held::Waiting(seats) => {
                 panel.text(
-                    "Waiting for the other machines",
+                    WAITING,
                     middle,
                     Align2::CENTER_CENTER,
                     panel::INK,
@@ -39,7 +45,7 @@ impl Held {
             Held::Desynced(tick) => {
                 panel.heading("Desynced", middle);
                 panel.text(
-                    &format!("The machines parted at tick {}", tick.0),
+                    &parted(*tick),
                     middle + Vec2::new(0.0, panel::HEADING_SIZE),
                     Align2::CENTER_CENTER,
                     panel::DIM_INK,

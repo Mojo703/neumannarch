@@ -551,7 +551,8 @@ fn chase(Body, &Row, target: Body) -> Vec3;
 pub struct View {
     seat: SeatId, tick: Tick, clock: Tick, gravity: Gravity,
     stockpile: Stockpile, reserve: BTreeMap<RowId, u32>,
-    compositions: Vec<Composition>,      // the seat's own posts
+    compositions: Vec<Composition>,      // every seat's holdings, by rock
+    plans: Vec<Plan>,                    // the viewer's own wants and frames
     present: Vec<Present>,               // every entity of the match
     teams: Box<[TeamId]>,                // the seating, indexed by seat
     exchanges: Vec<Exchange>,            // the tick's fire, per rock and seat
@@ -560,33 +561,50 @@ pub struct View {
     standings: Standings,
 }
 pub struct Present { id: EntityId, row: RowId, seat: SeatId, body: Body,
-                     hp: f64, home: RockId, from: Option<RockId> }
-pub struct Wanted { row: RowId, want: u32, present: u32, transit: u32,
-                    frames: Vec<Building> }
+                     hp: f64, home: RockId, at: Berth }
+pub enum Berth { Standing(RockId), Flying { from: RockId } }
+pub struct Composition { rock: RockId, seat: SeatId, builder: bool,
+                         rows: BTreeMap<RowId, Held> }
+pub struct Plan { rock: RockId, row: RowId, want: u32,
+                  building: Option<Building> }
 pub struct Building { progress: f64, starved_of: Option<Material> }
+pub struct Held { present: u32, leaving: u32, arriving: u32 }   // state::Held
 
 impl View {
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View;
     pub fn team_of(&self, seat: SeatId) -> Option<TeamId>;
     pub fn is_enemy(&self, seat: SeatId) -> bool;   // its team differs from the viewer's
+    pub fn plan_of(&self, rock: RockId, row: RowId) -> Option<&Plan>;
 }
 ```
 
 - Everything is visible (DESIGN.md, Visibility), so a view is the whole
   state projected for one seat, built once per tick from that tick's
-  shots. Only what a seat owns is its own: the compositions, the reserve
-  and the stockpile.
+  shots. Wants and frames are the one exception, and the type says so: a
+  composition exists for every seat that holds or moves anything at a
+  rock, and only the viewer's own wants and frames leave the sim, as
+  `plans`. The reserve and the stockpile are the viewer's too.
 - It derives nothing itself; every fact is asked of the type that owns
-  it — `State::holding` for a row present and in transit, `Frame::fraction`
-  and `Frame::starved_material` for a frame, `Shots::exchanges` for the
-  tick's fire, `State::standings` for the standings.
+  it — `State::holdings` for what each seat holds at each rock,
+  `Frame::fraction` and `Frame::starved_material` for a frame,
+  `Shots::exchanges` for the tick's fire, `State::standings` for the
+  standings.
 - A view carries the seating's teams, so a side is a fact of the view and
   not a guess from the seat: `is_enemy` is the one question an agent asks
   about another seat, and a teammate is never one.
-- `Present::from` is `Some` exactly while the entity flies, and names the
-  rock it left; `home` is where it belongs, which for a flier is where it
-  is going. Together they are the whole of a flight, so no separate flag
-  says whether an entity is in the air.
+- `Berth` is where an entity is and `home` is where it belongs, which for
+  a flier is where it is going. A unit whose send is still forming stands
+  at its source and is homed at its destination, so `Standing(rock)` with
+  a `home` elsewhere is exactly a unit leaving that rock, and no flag says
+  whether an entity is in the air.
+- `Held` counts one row for one seat at one rock: `present` stands there
+  and belongs there, `leaving` stands there in a send that has not
+  departed, `arriving` is homed there and in a send. A ship in flight is
+  counted only at the rock it flies to. `State::count`, which the
+  shortfall rule reads, is what a rock is homed by, present and arriving
+  together.
+- A post builds one frame of a row at a time (DESIGN.md, Compositions),
+  so a `Plan` carries at most one `Building`.
 - The roster is match-constant and travels with the initial state, so a
   client holds it from the session rather than from a view.
 - `State::hash() -> u64`: FNV-1a over `Hash` of the whole state. The hasher
@@ -604,42 +622,68 @@ impl View {
 ```rust
 pub struct Scene {
     rocks: Vec<RockView>,          // position, radius, caps
-    entities: Vec<EntityView>,     // position, glyph, seat
-    rings: Vec<RingView>,          // per rock: caps, the runs on it, the fight arcs
+    entities: Vec<EntityView>,     // position, glyph, seat, weapon range
+    wheels: Vec<WheelView>,        // one per rock that carries a wheel
     flights: Vec<FlightLine>,      // every flying ship, whoever owns it
+    zone: f64,                     // the zone radius every rock draws
+    seat: SeatId,                  // whose view this is
     selection: Option<RockId>,
     hover: Option<Hover>,          // a wheel band or a Sending
 }
-pub struct Run { seat: SeatId, marks: Vec<Mark> }
-pub struct Mark { glyph: Glyph, fill: Fill, dim: bool, reason: Reason }
+pub struct WheelView { rock: RockId, sectors: Vec<SectorView> }
+pub struct SectorView { seat: SeatId, rows: Vec<RowView>, arc: Option<Arc> }
+pub struct RowView { row: RowId, entries: Vec<Shown> }
+pub struct Shown { entry: Entry, previewed: bool }
+pub enum Entry {
+    Present(u32),
+    Leaving { count: u32, to: RockId },
+    Building(Building),
+    Arriving { count: u32, from: RockId },
+    Wanted { count: u32, dashed: bool },
+}
 pub enum Fill { Solid, Hollow, Filling(f32), Dashed }
-pub struct Client<'a> { selection, hover, fights: &'a Fights }
+pub enum WheelBand { Plus(u32), Minus(u32) }
+pub struct Client<'a> { selection, pointed, hover, fights: &'a Fights }
 
 impl Scene {
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene;
     pub fn of_belt(rocks: &[Rock], gravity: Gravity, tick: Tick) -> Scene;
     pub fn centre(&self) -> Vec3;
+    pub fn wheel_of(&self, rock: RockId) -> Option<&WheelView>;
+}
+
+impl Entry {
+    pub fn fill(self) -> Fill;
+    pub fn dim(self) -> bool;
+    pub fn count(self) -> Option<u32>;   // None for Building: a frame has no count
+    pub fn phrase(self, name: &str) -> String;
 }
 ```
 
 - `of_belt` is what the lobby and loading screens draw before a match
   exists to have a view of; `look` builds scenes by hand. `centre` is the
   middle of the rocks, which a camera frames the map from.
-- `Mark::dim` is what the pointer says is leaving or arriving, and
-  `reason` is the state the glyph stands in, whose `sentence` is what
-  hovering it shows.
-- Every rock draws one ring, at `hud::RING_RADIUS`, and a ring is named by
-  its rock.
+- A scene carries a wheel for every rock a seat holds a composition at,
+  and for the selection and the rock under the pointer, whose own sector
+  stands empty until it wants something: without it no first want could
+  be placed, and a bare rock could not grow before its click. A sector holds only
+  the rows that have an entry; another seat's sector never carries a
+  wanted or a building entry, since wants and frames are its own.
+- `Entry` is one fact about a row at a rock, and its variants are what
+  DISPLAY.md's states are. `Shown::previewed` is what the pointer says
+  would change, drawn at half alpha; `Entry::dim` is what is dim by its
+  own state, so a preview and a state cannot be confused.
 - `Client` is what the client, not the sim, decides about a frame.
 - `fights::Fights`: the fight memory, kept by the client because no field
   of the state records a shot. `observe(&View)` once per tick starts an arc
   where the view reports shots exchanged, drains it as the seat's HP at the
   rock falls, trails the last second and a half of damage, and forgets an
   arc ten seconds after the last shot; `arcs()` is what the scene draws.
-- `send::Sending { from, to, count }`: the drag between two rocks' rings. `rows` is what it
-  moves, off the end of the source run so the cheapest rows go first, and
-  `commands` is the two count edits per row it moves. One type, so the
-  glyphs the scene dims and the edits the release issues cannot disagree.
+- `send::Sending { from, to, count }`: the drag between two rocks' wheels.
+  `rows` is what it moves, cheapest first, off the units standing at the
+  source, and `commands` is the two count edits per row it moves. One
+  type, so the entries the scene dims and the edits the release issues
+  cannot disagree.
 - `glyph::Glyph { frame, marks, size }`: `Glyph::of(&Row)` by DISPLAY.md's
   three rules, a pure function with a test per rule. `glyph::HALF` is a
   glyph's nominal half-width, which both layers size by, and
@@ -647,42 +691,89 @@ impl Scene {
   becomes a bar instead of a dot.
 - `tint::toward(base, caps, strength)`: a rock's colour from its caps, so
   a region reads as one hue. `belt` paints a rock's mesh with it and `hud`
-  strokes that rock's rings with it, faintly, since a lobby and a match
-  draw their rings through the same code; a selected ring is white and
-  wider, so its brightening wins over the tint rather than mixing with it.
+  strokes that rock's zone circle with it, faintly, so a region reads as
+  one hue on both layers.
 - `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
-  state, its marks, the dim a preview draws it at, and the belt a starved
-  frame carries in its material's `hue`. The HUD and the wheel paint
-  through it, so a glyph is drawn one way.
-- `hud::glyph_at`: the run glyph under a point, off the same `Layout` the
-  paint reads, which is what the hover sentence is found through.
+  state, its marks, the `alpha` it is drawn at, and the belt a starved
+  frame carries in its material's `hue`. Every HUD glyph goes through it,
+  so a glyph is drawn one way, and `DIM_ALPHA` is what a dimmed one takes.
 - `glyph_quad::GlyphQuad`: a mesh value per `(Glyph, SeatId)`, its own
   texture rasterized in the seat's colour, for the belt. One billboarded
   quad per ship, one draw each; hollow, filling and dashed glyphs exist
-  only on rings, so the catalog holds solid cells alone.
-- `ring::Layout::of(runs, geometry)`: angles and overlap offsets for every
-  mark on a ring, pure, tested for the DISPLAY.md guarantees: distinct
-  glyphs per row, overlap at forty, no overrun. `span(run)` is the share a
-  run owns, which is what its fight arc is drawn over, so the arcs cannot
-  drift from the runs.
-- `wheel::Wheel`: the roster wheel's annulus over one rock, slots and
-  bands as screen-space sectors, its own hit test, and its painting; a
-  slot per row, since every row is buildable at every rock.
-  `WheelBand::edit` is the `Command` a click issues.
+  only on wheels, so the catalog holds solid cells alone.
+- `wheel::Wheel`: one rock's wheel, laid out in screen points. Sectors
+  stack down the rock's right in seat order, each as tall as its own
+  sections, or one bar where it fights with nothing standing; within a
+  sector a row stands as one upright section whose inner edge is on the
+  wheel's arc, its glyph at the left and its lines as cells in one row
+  after it, one per `Mark` — here, moving, wanted — each the count of
+  the entries behind it and the mark that says what it counts, a cell
+  as wide as its digits. Sections are laid out by cost, structures above
+  units, `STRIPS_PER_COLUMN` to a column and the overflow in the next
+  column beside it, each column as wide as the most its strips can grow
+  to: every count one digit wider, and the signed step a hovered band
+  shows, so nothing a strip gains runs under the next column. Every
+  rectangle is computed once, so `paint`, `band_at` and
+  `spoken_at` read the same geometry and cannot drift. `WheelBand::edit`
+  is the `Command` a click issues, `WheelBand::wanted` is the count it
+  would leave, which is also how a band that would change nothing knows
+  to draw itself spent, and `WheelBand::delta` is the signed step a
+  hovered band shows beside its strip.
+- `wheel::Detail`: a wheel is drawn `Full` where the pointer or the
+  selection rests on it and `Small` everywhere else, two fixed scales and
+  two fixed slot counts, never a size that follows the crowd. A small
+  wheel carries a section only for the rows standing or moving there and
+  never a wanted slot. `Bands { step, wants }` is passed only to a
+  full wheel, so a small wheel takes no input by construction, and the
+  bands stand as two buttons between each section's glyph and its cells,
+  plus over minus. `Sizing { detail,
+  scale }` is how a wheel is drawn this frame: the detail decides what
+  it shows and the scale, eased toward the detail's own, how large.
+- `wheel::Footprint`: the rectangle a rock's wheel would take at each
+  `Detail`, from the view alone, so the frame can lay wheels out and
+  decide what the pointer is over before any wheel is built.
+- `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the frame's
+  layout and the frame's hit test in one pass. `Aim { viewer, pointer,
+  hovered, step, wants }` is what the pointer and the keyboard say, the
+  wants keyed by rock and row so any full wheel can carry its bands. `Ease` is
+  where a wheel's scale and alpha are eased toward their targets over
+  `ease::SPAN_SECONDS`: `Motion`, a store the play screen owns and steps
+  once per frame by the engine's own `dt`, never egui's clock, in which
+  a wheel first drawn starts at rest so it grows rather than appears;
+  `Still` in tests and in `look`. Size and alpha are two axes: a wheel
+  is full where the pointer or the selection rests, so two may be full
+  at once, and whole only where the pointer is or, with nothing hovered,
+  at the selection; every other wheel is faint, a covered wheel no
+  fainter; wheels are painted faintest first. Which
+  wheel is hovered is decided against the footprints as they stood before
+  any wheel grew, the smallest footprint under the pointer winning so a
+  small wheel inside the full one's reach still takes the pointer, and a hovered wheel stays hovered until the pointer
+  leaves its full footprint by `HOVER_MARGIN`, so growing under the
+  pointer never changes what is hovered and an overshoot closes nothing. `at`, `band_at` and `entry_at` are what a click, a
+  drag and the hover phrase read.
+- `ease`: `SPAN_SECONDS`, the one span every eased value on screen
+  settles over, and `toward`, which closes that span's share of a
+  value's gap to its target in one frame.
 - `camera::BeltCamera`: the focus point moving at the local orbital
   velocity, pan by meters or by pointer pixels, and zoom within a range
-  stated against the belt's own scale.
-- `screen::Screen`: one frame's projection, the engine camera built once,
-  with the window and the painter's own measure. Everything that projects
-  a world point goes through it. Picking is screen-space distance to a
-  projected rock centre against the ring radius, since a ring has a fixed
-  screen radius.
+  stated against the belt's own scale. A pan, a zoom or a new focus sets
+  the target; `settle(dt)`, once per frame, eases the shown focus and
+  distance toward it, and the engine camera and the viewport read the
+  shown values.
+- `viewport::Viewport`: one frame's projection, the engine camera built
+  once, with the window and the painter's own measure. Everything that
+  projects a world point goes through it. A rock with no wheel is picked
+  by screen-space distance to its projected centre against
+  `wheel::PICK_RADIUS`, which is how a rock a seat holds nothing at is
+  selected and its first want placed.
 - Two draw modules, one per DISPLAY.md layer. `belt`: one function from a
-  `Scene` and a `Screen` to the engine's draws — rocks, one light, and
-  ships, in 3D. `hud`: one function from a `Scene`, a `Screen`, the open
-  wheel and an `egui::Painter` to painted shapes — rings, runs, arcs, the
-  wheel, flight lines, the selection and the hover preview; it calls
-  `ring::Layout` and paints glyphs through `Stencil`.
+  `Scene` and a `Viewport` to the engine's draws — rocks, one light, and
+  ships, in 3D. `hud`: one function from a `Scene`, a `Viewport` and an
+  `egui::Painter` to what is painted over the belt's own projection —
+  every rock's zone circle in its tint, every standing armed ship's range
+  circle in its owner's colour, and the flight lines. The wheels are
+  painted after it, through `Wheels::paint`, so nothing on the belt covers
+  a wheel.
 - The binary is the playable: a `Game` whose `tick` and `frame` are the
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped
@@ -692,18 +783,19 @@ impl Scene {
   — over one full-window transparent egui layer that claims no widgets,
   and every other screen is drawn on that same layer. Input is keyboard
   and mouse through the engine's action vocabularies, which `controls.rs`
-  declares: a ring click selects and focuses, a wheel band click edits
-  one want and repeats while held, a left drag from ring to ring is the
-  send, the right or middle button and the pan keys drag the belt, the
-  zoom axis zooms or, during a send, sets how many go, and Escape opens
-  the pause screen and closes it again. The gamepad bindings DISPLAY.md
-  states are a later unit. Its own headless drive, behind the `look`
-  feature, plays a whole skirmish through the engine's offscreen
-  `Session` — title to lobby to a placement to the standings — picks a
-  team out of an open list, removes a guest from a room it serves, and
-  clicks a disabled Quit; it writes `game/look/title.png`,
-  `title_quit_reason.png`, `lobby.png`, `lobby_choice.png`,
-  `glyph_reason.png` and `results.png`. Every test of it holds one lock,
+  declares: a click on a wheel or a rock selects and focuses it, a band
+  click edits one want and repeats after a third of a second and every
+  tenth after that, Shift raises the step from one to five, a left drag
+  from wheel to wheel is the send, the right or middle button and the pan
+  keys drag the belt, the zoom axis zooms or, during a send, sets how many
+  go, and Escape opens the pause screen and closes it again. The gamepad
+  bindings DISPLAY.md states are a later unit. Its own headless drive,
+  behind the `look` feature, plays a whole skirmish through the engine's
+  offscreen `Session` — title to lobby to a placement through a wheel's
+  band to the standings — picks a team out of an open list, removes a
+  guest from a room it serves, and clicks a disabled Quit; it writes
+  `game/look/title.png`, `title_quit_reason.png`, `lobby.png`,
+  `lobby_choice.png`, `wheel.png` and `results.png`. Every test of it holds one lock,
   since each title serves a room on the protocol's one port. `check.sh`
   runs it under `xvfb-run`, so the drive and its screenshots are verified
   on every change.
@@ -1002,7 +1094,7 @@ exists.
   too, and no screen but this one reads them yet. Ending a match at an
   elimination is a later unit.
   The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
-  widest view whose rings stand apart, and lays its seats out by team:
+  widest view whose zone circles stand apart, and lays its seats out by team:
   one heading per team that holds a seat, and its seats under it, each a
   holder choice, a Kick beside a guest, a team choice and a readiness
   mark. A closed seat is not drawn, so a team holding none is not drawn
@@ -1134,10 +1226,13 @@ agents/src/
 game/src/
   lib.rs            the surface
   controls.rs       Controls: the buttons and axes the playable reads
-  display/          mod.rs; scene.rs glyph.rs glyph_quad.rs ring.rs
-                    wheel.rs camera.rs viewport.rs stencil.rs tint.rs
-                    fights.rs send.rs belt.rs hud.rs, as before;
-                    hue.rs the three materials' colours; label.rs titled
+  display/          mod.rs; scene.rs the frame's data; wheel.rs one rock's
+                    wheel and wheels.rs the frame's layout and hit test;
+                    glyph.rs glyph_quad.rs camera.rs viewport.rs
+                    stencil.rs tint.rs fights.rs send.rs belt.rs hud.rs,
+                    as before; ease.rs the one span and its step;
+                    hue.rs the three materials' colours;
+                    label.rs titled, is_a_phrase and the words test
   net/              controller.rs Controller, Human; transport.rs
                     Transport; local.rs Local; connection.rs Connection,
                     the room this machine has joined and its own

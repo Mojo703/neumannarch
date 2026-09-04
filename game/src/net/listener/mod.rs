@@ -12,8 +12,8 @@ pub enum NoListener {
 impl NoListener {
     pub fn reason(self) -> &'static str {
         match self {
-            NoListener::NotBuilt => "This version cannot host",
-            NoListener::PortHeld => "Another program holds the room's port",
+            NoListener::NotBuilt => "Cannot host here",
+            NoListener::PortHeld => "Port in use",
         }
     }
 }

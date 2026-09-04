@@ -11,6 +11,8 @@ pub const DIM_INK: Color32 = Color32::from_gray(96);
 
 pub const LINE: Color32 = Color32::from_gray(70);
 
+pub const HOVER_FILL: Color32 = Color32::from_rgba_premultiplied(30, 34, 42, 255);
+
 pub const HEADING_SIZE: f32 = 26.0;
 
 pub const BODY_SIZE: f32 = 15.0;

@@ -5,10 +5,14 @@ use mirage_engine::{Camera, Projection, View};
 use probe_sim::Vec3;
 use probe_sim::orbit::Gravity;
 
+use crate::display::ease;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeltCamera {
     focus: Vec3,
     distance: f64,
+    shown_focus: Vec3,
+    shown_distance: f64,
 }
 
 impl BeltCamera {
@@ -19,9 +23,12 @@ impl BeltCamera {
     pub const ZOOM_RANGE: RangeInclusive<f64> = 40.0..=12_000.0;
 
     pub fn new(focus: Vec3, distance: f64) -> Self {
+        let distance = Self::within_zoom_range(distance);
         Self {
             focus,
-            distance: Self::within_zoom_range(distance),
+            distance,
+            shown_focus: focus,
+            shown_distance: distance,
         }
     }
 
@@ -31,8 +38,19 @@ impl BeltCamera {
             return;
         };
         let (sin, cos) = (rate * dt).sin_cos();
+        let turned = |Vec3 { x, y, z }: Vec3| Vec3::new(x * cos + z * sin, y, z * cos - x * sin);
+        self.focus = turned(self.focus);
+        self.shown_focus = turned(self.shown_focus);
+    }
+
+    pub fn settle(&mut self, dt: f64) {
         let Vec3 { x, y, z } = self.focus;
-        self.focus = Vec3::new(x * cos + z * sin, y, z * cos - x * sin);
+        self.shown_focus = Vec3::new(
+            ease::toward(self.shown_focus.x, x, dt),
+            ease::toward(self.shown_focus.y, y, dt),
+            ease::toward(self.shown_focus.z, z, dt),
+        );
+        self.shown_distance = ease::toward(self.shown_distance, self.distance, dt);
     }
 
     pub fn pan(&mut self, delta: Vec3) {
@@ -63,6 +81,10 @@ impl BeltCamera {
         self.focus
     }
 
+    pub fn shown_focus(&self) -> Vec3 {
+        self.shown_focus
+    }
+
     pub fn distance(&self) -> f64 {
         self.distance
     }
@@ -75,13 +97,13 @@ impl BeltCamera {
     }
 
     pub(crate) fn local(&self, point: Vec3) -> math::Vec3 {
-        let relative = point - self.focus;
+        let relative = point - self.shown_focus;
         math::Vec3::new(relative.x as f32, relative.y as f32, relative.z as f32)
     }
 
     fn eye(&self) -> Vec3 {
         let (rise, run) = Self::TILT_DEGREES.to_radians().sin_cos();
-        self.focus + Vec3::new(0.0, rise, run) * self.distance
+        self.shown_focus + Vec3::new(0.0, rise, run) * self.shown_distance
     }
 
     fn within_zoom_range(distance: f64) -> f64 {
@@ -133,6 +155,32 @@ mod tests {
     }
 
     #[test]
+    fn a_new_focus_and_zoom_are_shown_only_as_the_camera_settles_toward_them() {
+        let mut camera = over_the_belt();
+        let start = camera.focus();
+        let far = start + Vec3::new(1000.0, 0.0, 0.0);
+
+        camera.set_focus(far);
+        camera.zoom(2.0);
+        assert_eq!(camera.focus(), far, "the target is taken at once");
+        assert_eq!(camera.shown_focus(), start, "and shown only as it settles");
+
+        camera.settle(ease::SPAN_SECONDS / 2.0);
+        assert!(
+            camera
+                .shown_focus()
+                .distance(start + Vec3::new(500.0, 0.0, 0.0))
+                < 1e-6,
+            "half a span shows half the way"
+        );
+        assert!((camera.shown_distance - 600.0).abs() < 1e-6);
+
+        camera.settle(ease::SPAN_SECONDS);
+        assert_eq!(camera.shown_focus(), far);
+        assert_eq!(camera.shown_distance, camera.distance());
+    }
+
+    #[test]
     fn a_focus_at_the_origin_stays() {
         let mut camera = BeltCamera::new(Vec3::ZERO, 50.0);
 
@@ -162,6 +210,7 @@ mod tests {
 
         let mut dragged = camera;
         dragged.pan_by_pixels(delta, WINDOW);
+        dragged.settle(ease::SPAN_SECONDS);
 
         let now = crate::display::viewport::Viewport::of(&dragged, WINDOW, 1.0)
             .pixel_of(held)

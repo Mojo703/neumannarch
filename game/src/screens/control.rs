@@ -1,7 +1,9 @@
-use mirage_engine::egui::{self, Align2, Color32, Pos2, Rect, Stroke, Vec2};
+use mirage_engine::egui::{self, Align2, Pos2, Rect, Stroke, Vec2};
 
 use crate::screens::field::{Field, Typed};
-use crate::screens::panel::{self, Panel};
+use crate::screens::panel::{self, HOVER_FILL, Panel};
+
+pub(crate) const HOST_ONLY: &str = "Host only";
 
 const NOTE_GAP: f32 = 12.0;
 
@@ -12,8 +14,6 @@ const ARROW_HALF: f32 = 4.0;
 const TEXT_INSET: f32 = 12.0;
 
 const INSIDE_WIDTH: f32 = 108.0;
-
-const HOVER_FILL: Color32 = Color32::from_rgba_premultiplied(30, 34, 42, 255);
 
 pub enum Rule {
     Allows,

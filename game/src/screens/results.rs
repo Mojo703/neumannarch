@@ -79,7 +79,7 @@ impl Results {
         let teams = &self.teams;
         let mut picked = None;
         ctx.ui(|ui| {
-            hud::paint(scene, &viewport, None, ui.painter());
+            hud::paint(scene, &viewport, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             picked = paint(&panel, standings, teams, rematch);
         });
@@ -120,7 +120,7 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
             half: glyph::HALF,
             colour: seat_color32(colour),
             fill: Fill::Solid,
-            dim: false,
+            alpha: 1.0,
             starved: None,
         }
         .paint(panel.painter());

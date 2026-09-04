@@ -111,7 +111,7 @@ fn building(view: &View, roster: &Roster) -> Vec<RockId> {
     let mut rocks: Vec<RockId> = view
         .present
         .iter()
-        .filter(|mine| mine.seat == view.seat && mine.from.is_none())
+        .filter(|mine| mine.seat == view.seat && mine.at.standing().is_some())
         .filter(|mine| {
             roster
                 .get(mine.row)

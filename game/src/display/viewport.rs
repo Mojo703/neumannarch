@@ -17,7 +17,7 @@ impl Viewport {
     pub fn of(camera: &BeltCamera, window: UVec2, points_per_pixel: f32) -> Viewport {
         Viewport {
             camera: camera.engine_camera(),
-            focus: camera.focus(),
+            focus: camera.shown_focus(),
             window,
             points_per_pixel,
         }

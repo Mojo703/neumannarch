@@ -19,6 +19,7 @@ pub enum Button {
     Select,
     Pan,
     Pause,
+    Shift,
 }
 
 pub struct Controls;
@@ -73,6 +74,7 @@ impl BindButton for Button {
             Button::Select => vec![MouseButton::Left.into()],
             Button::Pan => vec![MouseButton::Right.into(), MouseButton::Middle.into()],
             Button::Pause => vec![Key::Escape.into()],
+            Button::Shift => vec![Key::LeftShift.into(), Key::RightShift.into()],
         }
     }
 }

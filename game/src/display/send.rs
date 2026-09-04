@@ -58,7 +58,7 @@ fn run(view: &View, rock: RockId, roster: &Roster) -> Vec<(RowId, u32)> {
     for unit in view
         .present
         .iter()
-        .filter(|unit| unit.seat == view.seat && unit.from.is_none())
+        .filter(|unit| unit.seat == view.seat && unit.at.standing() == Some(rock))
         .filter(|unit| unit.home == rock)
         .filter(|unit| roster[unit.row].kind() == Kind::Unit)
     {
@@ -76,12 +76,7 @@ fn run(view: &View, rock: RockId, roster: &Roster) -> Vec<(RowId, u32)> {
 }
 
 fn wanted(view: &View, rock: RockId, row: RowId) -> u32 {
-    view.compositions
-        .iter()
-        .filter(|composition| composition.rock == rock)
-        .flat_map(|composition| &composition.rows)
-        .find(|wanted| wanted.row == row)
-        .map_or(0, |wanted| wanted.want)
+    view.plan_of(rock, row).map_or(0, |plan| plan.want)
 }
 
 #[cfg(test)]

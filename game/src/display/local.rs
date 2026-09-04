@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
 use probe_sim::step::fire::Shots;
@@ -7,11 +9,13 @@ use probe_sim::{
 
 pub(crate) const PLAYER: SeatId = SeatId(0);
 
+pub(crate) const RIVAL: SeatId = SeatId(1);
+
 const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
 pub(crate) struct Local {
     session: Session,
-    sequence: Sequence,
+    sequences: BTreeMap<SeatId, Sequence>,
 }
 
 impl Local {
@@ -21,7 +25,7 @@ impl Local {
         Local {
             session: Session::new(setup, Retention::shipped(), &[PLAYER])
                 .expect("seat zero is seated"),
-            sequence: Sequence::new(PLAYER),
+            sequences: BTreeMap::new(),
         }
     }
 
@@ -30,22 +34,35 @@ impl Local {
     }
 
     pub(crate) fn view(&self) -> View {
+        self.view_of(PLAYER)
+    }
+
+    pub(crate) fn view_of(&self, seat: SeatId) -> View {
         let quiet = Shots::default();
         let shots = self
             .session
             .outcome()
             .map_or(&quiet, |outcome| &outcome.shots);
-        View::of(self.session.state(), PLAYER, shots)
+        View::of(self.session.state(), seat, shots)
     }
 
     pub(crate) fn want(&mut self, wants: &[(RockId, RowId, u32)]) {
+        self.want_of(PLAYER, wants);
+    }
+
+    pub(crate) fn want_of(&mut self, seat: SeatId, wants: &[(RockId, RowId, u32)]) {
         for (rock, row, count) in wants {
             let command = Command::Want {
                 rock: *rock,
                 row: *row,
                 count: *count,
             };
-            let stamped = self.sequence.stamp(self.session.state().tick(), command);
+            let tick = self.session.state().tick();
+            let stamped = self
+                .sequences
+                .entry(seat)
+                .or_insert_with(|| Sequence::new(seat))
+                .stamp(tick, command);
             assert!(self.session.insert(stamped).is_ok(), "a want was refused");
         }
         assert!(

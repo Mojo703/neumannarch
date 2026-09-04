@@ -30,47 +30,86 @@ and it changes with the sim and with the player's pointer, every frame.
 
 ## The wheel
 
-Every rock that holds a composition carries one wheel: an annulus at a
-fixed screen radius around the rock, so it reads the same at every zoom.
-The wheel is the whole HUD of a rock. Ships and structures are drawn at
-their world positions and never on it. A rock with no composition
-carries no wheel. A wheel is drawn only where it stands clear of every
-other wheel on screen: past the zoom at which two would overlap, none is
-drawn and a rock shows its ships, its structures and its zone circle
-alone, and zooming in brings the wheels back.
+Every rock that holds a composition, and the selected rock whether or
+not it holds one, carries one wheel: the whole HUD of a rock. Ships and
+structures are drawn at their world positions and never on it.
 
-A wheel has one slot per roster row, structures in the left half and
-units in the right, each half ordered by cost from the top down. A slot
-always shows its row's glyph. Beside the glyph stand the row's entries
-at this rock, clockwise from the glyph in the order below. An entry is
-a glyph drawn in one state with a count, a numeral at the glyph's lower
-right, in the seat's colour, at the glyph's own size. An entry whose
-count is zero is not drawn, so a row at rest is its slot's glyph alone:
+A wheel is a column of sections standing to the right of the rock,
+centred on the rock's height, their inner edges on an arc of a circle
+whose centre lies far to the rock's left, so the column bows toward the
+rock's right and the rock's left side stays clear for what a later
+section of this document puts there. A section is one upright strip for
+one row, of the glyph's height, never a box: the row's glyph at its
+left, then its counted lines side by side along the strip, each a small
+mark and a numeral in the seat's colour, packed left to right so the
+strip holds no blank. A wide count widens its cell and the strip with
+it; nothing is cut. A line with a count of zero is not drawn. The
+lines, left to right:
 
-- **Present:** a solid glyph and its count.
-- **Leaving:** a dimmed solid glyph and its count, the units in a send
-  forming here, until the send departs; a ship in flight is on the belt
-  with its line and the wheel forgets it.
-- **Building:** one hollow glyph filling from the bottom to the frame's
-  progress, with no count, since a post builds one frame of a row at a
-  time.
-  A frame that spent nothing this second for want of a material carries
-  a belt mark along its base in that material's hue: metals, volatiles
-  or energy, three fixed hues named in the game crate.
-- **Arriving:** a dimmed hollow glyph and its count, the units in a send
-  toward here.
-- **Wanted:** a hollow glyph and its count, the want not covered by
-  present, arriving or building; dashed when no builder is at the rock.
+- **Present:** a dot mark and the count of the row's units here.
+- **Surplus:** a hollow dot and the count of the row's units here or
+  arriving above the want. Nothing complete is ever scrapped, so
+  lowering a want moves units from the dot to the hollow dot and they
+  stay until a shortfall elsewhere wants them.
+- **In transit:** an arrow mark and one count of units leaving (in a
+  send forming here) or arriving (in a send toward here); the arrow
+  points away from the rock for leaving and toward it for arriving.
+- **Wanted:** a hollow mark and the count still to come: the want not
+  covered by present or arriving, the frame building counted among
+  them, so the numeral holds while a frame opens and fills. Where a
+  frame builds, the mark is a box filling from the bottom to the frame's
+  progress, and a frame that spent nothing this second for want of a
+  material carries a belt along the box's base in that material's hue:
+  metals, volatiles or energy, three fixed hues named in the game crate.
+  A dashed mark when no builder is at the rock.
 
-When more than one seat holds a composition at a rock, the wheel splits
-into one equal sector per seat, by angle, seats in seat order clockwise
-from twelve o'clock, and each seat's slots and entries are drawn in its
-own sector. Ownership is colour, and colour is the team's; a team's
-seats share it.
+Sections stand in a fixed order down the column, structures first and
+then units, each by cost. A section is drawn only where the row can be
+edited or stands here: the selected rock's own sector shows every row,
+a row with nothing here as its hollow glyph alone, dimmed, and every
+other sector shows only rows with a line to draw. When more than one
+seat holds a composition at a rock, the column stacks one sector per
+seat, seats in seat order from the top, each sector as tall as its own
+sections with a gap between sectors. A sector taller than a stated number of strips wraps into a
+second column beside the first, and a third past that, so a crowded
+rock stays within the screen's height; a column is as wide as its
+strips can grow, a digit and a signed step more than they show, so a
+count rising or a band's step appearing never runs under the next
+column. A sector carries a spine: a thin
+line in the seat's colour along its inner edge, on the arc.
 
-Hovering any entry shows one short phrase beside it saying what the
-entry is and why: "Short of metals", "No builder", "From Rock 3", "To
-Rock 5".
+A wheel has two states and no third: full where the pointer or the
+selection rests, small elsewhere. Hover and selection are one state
+drawn one way, with the same scale, the same detail, the same bands and
+the same alpha; selection differs from hover only in that it outlasts
+the pointer and holds the camera's focus. While the pointer rests on another
+rock's wheel, the selected wheel keeps its full size and its bands and
+is drawn at the faint alpha of a small wheel, and is whole again when
+the pointer leaves; the hovered wheel is full and whole. Two wheels
+may be full at once, the hovered one whole and the selected one faint. A small wheel is drawn at a
+smaller scale and shows present and in transit, never wanted, and is
+drawn faint; a full wheel is drawn whole, and a faint wheel is painted
+before a whole one. Neither size follows the crowd, and a wheel covered
+by another is no fainter and does not move. Every change between the
+two states, by hover or by selection alike, eases over one short
+span, a constant of the display, never a jump. A faded glyph is blended toward the
+backdrop, never drawn translucent, so its strokes do not double where
+they cross. Which wheel is hovered is decided
+against the wheels as they stood before any grew, and a hovered wheel
+stays hovered until the pointer leaves its full extent by a margin of
+a band's width or more, so growing under the pointer never changes
+which wheel is hovered, an overshoot past an edge closes nothing, and
+nothing jitters. A bare rock under the pointer carries the seat's own wheel as
+a selected one does, every row hollow, so what a rock could hold shows
+before it is clicked.
+
+The wheels' numerals and the stockpile's are the only numerals on the
+HUD. Ownership is colour, and colour is the team's; a team's seats share
+it. Hovering any line shows one short phrase beside it naming the row
+and saying what the line is and why: "Frigate here", "Frigate
+building", "Frigate short of metals", "No builder for Frigate",
+"Frigate wanted", "Frigate arriving from Rock 3", "Frigate leaving for
+Rock 5". Hovering a glyph shows the row's name alone.
 
 ## The glyph
 
@@ -111,13 +150,17 @@ material.
 
 ## Fights
 
-While shots are exchanged at a rock, each engaged seat's sector of the
-wheel gains an arc just inside the wheel's inner edge. The arc is full at the fight's start and
-drains clockwise as that player's total HP at the rock falls. Damage from
-the last second and a half trails the drain as a red segment that catches
-up. Arcs disappear ten seconds after the last shot. Ships carry no health
-bars: damage is on the hull, and the combatant the player reads is the
-force.
+While shots are exchanged at a rock, each engaged seat's spine lights
+as a bar: a thick segment of the seat's colour from the top of its
+sector, on the same arc, of one fixed length whoever the seat is, so
+two seats' bars compare at a glance. The bar is full at the fight's
+start and drains downward as that player's total HP at the rock falls.
+Damage from the last second and a half trails the drain as a white
+segment that catches up; white, since a red trail vanishes on a red
+seat. A sector with nothing standing stays one bar tall while its bar
+shows. Bars disappear ten seconds after the last shot. Ships carry no
+health bars: damage is on the hull, and the combatant the player reads
+is the force.
 
 ## Flights
 
@@ -129,44 +172,55 @@ from the ship into the wheel's present count.
 
 ## Editing: the wheel's bands
 
-Build is flow, so there is no queue; the player edits wants. Selecting a
-rock brightens its wheel and adds its interactions: each slot gains two
-bands, an outer band bearing "+1" and an inner band bearing "-1"; while
-Shift is held they bear "+5" and "-5" and add or remove five. A hovered
-band brightens. A click adds or removes that many wants. Holding repeats
-after a third of a second. A selected wheel takes input through its
-bands and through the drag under Sending, and nothing else; an
-unselected wheel takes none and shows no bands.
+Build is flow, so there is no queue; the player edits wants. A full
+wheel, hovered or selected, looks one way and carries its
+interactions; hovering shows them and clicking the rock locks them in
+place when the pointer leaves. Each of its own sections gains
+a plus band and a minus band between its glyph and its counts, plus
+above minus, each an action button in the style of every other, an
+outlined box bearing its sign in ink always, not on hover; the bands
+stand at one place in every strip, so a count appearing never moves the
+band under the pointer; while Shift is held the bands bear
+"+5" and "-5" and add or remove five. A hovered band brightens and
+fills. A band that would change nothing, plus at the cap or minus at
+zero, is dimmed and bears no phrase. A click adds or removes that many
+wants and selects the rock. Holding repeats after a third of a second
+and every tenth of a second after that. A full wheel takes input
+through its bands and through the drag under Sending, and nothing else;
+a small wheel takes none and shows no bands.
 
-Hovering a plus band shows the slot's wanted entry with its count raised
-by the band's step, at half alpha. Hovering a minus band shows the
-entries the step would take from, dimmed, wanted first, then building,
-then present. The click lands the change, and the next tick draws the
-sim's response by the rules above: a count rising, a frame filling, a
-dashed entry, a ship lifting out toward its new home. The client
-predicts nothing.
+Hovering a live band shows its change as a signed step beside the
+strip, "+1" or "-5", and changes no count. The click lands the change,
+and the next tick draws the sim's response by the rules above: a count
+rising, a frame filling, a dashed mark, a ship lifting out toward its
+new home. The client predicts nothing.
 
-Gamepad: the stick points at a slot, one face button is plus and another
-is minus, a shoulder button is Shift, holding a button shows its preview
-and releasing commits, and a held button repeats as with the mouse.
+Gamepad: the stick points at a section, one face button is plus and
+another is minus, a shoulder button is Shift, holding a button shows its
+preview and releasing commits, and a held button repeats as with the
+mouse.
 
-A wheel shows at most twelve slots. A larger roster collapses to two, a
-square and a triangle, and choosing one opens that category's own wheel
-in its place, which does not collapse again.
+A wheel shows at most twelve sections. A larger roster collapses to two,
+a square and a triangle, and choosing one opens that category's own
+wheel in its place, which does not collapse again.
 
 Sending: drag from one rock's wheel to another's. While the drag is
-held, the source wheel dims the entries that would go and the
-destination wheel shows them as arriving entries at half alpha, a hover
-preview like the plus band's; the mouse wheel adjusts how many; release
-issues the two count edits, and the flight is the sim's response.
+held, the source wheel dims the lines that would go and the destination
+wheel shows them as an arriving line at half alpha, a hover preview like
+the plus band's; the mouse wheel adjusts how many; release issues the
+two count edits, and the flight is the sim's response.
 
 ## Camera
 
-A sixty-degree tilt from above, pan and zoom, no rotation. The camera is
+A sixty-degree tilt from above, pan and zoom, no rotation. Every move
+of the camera eases over a short span, pan, zoom and the jump to a new
+focus alike, never a cut. The camera is
 attached to a focus point that moves at the local orbital velocity, so the
 player's region stays on screen while the belt turns. The focus starts at
 the belt's centre until the player's first placement, then at that rock;
-clicking a rock's wheel makes it the focus.
+clicking a rock's wheel makes it the focus. A pan, a zoom and the jump
+to a new focus each ease over the same span as a wheel's growth, never
+a cut.
 
 ## Ranges
 
@@ -182,6 +236,12 @@ Nothing else on the HUD states a distance.
 Every string the player reads is a short phrase, never a sentence: no
 full stop, no semicolon, no dash. A comma in a string is a sign the
 screen says too much and is brought to the owner before it is drawn.
+The screen never tells the player what to do: no hint, no prompt, no
+tutorial phrase, ever. A string that opens with an imperative verb is
+a defect.
+The screen never tells the player what to do: no hint, no prompt, no
+tutorial phrase, ever. A control shows what it is; the belt shows what
+is; nothing invites.
 
 ## Controls
 

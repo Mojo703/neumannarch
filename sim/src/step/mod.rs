@@ -305,11 +305,8 @@ mod tests {
             world.run(TICKS_PER_SECOND as u64 + 1);
             world
                 .view(0)
-                .compositions
-                .iter()
-                .flat_map(|composition| &composition.rows)
-                .find(|wanted| wanted.row == LANCER)
-                .and_then(|wanted| wanted.frames.first().copied())
+                .plan_of(rock(0), LANCER)
+                .and_then(|plan| plan.building)
                 .expect("the lancer's frame is open")
         };
 

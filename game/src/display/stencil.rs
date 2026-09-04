@@ -4,12 +4,13 @@ use probe_sim::Material;
 use crate::display::glyph::{self, Glyph, Primitive};
 use crate::display::hue;
 use crate::display::scene::Fill;
+use crate::screens::panel;
 
 const DASH_LENGTH: f32 = 3.0;
 
 const GAP_LENGTH: f32 = 2.0;
 
-const DIM_ALPHA: f32 = 0.5;
+pub const DIM_ALPHA: f32 = 0.5;
 
 const STARVED_HALF_WIDTH: f32 = 13.0;
 
@@ -19,7 +20,7 @@ pub struct Stencil<'a> {
     pub half: f32,
     pub colour: Color32,
     pub fill: Fill,
-    pub dim: bool,
+    pub alpha: f32,
     pub starved: Option<Material>,
 }
 
@@ -127,10 +128,7 @@ impl Stencil<'_> {
     }
 
     fn faded(&self, colour: Color32) -> Color32 {
-        match self.dim {
-            true => colour.gamma_multiply(DIM_ALPHA),
-            false => colour,
-        }
+        panel::BACKDROP.lerp_to_gamma(colour, self.alpha)
     }
 }
 

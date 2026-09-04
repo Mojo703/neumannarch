@@ -7,39 +7,37 @@ target-state only. Agents see this file only through their briefs.
 
 ## In flight
 
-One implementation agent at a time (owner, 2026-09-03): for usage and to
-avoid seams. A unit ends green through `check.sh`, is verified by the
-overseer's own gate run, and commits on the owner's word. Last commit:
-b561351, the `Stage` flow with one seating authority, 2026-09-05.
+Resume here (written 2026-09-05 at session end, usage exhausted): the
+last commit is the wheel unit, made on the owner's word with the Fable
+repaint in it. Nothing is in flight. One implementation agent at a
+time; every brief carries the rules under Operational. The next unit in
+order is 1e, the contraction audit, then 2, vectors, then 3, the belt.
+Read DISPLAY.md's The wheel, Fights and Editing sections as the current
+target: the Fable agent rewrote them to what it built and the owner
+steered every visual choice directly.
 
-Owner's note on that commit (2026-09-05): the tree grew by about 700
-net lines and the owner is worried by how much code lands per unit; the
-best system is no system. Every brief from now carries a net-line
-budget, the agent reports lines added against deleted, and a unit that
-grows the codebase names each new type and what it made unrepresentable.
-
-1. One movement limit for every unit (owner, 2026-09-05): the roster's
-   acceleration field goes; the movement limit is one value of the roster
-   (hashed with the state, a faction's to skew later); a row's kind
-   derives from its manoeuvring limit (zero for a structure); a send is
-   one schedule; DESIGN.md rewritten by the overseer (World, Materials,
-   Entity, Sends; the slowest-row harness question deleted). Opus,
-   critique stop first, in flight.
-
-Discussed and held (owner, 2026-09-05), not scheduled: the solve leaving
-the sim, with a send's schedule as a stamped command from the machine
-that owns its units, validated in apply by one integration against the
-tolerance and the limit, so the solver may warm-start, cache and run
-off the step and the docs state only what the sim checks; and, only
-after that, a planner memo keyed by place pair and quantised phase.
-The overseer's view: the right shape, its own unit, after one speed.
-
-Movement landed and committed da0a169 (2026-09-05): a schedule of two
-burns built only from a delta-v and the limit, existence by an
-eight-percent burn share of the span plus three aim corrections, coasts
-as one propagation in the solver and tick by tick in the step, a flight
-on its ship, no arrival snap, an unschedulable send opening frames.
-Measured: 2.8 ms per accepted candidate, 5.8 ms per row per send.
+Open at close, each for a ruling or a unit:
+- Ship glyphs stairstep: the quads use an alpha-test cutout that MSAA
+  cannot soften. Ruled 2026-09-05: a coverage-sampled glyph rasteriser
+  (edge coverage in the sheet's alpha), no material change. A display
+  unit item, small.
+- The hover preview of a want is computed on the client and is wrong for
+  the first shipyard and constructor, which the reserve places free:
+  the client re-derives the sim's response instead of evaluating the
+  result of the possible action (owner, 2026-09-05). The structural fix:
+  a preview asks the sim what the command would do, an apply on a copy
+  of the state that answers the fulfilment's placement and cost, and the
+  display draws that answer; the client keeps no rule of its own. A sim
+  and display unit; DESIGN's "the client predicts nothing" is then true
+  by construction and DISPLAY's hover paragraphs follow.
+- The lobby's belt preview is a fixed belt, not the seed's: into the
+  belt unit (3).
+- A deselected bare rock's wheel vanishes rather than shrinking: ruled
+  fine, no change.
+- The send-destroys-frame defect (below) and the thousand-units-at-one-
+  rock cost from the holding unit remain unscheduled.
+- The wheel unit's budgets were missed: code and tests both grew; the
+  contraction audit (1e) is the answer, seeded by the shrink survey.
 
 ## Owner rulings from play, 2026-09-05 (design conversation open; DESIGN.md
 ## and DISPLAY.md follow once the shapes below are settled)
@@ -144,12 +142,9 @@ the plan's item 2):
   place per rock; the zone; sends to the rock's orbit with a joining
   window; the holding rule; no scrap; one frame per row at a time;
   everything visible; range the only fire gate; standings always.
-- DISPLAY The wheel, Fights, Flights, Editing, Ranges, Words on screen
-  (confirmed by the owner 2026-09-05): the wheel as a rock's one HUD with
-  entries and counts in five states; no ring, no run, no stacking; bands
-  bearing +1 and -1, five on Shift; the arc inside the wheel; drawn only
-  where it stands clear; zone and weapon circles; short phrases only.
-  Unit 1d.
+- DISPLAY: the wheel unit landed 2026-09-05; the document's wheel,
+  fights and editing sections describe what is built. Remaining ahead
+  of code: the hover preview evaluated by the sim (In flight, above).
 
 
 One line per sentence of DESIGN.md, DISPLAY.md or ARCHITECTURE.md the
@@ -190,43 +185,11 @@ play, then the programme.
    fields, `Sight`, `Radar`, the fog in the view and the radar blips go;
    fire and the chase gate on range and the zone; standings in every
    view; the glyph's radar mark goes.
-   Holding built 2026-09-05, green on the overseer's run (295 tests),
-   uncommitted, held for the owner's review of the tree and of
-   DISPLAY.md. Key files: sim/src/step/holding/{mod,field,terms,power}.rs,
-   sim/src/state/threat.rs, agents/src/bin/harness.rs (the sweep).
-   Findings: a thousand units at one rock cost 11.7 ms against 8.3 (the
-   chase scans the roll per unit; rank once per rock and plating);
-   departure drift times flight time gives 19 m of arrival error on a
-   two-minute coast (zero a ship's drift at departure); the spacing is
-   where a pair settles, 0.49 m against 0.5; code +602, tests +617,
-   field.rs 368 lines and terms.rs 293, a simplification pass proposed
-   before commit; three things named holding (phase, row weights, the
-   state's count present and in transit: holdings and steering proposed).
-   Sweep: every variant mirrors when sides swap; frigate at 0.5 never
-   closes, at 1.25 closes in 7 s. Owner review 2026-09-05: terms.rs
-   duplicates state (Place is Body; Steering copies entity and row;
-   Shell is a rock; Standing re-indexes entities_at); a fresh Sonnet
-   shrink with those deletions and a 400-line code ceiling runs before
-   the commit, and reports where the same pattern lives elsewhere. Owner
-   ruling: builders following a fleet through cohesion is left alone,
-   enemies attack the combat ships; tune later if it shows. CLAUDE.md
-   gained the no-duplicate-types rule. Owner 2026-09-05 from play: ships move
-   inside the asteroid; DESIGN's return term now also pushes out from
-   inside the rock's radius plus one spacing (into the pass before
-   commit). The camera does not lock its reference frame to the
-   selection: deferred, plan item 10 (a selected rock owns the focus).
-1c. The holding rule, Opus (sim): `Attractor` and the pair term replaced
-   by one module, DESIGN's Power, The fields and Holding (2026-09-05):
-   per rock and side, a strength field computed once per tick (power =
-   damage per second times remaining HP, times a kernel of distance at
-   the zone's scale), sampled by every unit there; six terms with
-   per-row weights: wander, return, weak separation, cohesion up the own
-   field's gradient, caution down the enemy field's gradient weighted by
-   being outnumbered, chase to the fire rule's target; no facing;
-   cohesion weighted so a force closes as one body. The agent sets the
-   first constants as hypotheses with a harness sweep and two tests: a
-   lone unit falls back to its allies, a group closes on its target as
-   one body. `Motion::Free` renamed here. Replaceable whole.
+   Holding committed 2026-09-05 as the eighth commit of the session:
+   fields, six terms, floor, drift zeroed, unarmed no chase, frigate
+   1.25, holding module 330 code lines after the shrink. Open from it:
+   a thousand units at one rock cost 11.7 ms against 8.3 (rank the roll
+   once per rock and plating); the send-destroys-frame defect above.
 1d. The wheel as the rock's HUD, Opus, critique stop: DISPLAY.md's The
    wheel, Fights, Flights, Editing, Ranges and Words on screen as the
    target; deletes the ring, the run, `ring::Layout`, the stacking and
@@ -235,7 +198,45 @@ play, then the programme.
    stands at; the zone and weapon circles; every string on screen a
    short phrase; the wheel's centre follows its rock under a pan; look
    scenes re-shot and judged by fresh eyes against DISPLAY's questions
-   plus "read every count".
+   plus "read every count". The owner steered the Opus agent directly
+   on the visuals during the build (2026-09-05). Once its draft is green
+   and committed, a Fable agent recreates the wheel's painting from
+   DISPLAY.md and the screenshots, since Fable is markedly better at
+   visual work; fresh-eyes judgement after, then the owner's play.
+   Owner judgement 2026-09-05 on the draft's screenshots (kept, painting
+   to be redone): the doc follows the steered build (boxed sections with
+   counted lines, two sizes with fade, glyphs only where editable, bands
+   as boxes); the sections go on a non-centred circular arc to the right
+   of the rock, the left kept free for later (material amounts); the
+   plus and minus layout is to be reconsidered; keep the game's general
+   visual style. Ruling 2026-09-05 for the Fable repaint's brief: free
+   rein on the wheel's visuals; every steered ruling above (sections,
+   counted lines, two sizes and fade, bands) is loose and the agent may
+   change any of it with a UX reason stated; DISPLAY.md's wheel and
+   editing sections are then rewritten to what it built and the owner
+   reads them; the hover rule, the counts' states, the words rule and
+   the game's style stand. Fable repaint landed 2026-09-05, green on the
+   overseer's run (314 tests), uncommitted and staged; the owner is
+   steering the Fable agent directly on the visuals and reviewing its
+   changes, so visual rulings are the owner's until they say the tree
+   is ready. Fresh-eyes judge, cold: ownership, the arriving unit and
+   the flight read; who is winning did not (the fight bar reads as the
+   spine); the in-transit and wanted marks could not be classified; the
+   rocks are invisible at belt zoom (plan item 12). The agent rewrote
+   DISPLAY.md's wheel, fights and editing sections to what it built. Under the owner's direct steering it then added: a
+   Surplus entry (hollow dot, standing plus arriving above the want,
+   own seat only), bands on any full wheel with a band click selecting
+   the rock, easing stepped by the engine's frame delta instead of
+   egui's animator, one resting alpha. Its UI proposals, not built:
+   rock names in phrases; total HP on the fight bar's hover; a live
+   send line from wheel to pointer; "-1" on the surplus cell; the
+   stockpile as the next missing reading (plan item 7); the hint phrase
+   advancing to "Drag a wheel to send". Open ruling it awaits from the
+   owner: whether "preview recreating instead of engine state" means
+   the lobby belt built from the seed and the starting state. Overseer's read of the draft: who holds, who wins and
+   what flies all read; the plus and minus are near invisible, the
+   selected wheel is mostly empty boxes, boxes sit unevenly on the
+   circle, ships clump under the arcs at region zoom.
    From the wheel judge 2026-09-05: the run's stacking depth recedes
    uncapped to the rock's centre (the spiral the owner keeps seeing; it
    was never fixed, only ruled, and this unit fixes it: no radial step,
@@ -508,7 +509,9 @@ step/mod.rs and history/session.rs move.
   no rule holds an entity across a tick or indexes the entity store by
   anything but an id, so the columns land without touching a rule.
 - Brief rules in force (owner, 2026-09-05): no comments of any kind; a
-  confused agent is a naming defect; Edit and Write only; three line
+  confused agent is a naming defect; Edit and Write only, reaffirmed
+  2026-09-05 after an agent's script edits caused mistakes the owner had
+  to correct, no relaxation for sweeps; three line
   budgets reported separately, code, tests and docs, the code budget
   below zero and the test budget below zero unless a new guarantee has
   no old test to replace; tests share one fixture module per crate;
@@ -516,6 +519,30 @@ step/mod.rs and history/session.rs move.
   cannot say, never a paragraph restating a signature.
 
 ## Engine friction
+
+- From the wheel repaint, 2026-09-05: no text measure without a painter
+  (cell widths are guessed at 0.6 em per digit; a measure on `FrameCtx`
+  would delete the guess); `FrameCtx::dt` on the tick and the frame
+  contexts share a name for a fixed and a variable step; egui strokes
+  have no round caps without a second overlapping shape, which forces a
+  blend-toward-backdrop fade instead of alpha; getting the egui
+  `Context` for animation means cloning it out of a `ctx.ui` closure.
+  Also: `cargo clippy --features look --all-targets` is not in the gate
+  and flags an item-ordering lint in game/src/main.rs.
+- From the repaint's easing, 2026-09-05: the offscreen `Session::step`
+  reports a frame `dt` of zero by design, so any easing by frame delta
+  freezes in the headless drive; the game eases by elapsed game time
+  instead. A headless frame carrying a duration would let the drive
+  test time-based display behaviour directly. Also asked: does
+  `FrameCtx` expose a cursor icon?
+- Anti-aliasing survey, 2026-09-05: the engine's 4x MSAA is on by
+  default for the 3D chain; egui's feathering is on; the overlay's
+  sample count and egui's tessellation options are not exposed through
+  the engine; whether the headless target resolves MSAA is undocumented.
+  What stairsteps is game-side: the ship glyph quads use an alpha-test
+  cutout material that MSAA cannot soften; the fix is a coverage-sampled
+  glyph rasteriser or the blended material (with depth-write cost), the
+  owner's choice, not done.
 
 Reported to the owner as it is found; the game never works around a gap.
 

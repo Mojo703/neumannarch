@@ -248,7 +248,8 @@ sets one count.
 
 Everything is visible to every player always: every entity, its row, its
 seat, its position and velocity, every rock with its orbit, its caps and
-all its future positions, and the standings. The standings at any tick
+all its future positions, and the standings. Wants and frames are the
+one exception: a player sees their own and not another's. The standings at any tick
 are what the win rule would decide were the clock now: per side, the
 rocks held, the army value and whether it is still in. Nothing is hidden
 and nothing is remembered, since there is nothing to remember.

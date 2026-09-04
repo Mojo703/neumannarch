@@ -8,20 +8,25 @@ use probe_sim::{TICKS_PER_SECOND, TeamId, Tick};
 
 use crate::controls::Button;
 use crate::display::camera::BeltCamera;
+use crate::display::ease::Clock;
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
 use crate::display::label::titled;
 use crate::display::scene::Scene;
 use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::screens::Playable;
-use crate::screens::control::{Chose, Controls, Rule, Value, Valued};
+use crate::screens::control::{Chose, Controls, HOST_ONLY, Rule, Value, Valued};
 use crate::screens::field::{Allow, Field, MAX_SEED, Typed};
 use crate::screens::panel::{self, Panel};
 use crate::screens::panning::Panning;
 
 pub const PREVIEW_ZOOM: f64 = 12_000.0;
 
-const CLOCKS: [Tick; 4] = [
+pub(crate) const NO_SEAT: &str = "No seat";
+
+pub(crate) const ALREADY_READY: &str = "Already ready";
+
+pub(crate) const CLOCKS: [Tick; 4] = [
     Tick(60 * TICKS_PER_SECOND as u64),
     Tick(5 * 60 * TICKS_PER_SECOND as u64),
     Tick(15 * 60 * TICKS_PER_SECOND as u64),
@@ -60,6 +65,7 @@ pub struct LobbyScreen {
     seed: Field,
     open: Option<Open>,
     panning: Panning,
+    clock: Clock,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +119,7 @@ impl LobbyScreen {
             seed: Field::holding(&laid.to_string(), Allow::Digits(MAX_SEED)),
             open: None,
             panning: Panning::still(),
+            clock: Clock::default(),
         }
     }
 
@@ -130,6 +137,7 @@ impl LobbyScreen {
         let size = ctx.window_size();
         let window = panel::window_of(size, points_per_pixel);
         self.panning.drag(ctx, &mut self.camera, size, true);
+        self.camera.settle(self.clock.frame(ctx.elapsed()));
         let viewport = Viewport::of(&self.camera, size, points_per_pixel);
         belt::draw(&self.scene, &viewport, ctx);
 
@@ -137,7 +145,7 @@ impl LobbyScreen {
         let clicked = ctx.pressed(Button::Select);
         let mut asked = Asked::default();
         ctx.ui(|ui| {
-            hud::paint(&self.scene, &viewport, None, ui.painter());
+            hud::paint(&self.scene, &viewport, ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             asked = self.paint(&panel, &Typed::this_frame(ui.ctx()));
         });
@@ -346,7 +354,7 @@ impl LobbyScreen {
             }
             false => {
                 let readies = match self.lobby.readied(self.me) {
-                    true => Rule::refuses("You are ready"),
+                    true => Rule::refuses(ALREADY_READY),
                     false => self.rule(LobbyEdit::SetReady { ready: true }),
                 };
                 if controls.main_action(places.act, "Ready", &readies) {
@@ -365,11 +373,11 @@ impl LobbyScreen {
                 .clone()
                 .edit(self.me, edit)
                 .err()
-                .map(|why| refusal_sentence(why, edit)),
+                .map(refusal_phrase),
         )
     }
 
-    fn start_reason(&self, why: probe_protocol::NotReady) -> String {
+    pub(crate) fn start_reason(&self, why: probe_protocol::NotReady) -> String {
         let team = |slot: usize| {
             self.lobby
                 .slots()
@@ -377,14 +385,12 @@ impl LobbyScreen {
                 .map_or_else(|| "a seat".to_string(), |slot| team_name(slot.team))
         };
         match why {
-            probe_protocol::NotReady::NoSeats => "The lobby holds no seats".to_string(),
-            probe_protocol::NotReady::OpenSeat { slot } => {
-                format!("Waiting for a player to take a seat on {}", team(slot))
+            probe_protocol::NotReady::NoSeats => "No seats".to_string(),
+            probe_protocol::NotReady::OpenSeat { slot }
+            | probe_protocol::NotReady::Unready { slot } => {
+                format!("Waiting for {}", team(slot))
             }
-            probe_protocol::NotReady::Unready { slot } => {
-                format!("Waiting for {} to be ready", team(slot))
-            }
-            probe_protocol::NotReady::HostUnseated => "You hold no seat in this match".to_string(),
+            probe_protocol::NotReady::HostUnseated => NO_SEAT.to_string(),
         }
     }
 
@@ -436,7 +442,7 @@ impl LobbyScreen {
             .collect()
     }
 
-    fn holder_name(&self, holder: Holder) -> String {
+    pub(crate) fn holder_name(&self, holder: Holder) -> String {
         match holder {
             Holder::Open => "Open".to_string(),
             Holder::Closed => "Closed".to_string(),
@@ -512,43 +518,32 @@ fn settings_control(row: Rect) -> Rect {
     )
 }
 
-fn team_name(team: TeamId) -> String {
+pub(crate) fn team_name(team: TeamId) -> String {
     format!("Team {}", team.0 as u16 + 1)
 }
 
-fn player_name(player: PlayerId) -> String {
+pub(crate) fn player_name(player: PlayerId) -> String {
     format!("Player {}", player.0 as u64 + 1)
 }
 
-fn clock_name(clock: Tick) -> String {
+pub(crate) fn clock_name(clock: Tick) -> String {
     match clock.seconds() as u64 / 60 {
         1 => "1 minute".to_string(),
         minutes => format!("{minutes} minutes"),
     }
 }
 
-fn refusal_sentence(why: Refused, edit: LobbyEdit) -> String {
+pub(crate) fn refusal_phrase(why: Refused) -> String {
     match why {
-        Refused::NotHost => format!("Only the host changes {}", subject(edit)),
-        Refused::NotYours => "That seat is not yours".to_string(),
-        Refused::NotSeated => "You hold no seat".to_string(),
-        Refused::NoSuchSlot => "There is no such seat".to_string(),
-        Refused::BadTeam => "There is no such team".to_string(),
-        Refused::BadClock => "The clock does not go that far".to_string(),
-        Refused::AlreadySeated => "That player already holds a seat".to_string(),
-        Refused::NotAGuest => "That seat holds no guest".to_string(),
-        Refused::HeldByAGuest => "Kick this player to open their seat".to_string(),
-    }
-}
-
-fn subject(edit: LobbyEdit) -> &'static str {
-    match edit {
-        LobbyEdit::SetSlot { .. } => "who holds a seat",
-        LobbyEdit::Kick(_) => "who is in the room",
-        LobbyEdit::SetTeam { .. } => "a seat's team",
-        LobbyEdit::SetSeed(_) => "the seed",
-        LobbyEdit::SetClock(_) => "the clock",
-        LobbyEdit::SetReady { .. } => "readiness",
+        Refused::NotHost => HOST_ONLY.to_string(),
+        Refused::NotYours => "Not your seat".to_string(),
+        Refused::NotSeated => NO_SEAT.to_string(),
+        Refused::NoSuchSlot => "No such seat".to_string(),
+        Refused::BadTeam => "No such team".to_string(),
+        Refused::BadClock => "No such clock".to_string(),
+        Refused::AlreadySeated => "Already seated".to_string(),
+        Refused::NotAGuest => "No guest here".to_string(),
+        Refused::HeldByAGuest => "Kick the guest first".to_string(),
     }
 }
 
@@ -703,9 +698,6 @@ mod tests {
         assert!(own_team.allows(), "a guest owns its own seat's team");
         assert!(!other_team.allows());
         assert!(!kick.allows());
-        assert_eq!(
-            refusal_sentence(Refused::NotHost, LobbyEdit::SetSeed(7)),
-            "Only the host changes the seed"
-        );
+        assert_eq!(refusal_phrase(Refused::NotHost), "Host only");
     }
 }

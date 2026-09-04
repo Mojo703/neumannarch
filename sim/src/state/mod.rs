@@ -24,10 +24,11 @@ use crate::roster::{Roster, Row};
 use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Held {
     pub present: u32,
-    pub transit: u32,
+    pub leaving: u32,
+    pub arriving: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -144,21 +145,27 @@ impl State {
     }
 
     pub fn count(&self, post: Post, row: RowId) -> u32 {
-        let held = self.holdings(post, row);
-        held.present + held.transit
+        let counted = self
+            .entities_at(post.rock)
+            .filter(|entity| entity.seat() == post.seat && entity.row() == row)
+            .count();
+        u32::try_from(counted).unwrap_or(u32::MAX)
     }
 
-    pub fn holdings(&self, post: Post, row: RowId) -> Held {
-        let mine = || {
-            self.entities_at(post.rock)
-                .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
-        };
-
-        let counted = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
-        Held {
-            present: counted(mine().filter(|entity| entity.flight().is_none()).count()),
-            transit: counted(mine().filter(|entity| entity.flight().is_some()).count()),
+    pub fn holdings(&self) -> BTreeMap<(RockId, SeatId, RowId), Held> {
+        let mut holdings: BTreeMap<(RockId, SeatId, RowId), Held> = BTreeMap::new();
+        for entity in self.entities.values() {
+            let at = |rock: RockId| (rock, entity.seat(), entity.row());
+            match (entity.standing(self.tick), entity.flight()) {
+                (Some(rock), None) => holdings.entry(at(rock)).or_default().present += 1,
+                (Some(rock), Some(_)) => holdings.entry(at(rock)).or_default().leaving += 1,
+                (None, _) => {}
+            }
+            if entity.flight().is_some() {
+                holdings.entry(at(entity.home())).or_default().arriving += 1;
+            }
         }
+        holdings
     }
 
     pub fn rock_body(&self, rock: RockId) -> Body {
