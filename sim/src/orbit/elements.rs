@@ -77,13 +77,6 @@ impl Orbit {
         )
     }
 
-    pub fn shifted(&self, along: f64) -> Orbit {
-        Orbit {
-            lambda0: Real((self.lambda0.0 + along / self.a.0).rem_euclid(TAU)),
-            ..*self
-        }
-    }
-
     pub fn period(&self, gravity: Gravity) -> f64 {
         let a = self.a.0;
         TAU * (a * a * a / gravity.mu()).sqrt()
@@ -292,21 +285,6 @@ mod tests {
             Orbit::new(RADIUS, 0.0, 0.0, 0.0, 0.0, f64::NAN, EPOCH),
             None
         );
-    }
-
-    #[test]
-    fn a_shifted_orbit_leads_by_the_shift_and_keeps_station() {
-        let orbit = Orbit::from_body(circular_equatorial(), Tick::ZERO, MU).expect("bound");
-        let lead = 30.0;
-        let shifted = orbit.shifted(lead);
-        assert_eq!(shifted.period(MU), orbit.period(MU));
-        for tick in [Tick::ZERO, Tick(120), Tick(1_000_000)] {
-            let (rock, anchor) = (orbit.at(tick, MU), shifted.at(tick, MU));
-            let along = anchor.pos.distance(rock.pos);
-            assert!((along - lead).abs() < 1e-3 * lead, "{tick:?}: {along}");
-            let ahead = (anchor.pos - rock.pos).dot(rock.vel);
-            assert!(ahead > 0.0, "{tick:?}: the anchor is not ahead");
-        }
     }
 
     #[test]

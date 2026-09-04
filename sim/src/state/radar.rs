@@ -40,7 +40,6 @@ mod tests {
     use crate::materials::Materials;
     use crate::orbit::body::{Body, Gravity};
     use crate::orbit::elements::Orbit;
-    use crate::place::{Band, Place};
     use crate::roster::{LANCER, Roster, SCOUT};
     use crate::state::rock::Rock;
     use crate::state::seat::Seat;
@@ -50,12 +49,7 @@ mod tests {
 
     const MU: Gravity = Gravity::new(4.4e17);
 
-    fn place() -> Place {
-        Place {
-            rock: RockId(0),
-            band: Band::Inner,
-        }
-    }
+    const ROCK: RockId = RockId(0);
 
     fn state() -> State {
         let radius = 1.0e7;
@@ -77,15 +71,15 @@ mod tests {
     #[test]
     fn radar_reports_only_what_sight_does_not_give() {
         let mut state = state();
-        let anchor = state.anchor(place()).at(Tick::ZERO, MU);
+        let home = state.rock_body(ROCK);
         let at = |offset: f64| Motion::Free {
-            body: Body::new(anchor.pos + Vec3::new(offset, 0.0, 0.0), anchor.vel),
+            body: Body::new(home.pos + Vec3::new(offset, 0.0, 0.0), home.vel),
             flight: None,
         };
-        state.spawn(SeatId(0), SCOUT, place(), at(0.0));
-        let seen = state.spawn(SeatId(1), LANCER, place(), at(15.0));
-        let contact = state.spawn(SeatId(1), LANCER, place(), at(40.0));
-        state.spawn(SeatId(1), LANCER, place(), at(80.0));
+        state.spawn(SeatId(0), SCOUT, ROCK, at(0.0));
+        let seen = state.spawn(SeatId(1), LANCER, ROCK, at(15.0));
+        let contact = state.spawn(SeatId(1), LANCER, ROCK, at(40.0));
+        state.spawn(SeatId(1), LANCER, ROCK, at(80.0));
         let sweep = state.sweep();
         let sight = Sight::of(&state, SeatId(0), &sweep);
 

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use probe_sim::roster::{Kind, Roster};
 use probe_sim::state::view::View;
-use probe_sim::{Band, Materials, Place, RockId, RowId};
+use probe_sim::{Materials, RockId, RowId};
 
 use crate::memory::Memory;
 use crate::roles::Roles;
@@ -17,7 +17,7 @@ pub struct Survey<'a> {
     pub view: &'a View,
     pub roster: &'a Roster,
     pub roles: &'a Roles,
-    pub mine: BTreeMap<Place, BTreeMap<RowId, u32>>,
+    pub mine: BTreeMap<RockId, BTreeMap<RowId, u32>>,
     pub held: Vec<RockId>,
     pub occupied: Vec<RockId>,
     pub building: Vec<RockId>,
@@ -37,7 +37,7 @@ impl<'a> Survey<'a> {
             let mut rocks: Vec<RockId> = mine
                 .iter()
                 .filter(|(_, rows)| rows.keys().any(|row| kind(roster, *row)))
-                .map(|(place, _)| place.rock)
+                .map(|(rock, _)| *rock)
                 .collect();
             rocks.dedup();
             rocks
@@ -67,9 +67,9 @@ impl<'a> Survey<'a> {
         }
     }
 
-    pub fn count(&self, place: Place, row: RowId) -> u32 {
+    pub fn count(&self, rock: RockId, row: RowId) -> u32 {
         self.mine
-            .get(&place)
+            .get(&rock)
             .and_then(|rows| rows.get(&row))
             .copied()
             .unwrap_or_default()
@@ -79,41 +79,16 @@ impl<'a> Survey<'a> {
         self.mine.values().filter_map(|rows| rows.get(&row)).sum()
     }
 
-    pub fn army_at(&self, place: Place) -> f64 {
-        self.mine
-            .get(&place)
-            .into_iter()
-            .flatten()
-            .filter_map(|(row, count)| self.roster.get(*row).map(|row| (row, *count)))
-            .filter(|(row, _)| row.is_armed())
-            .map(|(row, count)| row.cost.total() * count as f64)
-            .sum()
-    }
-
     pub fn between(&self, from: RockId, to: RockId) -> f64 {
         match (self.view.rock_body(from), self.view.rock_body(to)) {
             (Some(from), Some(to)) => from.pos.distance(to.pos),
             _ => 0.0,
         }
     }
-
-    pub fn inner(rock: RockId) -> Place {
-        Place {
-            rock,
-            band: Band::Inner,
-        }
-    }
-
-    pub fn outer(rock: RockId) -> Place {
-        Place {
-            rock,
-            band: Band::Outer,
-        }
-    }
 }
 
-fn holdings(view: &View) -> BTreeMap<Place, BTreeMap<RowId, u32>> {
-    let mut counted: BTreeMap<Place, BTreeMap<RowId, u32>> = BTreeMap::new();
+fn holdings(view: &View) -> BTreeMap<RockId, BTreeMap<RowId, u32>> {
+    let mut counted: BTreeMap<RockId, BTreeMap<RowId, u32>> = BTreeMap::new();
     for seen in view.seen.iter().filter(|seen| seen.seat == view.seat) {
         if let Some(home) = seen.home {
             *counted
@@ -147,7 +122,6 @@ fn building(view: &View, roster: &Roster) -> Vec<RockId> {
                 .is_some_and(|row| row.builds().sum::<f64>() > 0.0)
         })
         .filter_map(|seen| seen.home)
-        .map(|home| home.rock)
         .collect();
     rocks.sort_unstable();
     rocks.dedup();
@@ -155,13 +129,13 @@ fn building(view: &View, roster: &Roster) -> Vec<RockId> {
 }
 
 fn home(
-    mine: &BTreeMap<Place, BTreeMap<RowId, u32>>,
+    mine: &BTreeMap<RockId, BTreeMap<RowId, u32>>,
     roster: &Roster,
     building: &[RockId],
 ) -> Option<RockId> {
     let rate = |rock: RockId| -> f64 {
         mine.iter()
-            .filter(|(place, _)| place.rock == rock)
+            .filter(|(at, _)| **at == rock)
             .flat_map(|(_, rows)| rows)
             .filter_map(|(row, count)| roster.get(*row).map(|row| (row, *count)))
             .map(|(row, count)| row.builds().sum::<f64>() * count as f64)
@@ -173,12 +147,16 @@ fn home(
         .max_by(|a, b| rate(*a).total_cmp(&rate(*b)).then(b.cmp(a)))
 }
 
-fn income(view: &View, roster: &Roster, mine: &BTreeMap<Place, BTreeMap<RowId, u32>>) -> Materials {
+fn income(
+    view: &View,
+    roster: &Roster,
+    mine: &BTreeMap<RockId, BTreeMap<RowId, u32>>,
+) -> Materials {
     let mut earned = Materials::ZERO;
     for terrain in &view.terrain {
         let rate: f64 = mine
             .iter()
-            .filter(|(place, _)| place.rock == terrain.rock)
+            .filter(|(at, _)| **at == terrain.rock)
             .flat_map(|(_, rows)| rows)
             .filter_map(|(row, count)| roster.get(*row).map(|row| (row, *count)))
             .map(|(row, count)| row.extracts().sum::<f64>() * count as f64)

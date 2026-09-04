@@ -335,8 +335,8 @@ mod tests {
             )
             .expect("the rock is in front of the eye");
         click_at(session, at);
-        let place = play(session).selection().expect("the ring was selected");
-        assert_eq!(place.rock, ROCK);
+        let selected = play(session).selection().expect("the ring was selected");
+        assert_eq!(selected, ROCK);
 
         let centre = viewport(session)
             .point_of(play(session).rock_pos(ROCK).expect("the rock"))
@@ -355,13 +355,13 @@ mod tests {
             .find(|seen| seen.row == SHIPYARD)
             .expect("the reserve placed the shipyard");
         assert_eq!(shipyard.seat, play(session).seat());
-        assert_eq!(shipyard.home, Some(place));
+        assert_eq!(shipyard.home, Some(selected));
         assert!(
-            has_a_solid_glyph(session, place),
+            has_a_solid_glyph(session, selected),
             "the shipyard's glyph is on the ring"
         );
 
-        let glyph = egui::pos2(centre.x, centre.y - hud::INNER_RADIUS);
+        let glyph = egui::pos2(centre.x, centre.y - hud::RING_RADIUS);
         let scene = scene_of(session);
         let (_, mark) = hud::glyph_at(&scene, &viewport(session), glyph)
             .expect("the glyph on the ring is under the pointer");
@@ -405,11 +405,11 @@ mod tests {
         )
     }
 
-    fn has_a_solid_glyph(session: &Offscreen<Probe>, place: probe_sim::Place) -> bool {
+    fn has_a_solid_glyph(session: &Offscreen<Probe>, rock: RockId) -> bool {
         scene_of(session)
             .rings
             .iter()
-            .find(|ring| ring.place == place)
+            .find(|ring| ring.rock == rock)
             .is_some_and(|ring| {
                 ring.runs.iter().any(|run| {
                     run.marks

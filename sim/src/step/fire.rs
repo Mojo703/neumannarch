@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{EntityId, SeatId};
-use crate::place::Place;
+use crate::ids::{EntityId, RockId, SeatId};
 use crate::roster::Weapon;
 use crate::state::sweep::Sweep;
 use crate::state::{Entity, Ready, Sight, State};
@@ -17,7 +16,7 @@ pub struct Hit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Exchange {
-    pub place: Place,
+    pub rock: RockId,
     pub seat: SeatId,
     pub fired: bool,
     pub landed: bool,
@@ -99,7 +98,7 @@ impl<'a> Fire<'a> {
             .filter(|ready| {
                 self.state
                     .entity(ready.entity())
-                    .is_some_and(|entity| !entity.is_flying())
+                    .is_some_and(|entity| !entity.is_flying(self.state.tick()))
             })
             .cloned()
             .collect();
@@ -127,13 +126,14 @@ impl<'a> Fire<'a> {
         let team = self.state[shooter.seat()].team();
         let from = self.state.body_of(shooter).pos;
         let plating = self.state[shooter.row()].plating.0;
+        let now = self.state.tick();
+        let here = shooter.standing(now)?;
         self.sweep
             .within(from, range)
             .filter_map(|id| self.state.entity(id))
             .filter(|target| {
                 self.state[target.seat()].team() != team
-                    && !target.is_flying()
-                    && target.home().rock == shooter.home().rock
+                    && target.standing(now) == Some(here)
                     && sight.sees(target.id())
                     && target.hp() > assigned.get(&target.id()).copied().unwrap_or(0.0)
             })
@@ -161,7 +161,7 @@ impl Shots {
     }
 
     pub fn exchanges(&self, state: &State, sight: &Sight) -> Vec<Exchange> {
-        let mut found: BTreeMap<(Place, SeatId), (bool, bool)> = BTreeMap::new();
+        let mut found: BTreeMap<(RockId, SeatId), (bool, bool)> = BTreeMap::new();
         let mut note = |id: EntityId, landed: bool| {
             if !sight.sees(id) {
                 return;
@@ -169,9 +169,10 @@ impl Shots {
             let Some(entity) = state.entity(id) else {
                 return;
             };
-            let at = found
-                .entry((entity.home(), entity.seat()))
-                .or_insert((false, false));
+            let Some(rock) = entity.standing(state.tick()) else {
+                return;
+            };
+            let at = found.entry((rock, entity.seat())).or_insert((false, false));
             match landed {
                 true => at.1 = true,
                 false => at.0 = true,
@@ -183,8 +184,8 @@ impl Shots {
         }
         found
             .into_iter()
-            .map(|((place, seat), (fired, landed))| Exchange {
-                place,
+            .map(|((rock, seat), (fired, landed))| Exchange {
+                rock,
                 seat,
                 fired,
                 landed,

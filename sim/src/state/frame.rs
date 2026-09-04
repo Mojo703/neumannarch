@@ -1,7 +1,7 @@
 use crate::TICKS_PER_SECOND;
 use crate::ids::RowId;
 use crate::materials::Material;
-use crate::place::Post;
+use crate::post::Post;
 use crate::real::Real;
 use crate::time::Tick;
 

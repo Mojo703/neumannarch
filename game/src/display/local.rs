@@ -2,7 +2,7 @@ use probe_sim::state::Command;
 use probe_sim::state::view::View;
 use probe_sim::step::fire::Shots;
 use probe_sim::{
-    Place, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
+    Retention, RockId, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
 };
 
 pub(crate) const PLAYER: SeatId = SeatId(0);
@@ -38,10 +38,10 @@ impl Local {
         View::of(self.session.state(), PLAYER, shots)
     }
 
-    pub(crate) fn want(&mut self, wants: &[(Place, RowId, u32)]) {
-        for (place, row, count) in wants {
+    pub(crate) fn want(&mut self, wants: &[(RockId, RowId, u32)]) {
+        for (rock, row, count) in wants {
             let command = Command::Want {
-                place: *place,
+                rock: *rock,
                 row: *row,
                 count: *count,
             };

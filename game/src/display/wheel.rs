@@ -3,7 +3,7 @@ use core::f32::consts::{PI, TAU};
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use probe_sim::roster::{Kind, Roster, Row};
 use probe_sim::state::Command;
-use probe_sim::{Band, Place, RowId, SeatId};
+use probe_sim::{RockId, RowId, SeatId};
 
 use crate::display::glyph::Glyph;
 use crate::display::glyph_quad::seat_color32;
@@ -14,9 +14,9 @@ pub const BAND_WIDTH: f32 = 22.0;
 
 pub const GAP: f32 = 55.0;
 
-pub const RADIUS: f32 = crate::display::hud::OUTER_RADIUS + GAP + BAND_WIDTH;
+pub const RADIUS: f32 = crate::display::hud::RING_RADIUS + GAP + BAND_WIDTH;
 
-const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::display::hud::OUTER_RADIUS + GAP);
+const _: () = assert!(GAP > 0.0 && RADIUS - BAND_WIDTH == crate::display::hud::RING_RADIUS + GAP);
 
 const GLYPH_HALF: f32 = 14.0;
 
@@ -29,7 +29,7 @@ const HOVER_COLOUR: Color32 = Color32::from_rgba_unmultiplied_const(255, 255, 25
 const SECTOR_SEGMENTS: usize = 12;
 
 pub struct Wheel {
-    place: Place,
+    rock: RockId,
     seat: SeatId,
     centre: Pos2,
     slots: Vec<Slot>,
@@ -43,13 +43,12 @@ struct Slot {
 }
 
 impl Wheel {
-    pub fn open(place: Place, seat: SeatId, roster: &Roster, centre: Pos2) -> Wheel {
+    pub fn open(rock: RockId, seat: SeatId, roster: &Roster, centre: Pos2) -> Wheel {
         let mut structures = Vec::new();
         let mut units = Vec::new();
         for (row, data) in roster.iter() {
             match data.kind() {
-                Kind::Structure if place.band == Band::Inner => structures.push((row, data)),
-                Kind::Structure => {}
+                Kind::Structure => structures.push((row, data)),
                 Kind::Unit => units.push((row, data)),
             }
         }
@@ -62,15 +61,15 @@ impl Wheel {
         slots.sort_by_key(|slot| slot.row);
 
         Wheel {
-            place,
+            rock,
             seat,
             centre,
             slots,
         }
     }
 
-    pub fn place(&self) -> Place {
-        self.place
+    pub fn rock(&self) -> RockId {
+        self.rock
     }
 
     pub fn slot_at(&self, pixel: Pos2) -> Option<(RowId, WheelBand)> {
@@ -146,12 +145,12 @@ impl Wheel {
 }
 
 impl WheelBand {
-    pub fn edit(self, place: Place, row: RowId, current: u32) -> Command {
+    pub fn edit(self, rock: RockId, row: RowId, current: u32) -> Command {
         let count = match self {
             WheelBand::Plus => current + 1,
             WheelBand::Minus => current.saturating_sub(1),
         };
-        Command::Want { place, row, count }
+        Command::Want { rock, row, count }
     }
 }
 
@@ -206,24 +205,12 @@ mod tests {
 
     const SEAT: SeatId = SeatId(0);
 
-    fn inner_place() -> Place {
-        Place {
-            rock: RockId(0),
-            band: Band::Inner,
-        }
-    }
-
-    fn outer_place() -> Place {
-        Place {
-            rock: RockId(0),
-            band: Band::Outer,
-        }
-    }
+    const ROCK: RockId = RockId(0);
 
     #[test]
     fn every_slot_is_found_at_its_mid_radius_and_the_centre_finds_none() {
         let roster = Roster::shipped();
-        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+        let wheel = Wheel::open(ROCK, SEAT, &roster, CENTRE);
 
         assert_eq!(wheel.slot_at(CENTRE), None);
 
@@ -236,7 +223,7 @@ mod tests {
     #[test]
     fn the_outer_half_of_a_slot_is_plus_and_the_inner_half_minus() {
         let roster = Roster::shipped();
-        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+        let wheel = Wheel::open(ROCK, SEAT, &roster, CENTRE);
         let slot = &wheel.slots[0];
 
         let outside = wheel.at(RADIUS + BAND_WIDTH * 0.5, slot.angle);
@@ -251,7 +238,7 @@ mod tests {
     #[test]
     fn structures_sit_left_of_centre_and_units_right() {
         let roster = Roster::shipped();
-        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+        let wheel = Wheel::open(ROCK, SEAT, &roster, CENTRE);
 
         for slot in &wheel.slots {
             let is_structure = roster[slot.row].kind() == Kind::Structure;
@@ -265,43 +252,29 @@ mod tests {
     }
 
     #[test]
-    fn an_outer_band_wheel_has_no_structure_slot() {
-        let roster = Roster::shipped();
-        let wheel = Wheel::open(outer_place(), SEAT, &roster, CENTRE);
-
-        assert!(
-            wheel
-                .slots
-                .iter()
-                .all(|slot| roster[slot.row].kind() != Kind::Structure)
-        );
-    }
-
-    #[test]
     fn plus_adds_one_and_minus_removes_one_and_never_below_zero() {
-        let place = inner_place();
         let row = RowId(0);
 
         assert_eq!(
-            WheelBand::Plus.edit(place, row, 3),
+            WheelBand::Plus.edit(ROCK, row, 3),
             Command::Want {
-                place,
+                rock: ROCK,
                 row,
                 count: 4
             }
         );
         assert_eq!(
-            WheelBand::Minus.edit(place, row, 3),
+            WheelBand::Minus.edit(ROCK, row, 3),
             Command::Want {
-                place,
+                rock: ROCK,
                 row,
                 count: 2
             }
         );
         assert_eq!(
-            WheelBand::Minus.edit(place, row, 0),
+            WheelBand::Minus.edit(ROCK, row, 0),
             Command::Want {
-                place,
+                rock: ROCK,
                 row,
                 count: 0
             }
@@ -311,7 +284,7 @@ mod tests {
     #[test]
     fn a_slot_glyph_sits_at_its_sectors_mid_angle_and_the_wheels_radius() {
         let roster = Roster::shipped();
-        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+        let wheel = Wheel::open(ROCK, SEAT, &roster, CENTRE);
 
         for slot in &wheel.slots {
             let centre = wheel.at(RADIUS, slot.angle);
@@ -333,7 +306,7 @@ mod tests {
     #[test]
     fn every_slot_glyph_takes_the_wheels_own_size_by_its_cost_class() {
         let roster = Roster::shipped();
-        let wheel = Wheel::open(inner_place(), SEAT, &roster, CENTRE);
+        let wheel = Wheel::open(ROCK, SEAT, &roster, CENTRE);
 
         for slot in &wheel.slots {
             let half = GLYPH_HALF * slot.glyph.size.scale();

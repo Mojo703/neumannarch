@@ -46,7 +46,6 @@ impl Log {
 mod tests {
     use super::*;
     use crate::ids::{RockId, RowId, SeatId};
-    use crate::place::{Band, Place};
     use crate::state::{Command, Issued};
 
     fn stamped(tick: u64, seat: u8, seq: u32) -> Stamped {
@@ -56,10 +55,7 @@ mod tests {
                 seat: SeatId(seat),
                 seq,
                 command: Command::Want {
-                    place: Place {
-                        rock: RockId(0),
-                        band: Band::Inner,
-                    },
+                    rock: RockId(0),
                     row: RowId(0),
                     count: seq,
                 },

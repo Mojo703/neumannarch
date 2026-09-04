@@ -85,16 +85,13 @@ impl Human {
 mod tests {
     use probe_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
     use probe_sim::roster::SHIPYARD;
-    use probe_sim::{Band, Place, Retention, RockId};
+    use probe_sim::{Retention, RockId};
 
     use super::*;
 
     fn command(count: u32) -> Command {
         Command::Want {
-            place: Place {
-                rock: RockId(0),
-                band: Band::Inner,
-            },
+            rock: RockId(0),
             row: SHIPYARD,
             count,
         }

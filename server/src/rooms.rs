@@ -267,7 +267,7 @@ mod tests {
     use probe_protocol::{Bot, Holder, Lobby};
     use probe_sim::roster::SHIPYARD;
     use probe_sim::state::{Command, Issued};
-    use probe_sim::{Band, Place, RockId, SeatId, Stamped, TeamId, Tick};
+    use probe_sim::{RockId, SeatId, Stamped, TeamId, Tick};
 
     use super::*;
 
@@ -280,10 +280,7 @@ mod tests {
                 seat: SeatId(seat),
                 seq: 0,
                 command: Command::Want {
-                    place: Place {
-                        rock: RockId(0),
-                        band: Band::Inner,
-                    },
+                    rock: RockId(0),
                     row: SHIPYARD,
                     count: 1,
                 },

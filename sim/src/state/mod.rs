@@ -21,8 +21,7 @@ pub use wants::Wants;
 use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
-use crate::orbit::elements::Orbit;
-use crate::place::{Place, Post};
+use crate::post::Post;
 use crate::roster::{Roster, Row};
 use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick};
@@ -30,7 +29,7 @@ use crate::time::{Moment, Tick};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Held {
     pub present: u32,
-    pub flying: u32,
+    pub transit: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -122,16 +121,16 @@ impl State {
         self.wants.iter().map(|(post, wants)| (*post, wants))
     }
 
-    pub fn entities_at(&self, place: Place) -> impl Iterator<Item = &Entity> {
+    pub fn entities_at(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
         self.entities
             .values()
-            .filter(move |entity| entity.home() == place)
+            .filter(move |entity| entity.home() == rock)
     }
 
-    pub fn entities_at_rock(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
+    pub fn standing_at(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
         self.entities
             .values()
-            .filter(move |entity| entity.home().rock == rock)
+            .filter(move |entity| entity.standing(self.tick) == Some(rock))
     }
 
     pub fn ready(&self) -> &[Ready] {
@@ -148,19 +147,19 @@ impl State {
 
     pub fn count(&self, post: Post, row: RowId) -> u32 {
         let held = self.holding(post, row);
-        held.present + held.flying
+        held.present + held.transit
     }
 
     pub fn holding(&self, post: Post, row: RowId) -> Held {
         let mine = || {
-            self.entities_at(post.place)
+            self.entities_at(post.rock)
                 .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
         };
 
         let counted = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
         Held {
-            present: counted(mine().filter(|entity| !entity.is_flying()).count()),
-            flying: counted(mine().filter(|entity| entity.is_flying()).count()),
+            present: counted(mine().filter(|entity| entity.flight().is_none()).count()),
+            transit: counted(mine().filter(|entity| entity.flight().is_some()).count()),
         }
     }
 
@@ -168,13 +167,9 @@ impl State {
         self[rock].orbit().at(self.tick, self.gravity)
     }
 
-    pub fn anchor(&self, place: Place) -> Orbit {
-        self[place.rock].orbit().shifted(place.band.amplitude())
-    }
-
     pub fn body_of(&self, entity: &Entity) -> Body {
         match entity.motion() {
-            Motion::Fixed => self.rock_body(entity.home().rock),
+            Motion::Fixed => self.rock_body(entity.home()),
             Motion::Free { body, .. } => body,
         }
     }
@@ -194,7 +189,7 @@ impl State {
         &mut self,
         seat: SeatId,
         row: RowId,
-        home: Place,
+        home: RockId,
         motion: Motion,
     ) -> EntityId {
         let id = self.next_entity;
@@ -343,7 +338,6 @@ mod tests {
     use crate::ids::TeamId;
     use crate::materials::Materials;
     use crate::orbit::elements::Orbit;
-    use crate::place::Band;
     use crate::roster::Kind;
     use crate::vec3::Vec3;
 
@@ -386,29 +380,22 @@ mod tests {
             .expect("the shipped roster has both kinds")
     }
 
-    fn inner() -> Place {
-        Place {
-            rock: ROCK,
-            band: Band::Inner,
-        }
-    }
-
     #[test]
-    fn count_is_the_seat_entities_of_the_row_at_the_place() {
+    fn count_is_the_seat_entities_of_the_row_at_the_rock() {
         let mut state = state();
         let structure = row_of(&state, Kind::Structure);
         let unit = row_of(&state, Kind::Unit);
         let post = Post {
-            place: inner(),
+            rock: ROCK,
             seat: SEAT,
         };
-        let first = state.spawn(SEAT, structure, inner(), Motion::Fixed);
-        let second = state.spawn(SEAT, structure, inner(), Motion::Fixed);
-        state.spawn(SeatId(1), structure, inner(), Motion::Fixed);
+        let first = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
+        let second = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
+        state.spawn(SeatId(1), structure, ROCK, Motion::Fixed);
         assert_ne!(first, second);
         assert_eq!(state.count(post, structure), 2);
         assert_eq!(state.count(post, unit), 0);
-        assert_eq!(state.entities_at(inner()).count(), 3);
+        assert_eq!(state.entities_at(ROCK).count(), 3);
         assert_eq!(state[first].hp(), state[structure].hp.0);
         state.remove_entity(first);
         assert_eq!(state.count(post, structure), 1);
@@ -422,8 +409,8 @@ mod tests {
         let structure = row_of(&state, Kind::Structure);
         let unit = row_of(&state, Kind::Unit);
         let body = Body::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
-        let fixed = state.spawn(SEAT, structure, inner(), Motion::Fixed);
-        let free = state.spawn(SEAT, unit, inner(), Motion::Free { body, flight: None });
+        let fixed = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
+        let free = state.spawn(SEAT, unit, ROCK, Motion::Free { body, flight: None });
         assert_eq!(state.body_of(&state[fixed]), state.rock_body(ROCK));
         assert_eq!(state.body_of(&state[free]), body);
     }

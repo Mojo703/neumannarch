@@ -11,7 +11,7 @@ document.
 
 1. **Invalid states are unrepresentable.** A structure has no velocity, a
    burn cannot exceed its row's limit or last no ticks, a composition with nothing in it
-   does not exist, a command names a place and a row and nothing else. Where the
+   does not exist, a command names a rock and a row and nothing else. Where the
    type system cannot say it, one runtime check says it, with a comment
    naming the shape change that would delete the check.
 2. **The step is a pure function.** `State::step(&self, ..) -> State`.
@@ -20,11 +20,11 @@ document.
    mutates.
 3. **One law of motion, two kernels.** Every body moves by exact two-body
    motion about the central mass. `Orbit::at` reads a fixed elliptic orbit
-   at a tick, for rocks and anchors; `universal::propagate` advances a
+   at a tick, for rocks; `universal::propagate` advances a
    thrusting body one tick, for ships. One test ties the kernels together:
    `kepler_agrees_with_the_universal_propagator` asserts
    `Orbit::at(t + dt)` equals `propagate(orbit.at(t), dt)` over a spread of
-   orbits and spans. Every send is one solved transfer between anchors,
+   orbits and spans. Every send is one solved transfer between two rocks,
    flown from a schedule the solver integrated to the tolerance the step
    flies it to; beyond it the only code steering a ship is manoeuvring.
 4. **Determinism by construction.** `f64` only, transcendentals through
@@ -115,12 +115,10 @@ pub struct State {
     ready: Vec<Ready>,              // damage weapons' next ready moments
 }
 
-pub struct Post { pub place: Place, pub seat: SeatId }      // one composition
-pub struct Place { pub rock: RockId, pub band: Band }
-pub enum Band { Inner, Outer }
+pub struct Post { pub rock: RockId, pub seat: SeatId }      // one composition
 
 pub struct Entity {
-    id: EntityId, seat: SeatId, row: RowId, home: Place, hp: Real,
+    id: EntityId, seat: SeatId, row: RowId, home: RockId, hp: Real,
     motion: Motion,
 }
 pub enum Motion {
@@ -129,12 +127,17 @@ pub enum Motion {
 }
 pub struct Body { pub pos: Vec3, pub vel: Vec3 }            // inertial frame
 
-pub struct Flight { source: Place, schedule: Schedule }
+pub struct Flight { source: RockId, schedule: Schedule }
 pub struct Schedule { burns: [Burn; 2], arrive: Tick }
 struct Burn { from: Tick, ticks: NonZeroU32, accel: Vec3 }  // held whole ticks
-pub struct Send { source: Place, destination: Place,        // one schedule,
+pub struct Send { source: RockId, destination: RockId,      // one schedule,
                   schedule: Schedule, members: Vec<EntityId> }   // every member
 ```
+
+A place is a rock, so `RockId` is the place: a post is a rock and a seat,
+the verb names a rock, and an entity's home is a rock. `State::entities_at`
+answers who is homed at a rock and `State::standing_at` who is at it now;
+the two differ only for a unit whose send is still forming.
 
 - Ids are newtypes over the index into their store: `RockId(u32)`,
   `EntityId(u32)`, `RowId(u16)`, `SeatId(u8)`. `State` implements `Index`
@@ -151,7 +154,10 @@ pub struct Send { source: Place, destination: Place,        // one schedule,
 - `Rock { orbit: Orbit, caps: Materials, radius: Real }`. `Orbit` is an
   elliptic conic as equinoctial elements with the tick its mean longitude
   is stated at; a rock never thrusts, so its body at any tick is
-  `Orbit::at`.
+  `Orbit::at`. `radius` is the rock's own size, for drawing;
+  `Belt::ZONE_RADIUS_METERS` is the zone, one constant of the belt for
+  every rock, which `belt.rs` owns and one test holds against the belt's
+  own spacing.
 - `Roster` owns the movement limit and the rows. The shipped eight are built
   by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`
   and `Roster::moving_at(Real) -> Roster` serve harness variants.
@@ -160,23 +166,23 @@ pub struct Send { source: Place, destination: Place,        // one schedule,
   `Row::kind()`: `Structure` when its manoeuvring limit is zero, else `Unit`.
   No `Copy` of a row lives anywhere but the roster.
 - `Frame { post: Post, row: RowId, progress: Real }`: the work done so far,
-  in cost units. An entity marked surplus carries its own scrapping the
-  same way, in `Entity::scrap`, which is `None` until fulfilment marks it.
+  in cost units. Nothing complete is ever scrapped, so no entity carries
+  work of its own; surplus is `count` above `want` and is read where it is
+  needed, never stored.
 - `Ready { entity: EntityId, weapon: u8, at: Moment }`: one per damage
   weapon of a living entity; never earlier than the current tick.
 
 ## Sim: commands and the session
 
 ```rust
-pub enum Command { Want { place: Place, row: RowId, count: u32 } }
+pub enum Command { Want { rock: RockId, row: RowId, count: u32 } }
 pub struct Issued { pub seat: SeatId, pub seq: u32, pub command: Command }
 pub struct Stamped { pub tick: Tick, pub issued: Issued }
 pub struct Batch(Vec<Issued>);                      // one tick's, ordered
 pub struct Sequence { seat: SeatId, next: u32 }
 pub struct Setup { teams: Vec<TeamId>, seed: u64, clock: Tick }
 pub enum BadSetup { NoSeats, TooManySeats }
-pub enum Rejected { NoSuchSeat, DeadSeat, NoSuchRock, NoSuchRow,
-                    StructureOutside, TooMany }
+pub enum Rejected { NoSuchSeat, DeadSeat, NoSuchRock, NoSuchRow, TooMany }
 pub enum Refused { Duplicate, TooMany, Late, Ahead }
 
 impl State {
@@ -317,12 +323,15 @@ order; anything sorted is sorted by a total key ending in an id.
   however old the tick is. `State::body_of(&Entity) -> Body` is the one
   query for where an entity is: its rock's body when `Fixed`, its stored
   body when `Free`.
-- **Anchors.** `Orbit::shifted(along: f64) -> Orbit` copies an orbit with
-  its mean longitude moved by `along / a`, so `State::anchor(place)` is the
-  rock's orbit shifted ahead by `place.band.amplitude()` and the anchor's
-  body at a tick is `Orbit::at`. `Band::amplitude()` holds the two
-  constants. An anchor is an orbit, and `Orbit::at` is its body at a
-  tick; it is never an entity and never a body in state.
+- **The zone.** Every rock's zone is `Belt::ZONE_RADIUS_METERS` about its
+  own body, so a force at a rock is read off the rock's orbit and nothing
+  else: `State::rock_body` is the whole of "where a force here is". The
+  zone is the chase's extent in `Attractor` and the circle `View::zone`
+  carries out for the display. Construction and `Fire` gate by the rock
+  a unit stands at rather than by a distance, which the zone is what
+  justifies: holding keeps a unit inside its own rock's zone and no two
+  zones overlap, so the set is the same one and no rule pays for a
+  distance test.
 - **Schedules.** A `Schedule` is one send's thrust: two `Burn`s
   and the arrival tick, a burn being an acceleration held over whole ticks.
   A burn is built only from a delta-v and the roster's movement limit, so its
@@ -335,12 +344,12 @@ order; anything sorted is sorted by a total key ending in an id.
   and it is free, so a candidate arrival tick failing it is never integrated.
   `Schedule::between(source, target, depart, arrive, limit, gravity)` solves
   one candidate arrival tick: `orbit::lambert::solve` from the
-  source anchor's body at `depart` to an aim point, prograde and single
+  source rock's body at `depart` to an aim point, prograde and single
   revolution, gives the impulses; `coasting` builds the schedule; the
   schedule is integrated; the aim moves by the miss at `arrive` and the
   solve repeats, at most `CORRECTIONS` times. It answers `Some` on the first
   pass landing inside `Schedule::ARRIVAL_POSITION_METERS` and
-  `ARRIVAL_SPEED_METERS_PER_SECOND` of the destination anchor, so a schedule
+  `ARRIVAL_SPEED_METERS_PER_SECOND` of the destination rock, so a schedule
   that exists has been flown before it is stored. That integration is in
   three parts: each burn tick by tick through `Body::after_tick`, the coast
   between them as one `universal::propagate`. The step flies the same
@@ -348,21 +357,37 @@ order; anything sorted is sorted by a total key ending in an id.
   bounds, far inside the tolerance the solver accepted against, and every
   machine runs this code, so the contract between solver and step is the
   tolerance, not the arithmetic.
-- **Sends.** `Send::solved(state, source, destination, members)` walks
-  candidate arrival ticks upward one second at a time from the tick after
-  the current one, which is the tick a member first thrusts, and takes the
-  first with a schedule at the roster's movement limit; past its bound it
-  answers `None`. A `Send` holds that one schedule and its members, so
-  every ship of it flies the same burns and arrives on the same tick,
-  whatever rows they are. A flight is a `Schedule` and the place it left,
-  carried by the unit itself, so an arrived unit drops it and no store is
-  reaped.
+- **Sends.** `Send::joining(state, source, destination, seat, members)` is
+  the one way a send is made: the schedule of the send already forming
+  between those rocks for that seat, else a newly solved one. The solve
+  walks candidate arrival ticks upward one second at a time from the
+  departure tick, `Send::FORMING_TICKS` past the current one and one
+  more, which is the tick a member first thrusts, and takes the first with
+  a schedule at the roster's movement limit; past its bound it answers
+  `None`. A `Send` holds that one schedule and its members, so every ship
+  of it flies the same burns and arrives on the same tick, whatever rows
+  they are. A flight is a `Schedule` and the rock it left, carried by the
+  unit itself, so an arrived unit drops it and no store is reaped.
+- **Forming.** A send forms for `Send::FORMING_TICKS` before it departs,
+  and the forming send is that carried flight, not a store of its own: a
+  flight whose schedule has not reached its first burn is forming, which
+  `Flight::has_departed` answers and the search inside `Send::joining`
+  finds by source, destination and seat. At most one such flight exists
+  per those three, since a send is solved only where none is found, so a
+  unit re-homed inside the window joins the one that is there. `Entity` reads
+  the two states off that one tick: `is_flying` is true only from
+  departure, and `Entity::standing` is the rock a unit is at — the rock
+  it left while its send forms, its home otherwise, and `None` once it
+  flies. Fire, the attractor, construction and extraction ask
+  `standing`, so a forming unit is a shooter and a target where it
+  stands; `State::holding` counts by the flight itself, so it counts
+  toward its destination from the tick it joins.
 - **The attractor.** `Attractor::pulling(state, &Entity, &Sight, &Sweep) ->
   Option<Attractor>` reads the snapshot and applies DESIGN.md's order:
   nothing while the unit flies a schedule, the half-range point off the
-  nearest seen enemy inside the leash, else the home anchor.
-  `state::sight::Sight` answers which entities a seat sees, over the `Sweep`
-  (Sight, below), and is the only such query.
+  nearest seen enemy inside the zone of the rock it stands at, else that
+  rock. `state::sight::Sight` answers which entities a seat sees, over the
+  `Sweep` (Sight, below), and is the only such query.
 - **Manoeuvring.** `Maneuver::of(&State).run() -> Thrusts` is one thrust
   per free unit in id order, each the pull to its attractor plus one pair
   term per ship within the cutoff, clamped to the row's `manoeuvring`. A
@@ -379,41 +404,43 @@ order; anything sorted is sorted by a total key ending in an id.
 - **Fulfilment** walks every post in key order. For each row: the reserve
   first, then the nearest post holding a surplus of that row (distance
   between rock bodies now, ties by lower rock id, the highest-id units
-  first), then the frames at the post brought to what remains. Bringing
-  the frames to the count still missing is the whole opening and
-  cancelling rule: a unit assigned or placed leaves one fewer missing, so
-  one frame closes and refunds what it consumed. Units re-homed from one
-  place to one place in one tick become one `Send`, solved before they are
-  counted as filling anything; a send with no schedule leaves its units
-  home this tick and its share of the shortfall opens frames like any
-  other. Surplus with nowhere to go is marked, and a structure is marked
-  where it stands. A unit held back by a failed send is neither sent nor
-  marked, so nothing scraps it while a shortfall still wants it.
-  `Assigned` carries the placements, the sends, the openings, the
-  cancellations, and the whole set of marks.
-- **Extraction** groups extract weapons by rock; per material, each takes
-  its rate, the cap is split equally among them when the sum exceeds it,
-  and unused shares redistribute until none is left or the cap is met.
-  `Income` is one `Materials` per seat.
+  first), then one frame at the post if anything is still missing and
+  none is open there for that row, so a row builds one at a time and the
+  next opens the tick after the last completes; rows are separate keys,
+  so they open beside each other. A row wanting nothing more cancels its
+  open frames, least-progressed first, and each refunds what it consumed.
+  Units re-homed from one rock to one rock join the send forming between
+  that pair for that seat, or open one, solved before they are counted as
+  filling anything; a send with no schedule leaves its units home this
+  tick and its share of the shortfall opens a frame like any other.
+  Surplus with nowhere to go stays where it stands, complete: nothing
+  marks it and nothing scraps it. `Assigned` carries the placements, the
+  sends, the openings and the cancellations.
+- **Extraction** groups extract weapons by the rock their entity stands
+  at; per material, each takes its rate, the cap is split equally among
+  them when the sum exceeds it, and unused shares redistribute until none
+  is left or the cap is met. `Income` is one `Materials` per seat.
 - **Construction** works one seat's rocks in turn over one copy of its
   stockpile. At each rock it assigns the builders' combined rate evenly
   across that seat's frames there, computes the per-material ratio of
   stock to demand, scales each frame's spend by the smallest ratio among
   the materials it uses, never above the work it has left, and records
-  completions. What the frames cannot use goes to scrapping the marked
-  surplus at that rock, which refunds a whole cost when it finishes, and
-  what scrapping cannot use goes to repairing the seat's damaged entities
-  there, which costs nothing. `Progress` names all three, so the split is
-  readable. Completion spawns at the post: a structure `Fixed`, a unit
-  `Free` at the place's anchor for the tick it first exists in, offset one
+  completions. What the frames cannot use goes to repairing the seat's
+  damaged entities there, which costs nothing. A builder's reach is the
+  rock it stands at, which is the zone by another name, since holding
+  keeps everything homed at a rock inside that rock's zone.
+  Completion spawns at the post: a structure `Fixed`, a unit
+  `Free` at the rock's body for the tick it first exists in, offset one
   spacing along the rock's radial direction per unit already there.
 - **Fire** collects every ready damage weapon of an entity that is not
   flying, sorts by `(Moment, EntityId, weapon)`, and resolves each in
   order against the snapshot plus a `BTreeMap<EntityId, f64>` of damage
   assigned so far this tick, skipping targets whose assigned damage is
-  lethal. Target choice is DESIGN.md's threat rule over entities at the
-  same rock, not flying, inside the weapon's range, that the shooter's
-  seat's team sees. Damage is the weapon's damage cut by its falloff over
+  lethal. Target choice is DESIGN.md's threat rule over entities standing
+  at the shooter's own rock, inside the weapon's range, that the
+  shooter's seat's team sees; standing at one rock is the zone by another
+  name, since no two zones overlap, and a flying entity stands nowhere
+  and so is neither shooter nor target. Damage is the weapon's damage cut by its falloff over
   the range, less the target's plating, floored at zero. A weapon that
   fires is next ready one interval on, never before this tick; a weapon
   with nothing to shoot keeps the moment it has, so it fires the instant a
@@ -434,22 +461,22 @@ order; anything sorted is sorted by a total key ending in an id.
   or an agent, built once per tick from that tick's shots. It is a
   projection and derives nothing itself: every fact it carries is asked
   of the type that owns it — `State::holding` for a post's row, present
-  and flying; `Frame::fraction` and `Frame::starved_material` for a frame
+  and in transit; `Frame::fraction` and `Frame::starved_material` for a frame
   under construction; `Shots::exchanges` for the tick's fire; `Sight` and
   `Radar` for what a seat sees and what it merely detects; `Row::mass_class`
   for what radar can tell of a contact. Own compositions with wants,
-  counts present and flying, and each frame's progress with the material
+  counts present and in transit, and each frame's progress with the material
   it has spent nothing on this second for want of; the reserve and
   stockpile; seen entities with id, row, seat, body, HP, whether they
-  fly, the place they belong to and, for the seat's own fliers, the place
+  fly, the rock they belong to and, for the seat's own fliers, the rock
   they left, both `None` for a flying entity of another team, whose
   destination sight does not give; radar
   blips with body and mass class, which are the entities inside a team
   sensor's radar range and outside its sight; the tick's `Exchange`s,
-  which say per place and seat whether a shot the seat saw was fired or
+  which say per rock and seat whether a shot the seat saw was fired or
   landed there; the gravity its terrain's orbits are read at; every rock
-  with its orbit
-  and caps; the standings, `Some` only once the clock has run out.
+  with its orbit and caps; the zone every rock's circle is drawn at; the
+  standings, `Some` only once the clock has run out.
   Nothing in a `View` refers to anything a seat cannot see. The roster is
   match-constant and travels with the initial state, so a client holds it
   from the session rather than from a view.
@@ -479,16 +506,16 @@ order; anything sorted is sorted by a total key ending in an id.
   `Arc { fraction, trailing }`; flights as lines to a rock; radar blips as
   a position, a drift past the nearest rock and a mass class; the
   selection and the `Hover`, which is a wheel band or a `Sending`. Every
-  rock draws its inner ring; an outer ring draws only where that band
-  holds something or its rock is selected.
+  rock draws one ring, at `hud::RING_RADIUS`, and a ring is named by its
+  rock.
 - `Client { selection, hover, fights }`: what the client, not the sim,
   decides about a frame, the third argument of `Scene::from_view`.
 - `fights::Fights`: the fight memory, kept by the client because no field
   of the state records a shot. `observe(&View)` once per tick starts an arc
   where the view reports shots exchanged, drains it as the seat's HP at the
-  place falls, trails the last second and a half of damage, and forgets an
+  rock falls, trails the last second and a half of damage, and forgets an
   arc ten seconds after the last shot; `arcs()` is what the scene draws.
-- `send::Sending { from, to, count }`: the drag gesture. `rows` is what it
+- `send::Sending { from, to, count }`: the drag between two rocks' rings. `rows` is what it
   moves, off the end of the source run so the cheapest rows go first, and
   `commands` is the two count edits per row it moves. One type, so the
   glyphs the scene dims and the edits the release issues cannot disagree.
@@ -515,8 +542,9 @@ order; anything sorted is sorted by a total key ending in an id.
   glyphs per row, overlap at forty, no overrun. `span(run)` is the share a
   run owns, which is what its fight arc is drawn over, so the arcs cannot
   drift from the runs.
-- `wheel::Wheel`: the roster wheel's annulus, slots and bands as
-  screen-space sectors, its own hit test, and its painting.
+- `wheel::Wheel`: the roster wheel's annulus over one rock, slots and
+  bands as screen-space sectors, its own hit test, and its painting; a
+  slot per row, since every row is buildable at every rock.
   `WheelBand::edit` is the `Command` a click issues.
 - `camera::BeltCamera`: the focus point moving at the local orbital
   velocity, pan by meters or by pointer pixels, and zoom within a range
@@ -524,7 +552,7 @@ order; anything sorted is sorted by a total key ending in an id.
 - `screen::Screen`: one frame's projection, the engine camera built once,
   with the window and the painter's own measure. Everything that projects
   a world point goes through it. Picking is screen-space distance to a
-  projected rock centre against the ring radii, since rings have a fixed
+  projected rock centre against the ring radius, since a ring has a fixed
   screen radius.
 - Two draw modules, one per DISPLAY.md layer. `belt`: one function from a
   `Scene` and a `Screen` to the engine's draws — rocks, one light, and
@@ -580,7 +608,7 @@ call. `Seated { seat, agent }` builds the view and stamps the seat and
 the sequence, so no caller does. `Scripted` is the shipped opponent: a
 `Personality`'s constants read through `Survey` (one decision's tally of a
 view, with memory folded in) into a `Plan` (a target composition per
-place, diffed against the view into `Want`s), stepping a `Memory` (what
+rock, diffed against the view into `Want`s), stepping a `Memory` (what
 the view carries no history of) and a `Dice` (the one seeded,
 deterministic source of variation an agent has). `Roles` reads the roster
 once into the row an agent prefers per job, so no agent names a row by
@@ -794,7 +822,7 @@ exists.
   it. A seat whose machine has left the room is acknowledged for the
   rest of the match by the room on its behalf, so the others settle
   every tick and the match goes on without it. Every one of these
-  numbers is a constant with units and a hypothesis in its rustdoc.
+  numbers is a constant with its unit in its name.
 - **Screens.** One `Flow` owns one `Screen`, which is the screen showing
   and the room behind it: `Title { listener, join }`, and `Lobby`,
   `Loading`, `Play` and `Results`, each with its screen and its `Room`.
@@ -910,22 +938,23 @@ list later.
 ```
 sim/src/
   lib.rs            TICKS_PER_SECOND, TICK; the public surface
-  belt.rs           Belt::fixed, State::start
+  belt.rs           Belt::fixed, Belt::ZONE_RADIUS_METERS, State::start
   setup.rs          Setup, MAX_SEATS, BadSetup
   real.rs           Real
   vec3.rs           Vec3
   materials.rs      Material, Materials, Stockpile
   time.rs           Tick, Moment
   ids.rs            RockId, EntityId, RowId, SeatId, TeamId
-  place.rs          Band, Place, Post
+  post.rs           Post
   roster/           mod.rs Roster and the movement limit; row.rs Row,
                     Weapon, Kind, MassClass; shipped.rs the eight
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
-                    entity.rs Entity, Motion; schedule.rs Flight,
-                    Schedule, Burn, the solve; send.rs Send and the
-                    search for its arrival tick;
+                    entity.rs Entity, Motion, flying and standing;
+                    schedule.rs Flight, Schedule, Burn, the solve;
+                    send.rs Send, its forming window and the search for
+                    its arrival tick;
                     attractor.rs; sight.rs Sight; radar.rs Radar;
                     wants.rs Wants; frame.rs Frame, its fraction and what
                     it went short of; ready.rs; command.rs Command,
@@ -1000,7 +1029,7 @@ One concern per file; a file that needs a section comment is two files.
   and never axes.
 - Lengths in meters, time in seconds inside `orbit`, ticks everywhere
   else; angles in radians; a phase is a fraction of a turn in `0..1`.
-- Every `f64` parameter or field states its unit in its rustdoc.
+- Every `f64` parameter or field states its unit in its name or its type.
 - Iteration order is id order. A `BTreeMap` where a map is needed, a
   sorted `Vec` where a set is needed.
 - `pub(crate)` by default; `pub` is the surface `lib.rs` re-exports.
@@ -1041,6 +1070,13 @@ it; a new one is added here in the unit that introduces it:
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.
+- `Send::joining` takes the first flight it finds between a source, a
+  destination and a seat that has not departed, trusting that at most one
+  exists — which holds because a send is solved only where none is found,
+  and the one that is found always departs before the window could open a
+  second. A store keyed by those three would make it unrepresentable, at
+  the price of a second place for a send to live and be reaped; the
+  flight the units already carry is the cheaper truth.
 - `Schedule::between` gives up after `CORRECTIONS` passes. The margin is
   the predicate and the cap is only its guard: at the shipped
   `BURN_SHARE_OF_SPAN` no candidate inside the margin has ever needed a

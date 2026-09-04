@@ -36,6 +36,8 @@ impl Belt {
     pub const GRAVITY: Gravity =
         Gravity::new(TAU * TAU * RADIUS * RADIUS * RADIUS / (2_400.0 * 2_400.0));
 
+    pub const ZONE_RADIUS_METERS: f64 = 30.0;
+
     pub fn fixed(gravity: Gravity) -> Vec<Rock> {
         (0..3 * REGION).map(|at| rock(at, gravity)).collect()
     }
@@ -89,5 +91,30 @@ fn caps(at: usize) -> Materials {
         0 => Materials::new(rich, poor, poor),
         1 => Materials::new(poor, rich, poor),
         _ => Materials::new(poor, poor, rich),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TICKS_PER_SECOND;
+
+    #[test]
+    fn no_two_zones_of_the_shipped_belt_overlap() {
+        let rocks = Belt::fixed(Belt::GRAVITY);
+        let apart = 2.0 * Belt::ZONE_RADIUS_METERS;
+        for minutes in 0..15 {
+            let tick = Tick(minutes * 60 * u64::from(TICKS_PER_SECOND));
+            let bodies: Vec<Body> = rocks
+                .iter()
+                .map(|rock| rock.orbit().at(tick, Belt::GRAVITY))
+                .collect();
+            for (at, body) in bodies.iter().enumerate() {
+                for other in &bodies[at + 1..] {
+                    let between = body.pos.distance(other.pos);
+                    assert!(between > apart, "{between} meters apart at {tick:?}");
+                }
+            }
+        }
     }
 }

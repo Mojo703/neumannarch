@@ -96,12 +96,12 @@ impl Memory {
             let Some(home) = seen.home else {
                 continue;
             };
-            mine.push(home.rock);
+            mine.push(home);
             if roster
                 .get(seen.row)
                 .is_some_and(|row| row.kind() == Kind::Structure)
             {
-                held.push(home.rock);
+                held.push(home);
             }
         }
         let now = view.tick.seconds();
@@ -138,7 +138,7 @@ fn watch(view: &View, roster: &Roster, rock: RockId) -> Option<Watched> {
     if !watching {
         return None;
     }
-    let theirs = || rows(false).filter(|(seen, _)| seen.home.is_some_and(|at| at.rock == rock));
+    let theirs = || rows(false).filter(|(seen, _)| seen.home == Some(rock));
     Some(Watched {
         at: view.tick,
         enemy_army: theirs()

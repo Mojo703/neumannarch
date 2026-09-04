@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::State;
-use crate::ids::{RowId, SeatId};
-use crate::place::{Band, Place, Post};
-use crate::roster::Kind;
+use crate::ids::{RockId, RowId, SeatId};
+use crate::post::Post;
 use crate::time::Tick;
 
 pub const MAX_WANT: u32 = 200;
@@ -13,7 +12,7 @@ pub const MAX_COMMANDS_PER_TICK: usize = 32;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Command {
     Want {
-        place: Place,
+        rock: RockId,
         row: RowId,
         count: u32,
     },
@@ -55,7 +54,6 @@ pub enum Rejected {
     DeadSeat,
     NoSuchRock,
     NoSuchRow,
-    StructureOutside,
     TooMany,
 }
 
@@ -116,9 +114,9 @@ impl Batch {
 
 impl State {
     pub(crate) fn apply(&mut self, issued: Issued) -> Result<(), Rejected> {
-        let Command::Want { place, row, count } = issued.command;
+        let Command::Want { rock, row, count } = issued.command;
         let post = Post {
-            place,
+            rock,
             seat: issued.seat,
         };
         self.validate(post, row, count)?;
@@ -133,14 +131,11 @@ impl State {
         if !seat.alive() {
             return Err(Rejected::DeadSeat);
         }
-        if self.rock(post.place.rock).is_none() {
+        if self.rock(post.rock).is_none() {
             return Err(Rejected::NoSuchRock);
         }
-        let Some(row) = self.roster().get(row) else {
+        if self.roster().get(row).is_none() {
             return Err(Rejected::NoSuchRow);
-        };
-        if row.kind() == Kind::Structure && post.place.band == Band::Outer {
-            return Err(Rejected::StructureOutside);
         }
         if count > MAX_WANT {
             return Err(Rejected::TooMany);

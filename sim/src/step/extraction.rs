@@ -24,8 +24,7 @@ impl<'a> Extraction<'a> {
             let rock_id = crate::RockId(id as u32);
             let extractors: Vec<Extractor> = self
                 .state
-                .entities_at_rock(rock_id)
-                .filter(|entity| !entity.is_flying())
+                .standing_at(rock_id)
                 .flat_map(|entity| {
                     self.state[entity.row()]
                         .extracts()

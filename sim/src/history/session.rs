@@ -189,7 +189,6 @@ mod tests {
     use super::*;
     use crate::TICKS_PER_SECOND;
     use crate::ids::{RockId, RowId, TeamId};
-    use crate::place::{Band, Place};
     use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD};
     use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion};
     use crate::step::maneuver::Maneuver;
@@ -219,18 +218,15 @@ mod tests {
         }
     }
 
-    fn inner(rock: u32) -> Place {
-        Place {
-            rock: RockId(rock),
-            band: Band::Inner,
-        }
+    fn rock(at: u32) -> RockId {
+        RockId(at)
     }
 
-    fn want(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
+    fn want(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
-            command: Command::Want { place, row, count },
+            command: Command::Want { rock, row, count },
         }
     }
 
@@ -243,13 +239,13 @@ mod tests {
 
     fn script() -> Vec<Stamped> {
         vec![
-            stamped(3, want(0, 0, inner(0), SHIPYARD, 1)),
-            stamped(3, want(0, 1, inner(0), CONSTRUCTOR, 1)),
-            stamped(3, want(1, 0, inner(4), CONSTRUCTOR, 1)),
-            stamped(9, want(0, 2, inner(0), FRIGATE, 1)),
-            stamped(20, want(0, 3, inner(0), CONSTRUCTOR, 0)),
-            stamped(20, want(0, 4, inner(1), CONSTRUCTOR, 1)),
-            stamped(31, want(1, 1, inner(4), SHIPYARD, 1)),
+            stamped(3, want(0, 0, rock(0), SHIPYARD, 1)),
+            stamped(3, want(0, 1, rock(0), CONSTRUCTOR, 1)),
+            stamped(3, want(1, 0, rock(4), CONSTRUCTOR, 1)),
+            stamped(9, want(0, 2, rock(0), FRIGATE, 1)),
+            stamped(20, want(0, 3, rock(0), CONSTRUCTOR, 0)),
+            stamped(20, want(0, 4, rock(1), CONSTRUCTOR, 1)),
+            stamped(31, want(1, 1, rock(4), SHIPYARD, 1)),
         ]
     }
 
@@ -295,7 +291,7 @@ mod tests {
         let mut session = session(span);
         run(&mut session, 20);
         let latest = session.state().tick();
-        let issued = want(0, 0, inner(0), SHIPYARD, 1);
+        let issued = want(0, 0, rock(0), SHIPYARD, 1);
 
         assert_eq!(
             session.insert(stamped(latest.back(span).0 - 1, issued)),
@@ -313,18 +309,18 @@ mod tests {
         for seq in 1..MAX_COMMANDS_PER_TICK as u32 {
             assert!(
                 session
-                    .insert(stamped(latest.0, want(0, seq, inner(0), SHIPYARD, 1)))
+                    .insert(stamped(latest.0, want(0, seq, rock(0), SHIPYARD, 1)))
                     .is_ok()
             );
         }
         let over = MAX_COMMANDS_PER_TICK as u32;
         assert_eq!(
-            session.insert(stamped(latest.0, want(0, over, inner(0), SHIPYARD, 1))),
+            session.insert(stamped(latest.0, want(0, over, rock(0), SHIPYARD, 1))),
             Err(Refused::TooMany)
         );
         assert!(
             session
-                .insert(stamped(latest.0, want(1, over, inner(0), SHIPYARD, 1)))
+                .insert(stamped(latest.0, want(1, over, rock(0), SHIPYARD, 1)))
                 .is_ok(),
             "the cap is one seat's"
         );
@@ -425,7 +421,7 @@ mod tests {
         let mut session =
             Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
-            let place = inner(at % 21);
+            let place = rock(at % 21);
             let body = Maneuver::spawn_body(&session.live, place, Tick::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
@@ -443,7 +439,7 @@ mod tests {
             reason = "a test measuring wall time is not the sim reading a clock"
         )]
         let started = std::time::Instant::now();
-        let rewound = session.insert(stamped(oldest.0, want(1, 0, inner(4), FRIGATE, 1)));
+        let rewound = session.insert(stamped(oldest.0, want(1, 0, rock(4), FRIGATE, 1)));
         let took = started.elapsed().as_secs_f64();
 
         assert_eq!(rewound, Ok(Rewound::From(oldest)));

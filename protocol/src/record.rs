@@ -109,7 +109,7 @@ fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
 mod tests {
     use probe_sim::roster::{CONSTRUCTOR, SHIPYARD};
     use probe_sim::state::{Command, Issued};
-    use probe_sim::{Band, Place, Retention, RockId, RowId, SeatId, TeamId};
+    use probe_sim::{Retention, RockId, RowId, SeatId, TeamId};
 
     use super::*;
     use crate::wire::Codec;
@@ -125,10 +125,7 @@ mod tests {
             seat: SeatId(0),
             seq,
             command: Command::Want {
-                place: Place {
-                    rock: RockId(0),
-                    band: Band::Inner,
-                },
+                rock: RockId(0),
                 row,
                 count: 1,
             },

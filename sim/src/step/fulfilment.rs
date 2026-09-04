@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{EntityId, RowId, SeatId};
-use crate::place::{Place, Post};
+use crate::ids::{EntityId, RockId, RowId, SeatId};
+use crate::post::Post;
 use crate::roster::Kind;
 use crate::state::{Entity, Send, State};
 
@@ -15,7 +15,6 @@ pub struct Placement {
 pub struct Opening {
     pub post: Post,
     pub row: RowId,
-    pub count: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,49 +31,40 @@ pub struct Assigned {
     pub sends: Vec<Send>,
     pub openings: Vec<Opening>,
     pub cancellations: Vec<Cancellation>,
-    pub marked: Vec<EntityId>,
 }
 
 pub struct Fulfilment<'a> {
     state: &'a State,
-    spare: BTreeMap<(SeatId, RowId), Vec<Spare>>,
-    stuck: Vec<EntityId>,
+    surplus: BTreeMap<(SeatId, RowId), Vec<Surplus>>,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Spare {
+struct Surplus {
     entity: EntityId,
-    place: Place,
+    rock: RockId,
 }
 
 impl<'a> Fulfilment<'a> {
     pub fn of(state: &'a State) -> Fulfilment<'a> {
-        let mut spare: BTreeMap<(SeatId, RowId), Vec<Spare>> = BTreeMap::new();
-        let mut stuck = Vec::new();
+        let mut surplus: BTreeMap<(SeatId, RowId), Vec<Surplus>> = BTreeMap::new();
         for (post, row, over) in surpluses(state) {
-            if state[row].kind() == Kind::Structure {
-                stuck.extend(over);
-            } else {
-                spare
+            if state[row].kind() == Kind::Unit {
+                surplus
                     .entry((post.seat, row))
                     .or_default()
-                    .extend(over.into_iter().map(|entity| Spare {
+                    .extend(over.into_iter().map(|entity| Surplus {
                         entity,
-                        place: post.place,
+                        rock: post.rock,
                     }));
             }
         }
-        Fulfilment {
-            state,
-            spare,
-            stuck,
-        }
+        Fulfilment { state, surplus }
     }
 
     pub fn run(mut self) -> Assigned {
         let mut assigned = Assigned::default();
         let mut reserved: BTreeMap<(SeatId, RowId), u32> = BTreeMap::new();
-        let mut moving: BTreeMap<(Place, Place, SeatId), Vec<EntityId>> = BTreeMap::new();
+        let mut moving: BTreeMap<(RockId, RockId, SeatId), Vec<EntityId>> = BTreeMap::new();
         let mut missing: Vec<(Post, RowId, u32)> = Vec::new();
         for (post, row, shortfall) in shortfalls(self.state) {
             let from_reserve = self.take_reserved(post, row, shortfall, &mut reserved);
@@ -82,11 +72,11 @@ impl<'a> Fulfilment<'a> {
                 assigned.placements.push(Placement { post, row });
             }
             let mut taking = 0;
-            for spare in self.nearest_spare(post, row, shortfall - from_reserve) {
+            for surplus in self.nearest_surplus(post, row, shortfall - from_reserve) {
                 moving
-                    .entry((spare.place, post.place, post.seat))
+                    .entry((surplus.rock, post.rock, post.seat))
                     .or_default()
-                    .push(spare.entity);
+                    .push(surplus.entity);
                 taking += 1;
             }
             missing.push((post, row, shortfall - from_reserve - taking));
@@ -96,7 +86,6 @@ impl<'a> Fulfilment<'a> {
             let back = held_back.get(&(post, row)).copied().unwrap_or_default();
             self.reconcile(&mut assigned, post, row, still + back);
         }
-        self.mark(&mut assigned);
         for (post, row, over) in unwanted_frames(self.state) {
             self.cancel(&mut assigned, post, row, over);
         }
@@ -117,30 +106,30 @@ impl<'a> Fulfilment<'a> {
         giving
     }
 
-    fn nearest_spare(&mut self, post: Post, row: RowId, wanted: u32) -> Vec<Spare> {
+    fn nearest_surplus(&mut self, post: Post, row: RowId, wanted: u32) -> Vec<Surplus> {
         let mut taking = Vec::new();
-        let Some(spare) = self.spare.get_mut(&(post.seat, row)) else {
+        let Some(surplus) = self.surplus.get_mut(&(post.seat, row)) else {
             return taking;
         };
-        let here = self.state.rock_body(post.place.rock).pos;
+        let here = self.state.rock_body(post.rock).pos;
         while taking.len() < wanted as usize {
-            let nearest = spare
+            let nearest = surplus
                 .iter()
                 .enumerate()
-                .filter(|(_, spare)| spare.place != post.place)
+                .filter(|(_, surplus)| surplus.rock != post.rock)
                 .min_by(|(_, a), (_, b)| {
                     let (first, second) = (
-                        self.state.rock_body(a.place.rock).pos.distance(here),
-                        self.state.rock_body(b.place.rock).pos.distance(here),
+                        self.state.rock_body(a.rock).pos.distance(here),
+                        self.state.rock_body(b.rock).pos.distance(here),
                     );
                     first
                         .total_cmp(&second)
-                        .then(a.place.rock.cmp(&b.place.rock))
+                        .then(a.rock.cmp(&b.rock))
                         .then(b.entity.cmp(&a.entity))
                 })
                 .map(|(at, _)| at);
             match nearest {
-                Some(at) => taking.push(spare.remove(at)),
+                Some(at) => taking.push(surplus.remove(at)),
                 None => break,
             }
         }
@@ -149,14 +138,10 @@ impl<'a> Fulfilment<'a> {
 
     fn reconcile(&self, assigned: &mut Assigned, post: Post, row: RowId, wanted: u32) {
         let open = self.frames_of(post, row);
-        if open.len() < wanted as usize {
-            assigned.openings.push(Opening {
-                post,
-                row,
-                count: wanted - open.len() as u32,
-            });
-        } else {
-            self.cancel(assigned, post, row, open.len() as u32 - wanted);
+        match wanted {
+            0 => self.cancel(assigned, post, row, open.len() as u32),
+            _ if open.is_empty() => assigned.openings.push(Opening { post, row }),
+            _ => {}
         }
     }
 
@@ -178,30 +163,26 @@ impl<'a> Fulfilment<'a> {
         }
     }
 
-    fn frames_of(&self, post: Post, row: RowId) -> Vec<usize> {
-        self.state
-            .frames()
-            .iter()
-            .enumerate()
-            .filter(|(_, frame)| frame.post() == post && frame.row() == row)
-            .map(|(at, _)| at)
-            .collect()
-    }
-
     fn solve(
         &self,
         assigned: &mut Assigned,
-        moving: BTreeMap<(Place, Place, SeatId), Vec<EntityId>>,
+        moving: BTreeMap<(RockId, RockId, SeatId), Vec<EntityId>>,
     ) -> BTreeMap<(Post, RowId), u32> {
         let mut held_back: BTreeMap<(Post, RowId), u32> = BTreeMap::new();
-        for ((from, to, seat), mut members) in moving {
+        for ((source, destination, seat), mut members) in moving {
             members.sort_unstable();
-            match Send::solved(self.state, from, to, &members) {
+            match Send::joining(self.state, source, destination, seat, &members) {
                 Some(send) => assigned.sends.push(send),
                 None => {
-                    for row in members.iter().filter_map(|id| self.state.entity(*id)) {
+                    for entity in members.iter().filter_map(|id| self.state.entity(*id)) {
                         *held_back
-                            .entry((Post { place: to, seat }, row.row()))
+                            .entry((
+                                Post {
+                                    rock: destination,
+                                    seat,
+                                },
+                                entity.row(),
+                            ))
                             .or_default() += 1;
                     }
                 }
@@ -210,15 +191,14 @@ impl<'a> Fulfilment<'a> {
         held_back
     }
 
-    fn mark(&self, assigned: &mut Assigned) {
-        assigned.marked = self
-            .spare
-            .values()
-            .flatten()
-            .map(|spare| spare.entity)
-            .chain(self.stuck.iter().copied())
-            .collect();
-        assigned.marked.sort_unstable();
+    fn frames_of(&self, post: Post, row: RowId) -> Vec<usize> {
+        self.state
+            .frames()
+            .iter()
+            .enumerate()
+            .filter(|(_, frame)| frame.post() == post && frame.row() == row)
+            .map(|(at, _)| at)
+            .collect()
     }
 }
 
@@ -240,9 +220,9 @@ fn surpluses(state: &State) -> Vec<(Post, RowId, Vec<EntityId>)> {
     for (post, row) in held_rows(state) {
         let want = state.wants(post).map_or(0, |wants| wants.get(row));
         let mut held: Vec<EntityId> = state
-            .entities_at(post.place)
+            .entities_at(post.rock)
             .filter(|entity| entity.seat() == post.seat && entity.row() == row)
-            .filter(|entity| !entity.is_flying())
+            .filter(|entity| entity.flight().is_none())
             .map(Entity::id)
             .collect();
         held.sort_unstable_by(|a, b| b.cmp(a));
@@ -261,7 +241,7 @@ fn held_rows(state: &State) -> Vec<(Post, RowId)> {
         .map(|entity| {
             (
                 Post {
-                    place: entity.home(),
+                    rock: entity.home(),
                     seat: entity.seat(),
                 },
                 entity.row(),

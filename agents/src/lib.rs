@@ -65,7 +65,7 @@ mod survey;
 mod tests {
     use super::*;
     use probe_sim::roster::SCOUT;
-    use probe_sim::{Band, Place, Retention, RockId, Setup, TeamId};
+    use probe_sim::{Retention, RockId, Setup, TeamId};
 
     fn session() -> Session {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(1_000)).expect("two seats");
@@ -79,10 +79,7 @@ mod tests {
         fn decide(&mut self, _view: &View) -> Vec<Command> {
             self.0 += 1;
             vec![Command::Want {
-                place: Place {
-                    rock: RockId(0),
-                    band: Band::Inner,
-                },
+                rock: RockId(0),
                 row: SCOUT,
                 count: 1,
             }]
@@ -125,11 +122,8 @@ mod tests {
         impl Agent for Flooding {
             fn decide(&mut self, _view: &View) -> Vec<Command> {
                 (0..64)
-                    .map(|rock| Command::Want {
-                        place: Place {
-                            rock: RockId(rock),
-                            band: Band::Inner,
-                        },
+                    .map(|at| Command::Want {
+                        rock: RockId(at),
                         row: SCOUT,
                         count: 1,
                     })

@@ -41,7 +41,69 @@ as one propagation in the solver and tick by tick in the step, a flight
 on its ship, no arrival snap, an unschedulable send opening frames.
 Measured: 2.8 ms per accepted candidate, 5.8 ms per row per send.
 
+## Owner rulings from play, 2026-09-05 (design conversation open; DESIGN.md
+## and DISPLAY.md follow once the shapes below are settled)
+
+- The two bands per rock go: one place per rock, one ring, no staging
+  band, no outer-to-inner drag.
+- Fog, radar and vision go: every entity is always shown to every
+  player. Sight and radar leave the row and the view; fire needs only
+  range; there is no leash: a unit chases any enemy at its rock.
+  Standings: to rule (revealed at the clock was a fog rule).
+- Holding is one encapsulated, tweakable module replacing the attractor
+  and the pair term: a boids rule with a soft boundary, ships moving
+  pseudo-organically within a torus around the rock and reacting to
+  threats; static ships are boring. Geometry, radii and reactions are
+  its own constants. Rock gravity stays absent (settled).
+- Deconstruction goes: lowering a want below what exists leaves complete
+  units where they are as surplus, sendable to a shortfall elsewhere,
+  never scrapped, never refunded; a frame still building is cancelled
+  and refunded; a complete structure stays until destroyed. The surplus
+  mark's scrapping and the Build weapon's scrap go.
+- Construction focus, ruled twice now and not yet built: a post builds
+  one frame of a row at a time in the order placed, rows in parallel
+  (plan item 10). Not to be lost again.
+- Ranges shown to the player, subtly: weapon range circles, the patrol
+  radius around a rock, a builder's reach.
+- The ring's glyph run winds into a spiral when a run overflows: each
+  stacked mark is drawn one `STACK_STEP` nearer the centre than the last
+  (display/ring.rs `Fit::Stacked` depth, hud.rs). A better shape to be
+  chosen.
+- Ships end a send off their destination and manoeuvre far into place,
+  seen in play after the movement commits. Measured 2026-09-05: the
+  schedule is exact (a lone frigate ends 0.03 m off the anchor, no
+  overshoot); the departure spread is carried to arrival (five frigates
+  twelve metres apart land twelve metres apart) and the walk-in to the
+  one anchor point saturates the manoeuvring limit for five to eight
+  seconds with a one-metre separation bounce. No fix of its own: the
+  holding rule (1c) deletes the point and the zone (1a) holds the
+  spread; the zone must be at least as wide as a crowd's spread at home.
+- Accepted 2026-09-05 from the overseer's pushback: one zone per rock (a
+  radius) is the holding region's centre circle, the builder's reach,
+  the chase's extent and the one faint circle drawn at every rock;
+  weapon ranges are the only other circles, one faint circle per armed
+  ship. A send's destination is the rock's own orbit; departure offsets
+  carried by the one schedule land a force spread as it left. Standings
+  readable always (a fog rule gone). Units re-homed within a short
+  window join one send. The holding rule is organic motion, not literal
+  boids: per row, a wander within the zone, a soft return past its
+  edge, the chase; separation minimal, since space is large and
+  collisions do not matter. The spiral's replacement: stacked glyphs
+  shrink and overlap in place on the ring. Ranges drawn always, subtly.
+
 ## Docs ahead of code
+
+Rewritten 2026-09-05 for the play rulings, the code still on the old
+shape; each line is cut into a unit by the plan (items 1a to 1d below
+the plan's item 2):
+- DESIGN Compositions, Movement and combat, Visibility, Weapons: one
+  place per rock; the zone; sends to the rock's orbit with a joining
+  window; the holding rule; no scrap; one frame per row at a time;
+  everything visible; range the only fire gate; standings always.
+- DISPLAY Rings, Glyph runs, Fights, Wheel, Sending, Ranges: one ring;
+  stacked glyphs shrink in place; no outer band anywhere; the two range
+  circles.
+
 
 One line per sentence of DESIGN.md, DISPLAY.md or ARCHITECTURE.md the
 code does not yet do, naming the unit that lands it. A brief quotes its
@@ -71,6 +133,28 @@ rock count and ship count set every other number, then measurement
 before any store rewrite, then the screens the owner needs to judge by
 play, then the programme.
 
+1a. One place per rock and no scrap, Opus (sim): `Band` and the outer
+   place go; `Place` is a rock; the zone radius a belt constant; a
+   send's destination the rock's orbit; units re-homed within a window
+   join the forming send; the surplus mark's scrapping and the Build
+   weapon's scrap go; one frame per row at a time in placement order.
+   Critique stop; hash re-baseline.
+1b. Everything visible, Opus (sim, view, display): sight and radar
+   fields, `Sight`, `Radar`, the fog in the view and the radar blips go;
+   fire and the chase gate on range and the zone; standings in every
+   view; the glyph's radar mark goes.
+1c. The holding rule, Opus (sim): `Attractor` and the pair term replaced
+   by one module with per-row constants: wander, soft return past the
+   zone, weak separation, the chase to half range; replaceable whole;
+   in flight schedule plus separation. Design numbers as hypotheses.
+1d. Display follow-through, Sonnet: one ring per rock; stacked glyphs
+   shrink in place with no radial step; the two range circles (the view
+   carries the zone already); the wheel's gap off the one ring re-set;
+   a forming unit drawn where it stands (the view gains the rock a unit
+   stands at; today it shows solid on the destination ring for the
+   half-second the send forms); look scenes re-shot and re-judged.
+   Naming for the holding unit: `Motion::Free` covers standing, forming
+   and flying and reads as flying.
 2. Vectors, Sonnet: the connection's inboxes and both websockets' queues
    gain a stated cap on frame count, past which the connection closes
    (a peer past the cap has broken the protocol); the kept records as a
@@ -79,7 +163,13 @@ play, then the programme.
    `Box<[T]>` and `Box<str>` at the constructor sites the 2026-09-05
    review named (protocol 6, server 9, sim 19, agents 12, game 15).
    The per-frame wheel rebuild joins item 9. Net lines below zero.
-3. The belt and the star, design conversation first, then Opus: map
+   Belt numbers accepted 2026-09-05 (overseer's proposal, owner's yes):
+   one to two hundred rocks in an annulus from the seed with regional cap
+   triples; neighbour spacing near two kilometres, the belt's extent
+   growing with the count; the scale check at two thousand and five
+   thousand ships; the zone radius tens of metres, from the largest force
+   a rock holds at the holding rule's spacing.
+3. The belt and the star, Opus: map
    generation from seed with regional caps; the star as a distant light
    and a disc; the lobby's seed changes the belt; the preview at
    whole-belt zoom. The conversation settles the rock count, the belt's

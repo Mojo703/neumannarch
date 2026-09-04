@@ -1,9 +1,9 @@
 use core::num::NonZeroU32;
 
+use crate::ids::RockId;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::lambert;
 use crate::orbit::universal::propagate;
-use crate::place::Place;
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
@@ -13,7 +13,7 @@ const BURN_SHARE_OF_SPAN: f64 = 0.08;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Flight {
-    source: Place,
+    source: RockId,
     schedule: Schedule,
 }
 
@@ -31,16 +31,28 @@ struct Burn {
 }
 
 impl Flight {
-    pub(crate) fn new(source: Place, schedule: Schedule) -> Flight {
+    pub(crate) fn new(source: RockId, schedule: Schedule) -> Flight {
         Flight { source, schedule }
     }
 
-    pub fn source(self) -> Place {
+    pub fn source(self) -> RockId {
         self.source
+    }
+
+    pub(crate) fn schedule(self) -> Schedule {
+        self.schedule
     }
 
     pub fn arrive(self) -> Tick {
         self.schedule.arrive
+    }
+
+    pub fn departs(self) -> Tick {
+        self.schedule.departs()
+    }
+
+    pub fn has_departed(self, now: Tick) -> bool {
+        self.departs() <= now
     }
 
     pub fn thrust(self, tick: Tick) -> Vec3 {
@@ -80,6 +92,10 @@ impl Schedule {
 
     pub fn arrive(self) -> Tick {
         self.arrive
+    }
+
+    pub fn departs(self) -> Tick {
+        self.burns[0].from
     }
 
     pub(crate) fn thrust(self, tick: Tick) -> Vec3 {
@@ -163,18 +179,21 @@ mod tests {
 
     const LIMIT: f64 = 2.0;
 
-    fn anchor(along: f64) -> Orbit {
+    fn orbit(along: f64) -> Orbit {
         let speed = (MU.mu() / RADIUS).sqrt();
-        let body = Body::new(Vec3::new(RADIUS, 0.0, 0.0), Vec3::new(0.0, 0.0, -speed));
-        Orbit::from_body(body, Tick::ZERO, MU)
-            .expect("a circular orbit")
-            .shifted(along)
+        let turn = along / RADIUS;
+        let (sin, cos) = (libm::sin(turn), libm::cos(turn));
+        let body = Body::new(
+            Vec3::new(RADIUS * cos, 0.0, -RADIUS * sin),
+            Vec3::new(-speed * sin, 0.0, -speed * cos),
+        );
+        Orbit::from_body(body, Tick::ZERO, MU).expect("a circular orbit")
     }
 
     fn transfer(limit: f64, seconds: u64) -> Option<(Schedule, Body, Body)> {
         let arrive = Tick(DEPART.0 + seconds * u64::from(TICKS_PER_SECOND));
-        let source = anchor(0.0).at(DEPART, MU);
-        let target = anchor(2_000.0).at(arrive, MU);
+        let source = orbit(0.0).at(DEPART, MU);
+        let target = orbit(2_000.0).at(arrive, MU);
         Schedule::between(source, target, DEPART, arrive, limit, MU)
             .map(|schedule| (schedule, source, target))
     }
@@ -186,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn a_schedule_flown_tick_by_tick_ends_on_the_destination_anchors_orbit_within_the_tolerance() {
+    fn a_schedule_flown_tick_by_tick_ends_on_the_destination_orbit_within_the_tolerance() {
         let (schedule, source, target) = solved();
 
         let mut body = source;

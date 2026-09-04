@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use probe_sim::state::view::View;
-use probe_sim::{Place, SeatId, TICKS_PER_SECOND, Tick};
+use probe_sim::{RockId, SeatId, TICKS_PER_SECOND, Tick};
 
 use crate::display::scene::Arc;
 
@@ -11,7 +11,7 @@ const FORGET: u64 = 10 * TICKS_PER_SECOND as u64;
 
 #[derive(Clone, Debug, Default)]
 pub struct Fights {
-    fights: BTreeMap<(Place, SeatId), Fight>,
+    fights: BTreeMap<(RockId, SeatId), Fight>,
 }
 
 #[derive(Clone, Debug)]
@@ -25,9 +25,9 @@ struct Fight {
 impl Fights {
     pub fn observe(&mut self, view: &View) {
         let totals = totals(view);
-        let hp_at = |key: &(Place, SeatId)| totals.get(key).copied().unwrap_or(0.0);
+        let hp_at = |key: &(RockId, SeatId)| totals.get(key).copied().unwrap_or(0.0);
         for exchange in &view.exchanges {
-            let key = (exchange.place, exchange.seat);
+            let key = (exchange.rock, exchange.seat);
             self.fights
                 .entry(key)
                 .or_insert_with(|| Fight::new(hp_at(&key), view.tick))
@@ -40,10 +40,10 @@ impl Fights {
             .retain(|_, fight| view.tick.0.saturating_sub(fight.last_shot.0) <= FORGET);
     }
 
-    pub fn arcs(&self) -> impl Iterator<Item = (Place, Arc)> + '_ {
+    pub fn arcs(&self) -> impl Iterator<Item = (RockId, Arc)> + '_ {
         self.fights
             .iter()
-            .filter_map(|((place, seat), fight)| Some((*place, fight.arc(*seat)?)))
+            .filter_map(|((rock, seat), fight)| Some((*rock, fight.arc(*seat)?)))
     }
 }
 
@@ -80,11 +80,11 @@ impl Fight {
     }
 }
 
-fn totals(view: &View) -> BTreeMap<(Place, SeatId), f64> {
-    let mut totals: BTreeMap<(Place, SeatId), f64> = BTreeMap::new();
+fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
+    let mut totals: BTreeMap<(RockId, SeatId), f64> = BTreeMap::new();
     for seen in view.seen.iter().filter(|seen| !seen.flying) {
-        if let Some(place) = seen.home {
-            *totals.entry((place, seen.seat)).or_insert(0.0) += seen.hp;
+        if let Some(rock) = seen.home {
+            *totals.entry((rock, seen.seat)).or_insert(0.0) += seen.hp;
         }
     }
     totals
@@ -96,14 +96,11 @@ mod tests {
     use probe_sim::orbit::Body;
     use probe_sim::state::view::Seen;
     use probe_sim::step::fire::Exchange;
-    use probe_sim::{Band, EntityId, Materials, RockId, RowId, Stockpile, Vec3};
+    use probe_sim::{EntityId, Materials, RockId, RowId, Stockpile, Vec3};
 
     use super::*;
 
-    const PLACE: Place = Place {
-        rock: RockId(0),
-        band: Band::Inner,
-    };
+    const ROCK: RockId = RockId(0);
 
     const SEAT: SeatId = SeatId(0);
 
@@ -123,13 +120,13 @@ mod tests {
                 body: Body::new(Vec3::ZERO, Vec3::ZERO),
                 hp,
                 flying: false,
-                home: Some(PLACE),
+                home: Some(ROCK),
                 from: None,
             }],
             blips: Vec::new(),
             exchanges: match shooting {
                 true => vec![Exchange {
-                    place: PLACE,
+                    rock: ROCK,
                     seat: SEAT,
                     fired: false,
                     landed: true,
@@ -137,6 +134,7 @@ mod tests {
                 false => Vec::new(),
             },
             terrain: Vec::new(),
+            zone: Belt::ZONE_RADIUS_METERS,
             standings: None,
         }
     }

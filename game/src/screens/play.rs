@@ -4,7 +4,7 @@ use mirage_engine::prelude::{FrameCtx, Game};
 use probe_protocol::Lobby;
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
-use probe_sim::{Band, Place, RowId, SeatId, Session, Vec3};
+use probe_sim::{RockId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
@@ -32,13 +32,13 @@ const REPEAT_DELAY: f32 = 1.0 / 3.0;
 const REPEAT_INTERVAL: f32 = 0.1;
 
 struct Drag {
-    from: Place,
+    from: RockId,
     count: u32,
     adjusted: f32,
 }
 
 struct Repeat {
-    place: Place,
+    rock: RockId,
     row: RowId,
     band: WheelBand,
     held: f32,
@@ -65,9 +65,9 @@ enum Gesture {
 }
 
 struct Hovered {
-    slot: Option<(Place, RowId, WheelBand)>,
+    slot: Option<(RockId, RowId, WheelBand)>,
     refused: Option<String>,
-    ring: Option<Place>,
+    ring: Option<RockId>,
 }
 
 #[derive(Default)]
@@ -82,7 +82,7 @@ pub struct Play {
     view: View,
     fights: Fights,
     camera: BeltCamera,
-    selection: Option<Place>,
+    selection: Option<RockId>,
     doing: Mode,
     followed: bool,
     panning: Panning,
@@ -129,7 +129,7 @@ impl Play {
         self.machine.session()
     }
 
-    pub fn selection(&self) -> Option<Place> {
+    pub fn selection(&self) -> Option<RockId> {
         self.selection
     }
 
@@ -161,7 +161,7 @@ impl Play {
         &self.camera
     }
 
-    pub fn rock_pos(&self, rock: probe_sim::RockId) -> Option<Vec3> {
+    pub fn rock_pos(&self, rock: RockId) -> Option<Vec3> {
         self.view
             .terrain
             .iter()
@@ -170,10 +170,10 @@ impl Play {
     }
 
     pub fn wheel(&self, viewport: &Viewport) -> Option<Wheel> {
-        let place = self.selection?;
-        let centre = viewport.point_of(self.rock_pos(place.rock)?)?;
+        let rock = self.selection?;
+        let centre = viewport.point_of(self.rock_pos(rock)?)?;
         Some(Wheel::open(
-            place,
+            rock,
             self.machine.seat(),
             self.machine.session().state().roster(),
             centre,
@@ -313,7 +313,7 @@ impl Play {
         if self.followed {
             return;
         }
-        let Some(place) = self
+        let Some(home) = self
             .view
             .seen
             .iter()
@@ -322,43 +322,30 @@ impl Play {
         else {
             return;
         };
-        if let Some(pos) = self.rock_pos(place.rock) {
+        if let Some(pos) = self.rock_pos(home) {
             self.camera.set_focus(pos);
             self.followed = true;
         }
     }
 
-    fn ring_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<Place> {
+    fn ring_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<RockId> {
         self.view
             .terrain
             .iter()
             .filter_map(|terrain| {
                 let centre = viewport.point_of(self.rock_pos(terrain.rock)?)?;
                 let away = centre.distance(at);
-                let band = if away <= hud::ring_radius(Band::Inner) {
-                    Band::Inner
-                } else if away <= hud::ring_radius(Band::Outer) {
-                    Band::Outer
-                } else {
-                    return None;
-                };
-                Some((
-                    away,
-                    Place {
-                        rock: terrain.rock,
-                        band,
-                    },
-                ))
+                (away <= hud::RING_RADIUS).then_some((away, terrain.rock))
             })
             .min_by(|(a, _), (b, _)| a.total_cmp(b))
-            .map(|(_, place)| place)
+            .map(|(_, rock)| rock)
     }
 
-    fn wanted(&self, place: Place, row: RowId) -> u32 {
+    fn wanted(&self, rock: RockId, row: RowId) -> u32 {
         self.view
             .compositions
             .iter()
-            .filter(|composition| composition.place == place)
+            .filter(|composition| composition.rock == rock)
             .flat_map(|composition| &composition.rows)
             .find(|wanted| wanted.row == row)
             .map_or(0, |wanted| wanted.want)
@@ -401,10 +388,10 @@ impl Play {
         let aimed_at = aimed.and_then(|wheel| {
             wheel
                 .slot_at(at)
-                .map(|(row, band)| (wheel.place(), row, band))
+                .map(|(row, band)| (wheel.rock(), row, band))
         });
         let refused = aimed_at
-            .map(|(place, row, band)| self.band_rule(place, row, band))
+            .map(|(rock, row, band)| self.band_rule(rock, row, band))
             .and_then(|rule| rule.why().map(str::to_string));
         Hovered {
             slot: aimed_at.filter(|_| refused.is_none()),
@@ -439,8 +426,8 @@ impl Play {
         if let Gesture::Editing(holding) = &mut gesture
             && holding.repeats(slot, dt)
         {
-            let (place, row, band) = (holding.place, holding.row, holding.band);
-            self.edit(place, row, band);
+            let (rock, row, band) = (holding.rock, holding.row, holding.band);
+            self.edit(rock, row, band);
         }
 
         let hover = match (&gesture, slot) {
@@ -451,18 +438,22 @@ impl Play {
                     count: drag.count,
                 })
             }),
-            (_, Some((place, row, band))) => Some(Hover::Wheel { place, row, band }),
+            (_, Some((rock, row, band))) => Some(Hover::Wheel { rock, row, band }),
             (Gesture::Still | Gesture::Editing(_), None) => None,
         };
         (gesture, Preview { hover, refused })
     }
 
-    fn pressed(&mut self, slot: Option<(Place, RowId, WheelBand)>, ring: Option<Place>) -> Gesture {
+    fn pressed(
+        &mut self,
+        slot: Option<(RockId, RowId, WheelBand)>,
+        ring: Option<RockId>,
+    ) -> Gesture {
         match (slot, ring) {
-            (Some((place, row, band)), _) => {
-                self.edit(place, row, band);
+            (Some((rock, row, band)), _) => {
+                self.edit(rock, row, band);
                 Gesture::Editing(Repeat {
-                    place,
+                    rock,
                     row,
                     band,
                     held: 0.0,
@@ -481,7 +472,7 @@ impl Play {
         }
     }
 
-    fn released(&mut self, gesture: Gesture, ring: Option<Place>) -> Gesture {
+    fn released(&mut self, gesture: Gesture, ring: Option<RockId>) -> Gesture {
         if let Gesture::Sending(drag) = gesture {
             match ring {
                 Some(to) if to != drag.from => {
@@ -495,28 +486,28 @@ impl Play {
                         self.issue(command);
                     }
                 }
-                Some(place) => self.focuses(place),
+                Some(rock) => self.focuses(rock),
                 None => {}
             }
         }
         Gesture::Still
     }
 
-    fn focuses(&mut self, place: Place) {
-        self.selection = Some(place);
-        if let Some(pos) = self.rock_pos(place.rock) {
+    fn focuses(&mut self, rock: RockId) {
+        self.selection = Some(rock);
+        if let Some(pos) = self.rock_pos(rock) {
             self.camera.set_focus(pos);
             self.followed = true;
         }
     }
 
-    fn edit(&mut self, place: Place, row: RowId, band: WheelBand) {
-        let command = band.edit(place, row, self.wanted(place, row));
+    fn edit(&mut self, rock: RockId, row: RowId, band: WheelBand) {
+        let command = band.edit(rock, row, self.wanted(rock, row));
         self.issue(command);
     }
 
-    fn band_rule(&self, place: Place, row: RowId, band: WheelBand) -> Rule {
-        let wanted = self.wanted(place, row);
+    fn band_rule(&self, rock: RockId, row: RowId, band: WheelBand) -> Rule {
+        let wanted = self.wanted(rock, row);
         match band {
             WheelBand::Plus => Rule::only_if(
                 wanted < probe_sim::state::MAX_WANT,
@@ -559,8 +550,8 @@ impl Drag {
 }
 
 impl Repeat {
-    fn repeats(&mut self, slot: Option<(Place, RowId, WheelBand)>, dt: f32) -> bool {
-        if slot != Some((self.place, self.row, self.band)) {
+    fn repeats(&mut self, slot: Option<(RockId, RowId, WheelBand)>, dt: f32) -> bool {
+        if slot != Some((self.rock, self.row, self.band)) {
             return false;
         }
         self.held += dt;
@@ -573,7 +564,6 @@ impl Repeat {
 #[cfg(test)]
 mod tests {
     use probe_protocol::{Lobby, PlayerId};
-    use probe_sim::{Band, RockId};
 
     use super::*;
     use crate::net::local::Local;
@@ -586,10 +576,7 @@ mod tests {
             .run_by(PlayerId::HOST)
             .expect("the host holds a seat");
         let mut play = Play::of(lobby, Machine::of(started, &crew, &mut Local));
-        let from = Place {
-            rock: RockId(0),
-            band: Band::Inner,
-        };
+        let from = RockId(0);
         play.doing = Mode::Playing {
             gesture: Gesture::Sending(Drag {
                 from,
@@ -599,10 +586,7 @@ mod tests {
             preview: Preview {
                 hover: Some(Hover::Send(Sending {
                     from,
-                    to: Place {
-                        rock: RockId(1),
-                        band: Band::Inner,
-                    },
+                    to: RockId(1),
                     count: 1,
                 })),
                 refused: None,

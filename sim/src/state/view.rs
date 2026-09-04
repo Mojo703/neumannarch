@@ -4,11 +4,12 @@ use super::State;
 use super::radar::Radar;
 use super::schedule::Flight;
 use super::sight::Sight;
+use crate::belt::Belt;
 use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
-use crate::place::{Place, Post};
+use crate::post::Post;
 use crate::roster::MassClass;
 use crate::state::standings::Standings;
 use crate::step::fire::{Exchange, Shots};
@@ -22,8 +23,8 @@ pub struct Seen {
     pub body: Body,
     pub hp: f64,
     pub flying: bool,
-    pub home: Option<Place>,
-    pub from: Option<Place>,
+    pub home: Option<RockId>,
+    pub from: Option<RockId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,13 +52,13 @@ pub struct Wanted {
     pub row: RowId,
     pub want: u32,
     pub present: u32,
-    pub flying: u32,
+    pub transit: u32,
     pub frames: Vec<Building>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composition {
-    pub place: Place,
+    pub rock: RockId,
     pub rows: Vec<Wanted>,
 }
 
@@ -74,6 +75,7 @@ pub struct View {
     pub blips: Vec<Blip>,
     pub exchanges: Vec<Exchange>,
     pub terrain: Vec<Terrain>,
+    pub zone: f64,
     pub standings: Option<Standings>,
 }
 
@@ -97,6 +99,7 @@ impl View {
             blips: blips(state, &Radar::beyond(state, seat, &sweep, &sight)),
             exchanges: shots.exchanges(state, &sight),
             terrain: terrain(state),
+            zone: Belt::ZONE_RADIUS_METERS,
             standings: Some(state.standings()).filter(Standings::over),
         }
     }
@@ -109,11 +112,6 @@ impl View {
         self.terrain_of(id)
             .map(|terrain| terrain.orbit.at(self.tick, self.gravity))
     }
-
-    pub fn anchor(&self, place: Place) -> Option<Orbit> {
-        self.terrain_of(place.rock)
-            .map(|terrain| terrain.orbit.shifted(place.band.amplitude()))
-    }
 }
 
 fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
@@ -121,7 +119,7 @@ fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
         .posts()
         .filter(|(post, _)| post.seat == seat)
         .map(|(post, wants)| Composition {
-            place: post.place,
+            rock: post.rock,
             rows: wants
                 .iter()
                 .map(|(row, want)| wanted(state, post, row, want))
@@ -136,7 +134,7 @@ fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
         row,
         want,
         present: held.present,
-        flying: held.flying,
+        transit: held.transit,
         frames: state
             .frames_at(post)
             .filter(|frame| frame.row() == row)
@@ -160,8 +158,8 @@ fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
                 row: entity.row(),
                 body: state.body_of(entity),
                 hp: entity.hp(),
-                flying: entity.is_flying(),
-                home: (!entity.is_flying() || own).then(|| entity.home()),
+                flying: entity.is_flying(state.tick()),
+                home: (!entity.is_flying(state.tick()) || own).then(|| entity.home()),
                 from: entity.flight().filter(|_| own).map(Flight::source),
             }
         })
@@ -197,10 +195,9 @@ fn terrain(state: &State) -> Vec<Terrain> {
 mod tests {
     use super::*;
     use crate::ids::TeamId;
-    use crate::place::Band;
     use crate::roster::{FRIGATE, SHIPYARD, STORAGE};
     use crate::setup::Setup;
-    use crate::state::{Batch, Command, Issued, Motion};
+    use crate::state::{Batch, Command, Issued, Motion, Send};
     use crate::step::fire::Fire;
 
     fn quiet(state: &State, seat: SeatId) -> View {
@@ -226,37 +223,34 @@ mod tests {
         next
     }
 
-    fn want(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
+    fn want(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
-            command: Command::Want { place, row, count },
+            command: Command::Want { rock, row, count },
         }
     }
 
-    fn inner(rock: u32) -> Place {
-        Place {
-            rock: RockId(rock),
-            band: Band::Inner,
-        }
+    fn rock(at: u32) -> RockId {
+        RockId(at)
     }
 
     #[test]
     fn a_view_holds_the_seats_own_posts_and_no_others() {
         let mut state = state();
-        state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
+        state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
         let state = tick(
             &state,
             &[
-                want(0, 0, inner(0), FRIGATE, 2),
-                want(1, 0, inner(5), FRIGATE, 3),
+                want(0, 0, rock(0), FRIGATE, 2),
+                want(1, 0, rock(5), FRIGATE, 3),
             ],
         );
 
         let view = quiet(&state, SeatId(0));
 
         assert_eq!(view.compositions.len(), 1);
-        assert_eq!(view.compositions[0].place, inner(0));
+        assert_eq!(view.compositions[0].rock, rock(0));
         assert_eq!(view.compositions[0].rows[0].row, FRIGATE);
         assert_eq!(view.compositions[0].rows[0].want, 2);
         assert_eq!(view.compositions[0].rows[0].present, 0);
@@ -267,9 +261,9 @@ mod tests {
     #[test]
     fn a_view_holds_what_the_seat_sees_and_leaves_out_what_it_does_not() {
         let mut state = state();
-        let mine = state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
-        let near = state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
-        let far = state.spawn(SeatId(1), STORAGE, inner(9), Motion::Fixed);
+        let mine = state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
+        let near = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
+        let far = state.spawn(SeatId(1), STORAGE, rock(9), Motion::Fixed);
 
         let view = quiet(&state, SeatId(0));
         let seen: Vec<EntityId> = view.seen.iter().map(|seen| seen.entity).collect();
@@ -294,13 +288,13 @@ mod tests {
     fn a_radar_contact_carries_a_mass_class_and_no_row() {
         let mut state = state();
 
-        let watcher = state.spawn(SeatId(0), crate::roster::SCOUT, inner(0), Motion::Fixed);
+        let watcher = state.spawn(SeatId(0), crate::roster::SCOUT, rock(0), Motion::Fixed);
         let body = state.body_of(&state[watcher]);
         let heavy = Motion::Free {
             body: Body::new(body.pos + crate::Vec3::new(30.0, 0.0, 0.0), body.vel),
             flight: None,
         };
-        state.spawn(SeatId(1), FRIGATE, inner(0), heavy);
+        state.spawn(SeatId(1), FRIGATE, rock(0), heavy);
 
         let view = quiet(&state, SeatId(0));
 
@@ -350,42 +344,25 @@ mod tests {
     }
 
     #[test]
-    fn a_view_reads_a_rock_and_an_anchor_by_id() {
+    fn a_view_reads_a_rock_by_id() {
         let state = state();
-        let place = Place {
-            rock: RockId(4),
-            band: Band::Outer,
-        };
+        let at = rock(4);
 
         let view = quiet(&state, SeatId(0));
 
-        assert_eq!(
-            view.terrain_of(place.rock).map(|rock| rock.rock),
-            Some(place.rock)
-        );
-        assert_eq!(
-            view.rock_body(place.rock),
-            Some(state.rock_body(place.rock))
-        );
-        assert_eq!(view.anchor(place), Some(state.anchor(place)));
+        assert_eq!(view.terrain_of(at).map(|rock| rock.rock), Some(at));
+        assert_eq!(view.rock_body(at), Some(state.rock_body(at)));
         assert_eq!(view.terrain_of(RockId(99)), None);
         assert_eq!(view.rock_body(RockId(99)), None);
-        assert_eq!(
-            view.anchor(Place {
-                rock: RockId(99),
-                ..place
-            }),
-            None
-        );
     }
 
     #[test]
     fn a_flying_units_home_is_its_destination_and_an_enemys_is_hidden() {
         let mut state = state();
-        state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
+        state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
 
-        let mine = state.spawn(SeatId(0), FRIGATE, inner(0), holding(&state, inner(0)));
-        let theirs = state.spawn(SeatId(1), FRIGATE, inner(0), holding(&state, inner(0)));
+        let mine = state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
+        let theirs = state.spawn(SeatId(1), FRIGATE, rock(0), holding(&state, rock(0)));
         let state = sent(state, &[(0, mine), (1, theirs)]);
 
         let view = quiet(&state, SeatId(0));
@@ -393,7 +370,7 @@ mod tests {
 
         let mine = of(mine).expect("a seat sees its own unit");
         assert!(mine.flying);
-        assert_eq!(mine.home, Some(inner(1)), "its own send names where to");
+        assert_eq!(mine.home, Some(rock(1)), "its own send names where to");
         let theirs = of(theirs).expect("the enemy is at the same rock");
         assert!(theirs.flying);
         assert_eq!(
@@ -403,10 +380,10 @@ mod tests {
     }
 
     #[test]
-    fn a_holding_entity_names_its_place_whoever_owns_it() {
+    fn a_holding_entity_names_its_rock_whoever_owns_it() {
         let mut state = state();
-        let mine = state.spawn(SeatId(0), SHIPYARD, inner(0), Motion::Fixed);
-        let theirs = state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
+        let mine = state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
+        let theirs = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
 
         let view = quiet(&state, SeatId(0));
 
@@ -416,15 +393,15 @@ mod tests {
                 .iter()
                 .find(|seen| seen.entity == id)
                 .expect("both are at the seat's own rock");
-            assert_eq!(seen.home, Some(inner(0)));
+            assert_eq!(seen.home, Some(rock(0)));
         }
     }
 
     #[test]
-    fn an_exchange_names_the_place_the_shooter_fired_from_and_the_target_was_hit_at() {
+    fn an_exchange_names_the_rock_the_shooter_fired_from_and_the_target_was_hit_at() {
         let mut state = state();
-        let shooter = state.spawn(SeatId(0), FRIGATE, inner(0), holding(&state, inner(0)));
-        let target = state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
+        let shooter = state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
+        let target = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
         let shots = Fire::of(&state).run();
         assert!(
             shots
@@ -440,13 +417,13 @@ mod tests {
             view.exchanges,
             vec![
                 Exchange {
-                    place: inner(0),
+                    rock: rock(0),
                     seat: SeatId(0),
                     fired: true,
                     landed: false,
                 },
                 Exchange {
-                    place: inner(0),
+                    rock: rock(0),
                     seat: SeatId(1),
                     fired: false,
                     landed: true,
@@ -460,9 +437,9 @@ mod tests {
         let setup =
             Setup::new(vec![TeamId(0), TeamId(1), TeamId(2)], 0, Tick(1_000)).expect("three seats");
         let mut state = State::start(&setup);
-        state.spawn(SeatId(0), FRIGATE, inner(0), holding(&state, inner(0)));
-        state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
-        state.spawn(SeatId(2), STORAGE, inner(9), Motion::Fixed);
+        state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
+        state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
+        state.spawn(SeatId(2), STORAGE, rock(9), Motion::Fixed);
         let shots = Fire::of(&state).run();
         assert!(!shots.hits.is_empty(), "the fight happened");
 
@@ -471,9 +448,9 @@ mod tests {
         assert!(view.exchanges.is_empty());
     }
 
-    fn holding(state: &State, place: Place) -> Motion {
+    fn holding(state: &State, at: RockId) -> Motion {
         Motion::Free {
-            body: state.anchor(place).at(state.tick(), state.gravity()),
+            body: state.rock_body(at),
             flight: None,
         }
     }
@@ -484,11 +461,15 @@ mod tests {
             .flat_map(|(seat, entity)| {
                 let row = state[*entity].row();
                 [
-                    want(*seat, 0, inner(0), row, 0),
-                    want(*seat, 1, inner(1), row, 1),
+                    want(*seat, 0, rock(0), row, 0),
+                    want(*seat, 1, rock(1), row, 1),
                 ]
             })
             .collect();
-        tick(&state, &issued)
+        let mut state = tick(&state, &issued);
+        for _ in 0..=Send::FORMING_TICKS {
+            state = tick(&state, &[]);
+        }
+        state
     }
 }

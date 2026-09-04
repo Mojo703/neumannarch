@@ -4,7 +4,10 @@ The rules of the game, as the target. This document is the authority on what
 the simulation computes; ARCHITECTURE.md is the authority on how the code is
 shaped, DISPLAY.md on what the player sees. Where this document is silent,
 prefer the reading that adds no new type, field, or rule. Numbers live in the
-roster in `sim`, never here.
+roster in `sim`, never here. Distances are metres, times seconds and
+rates per second throughout. The roster is the table of rows a match is
+played with; a row is one kind of entity, a ship or a structure, with its
+stats; a want is a count of a row a player asks for at a rock.
 
 ## Pillars
 
@@ -15,7 +18,7 @@ roster in `sim`, never here.
    does is a client gesture that issues that verb.
 3. **Emergent, deterministic outcomes.** Counters and roles come from stats
    and geometry, never from tables of types. No randomness.
-4. **Short matches.** A match ends at the clock, about fifteen minutes.
+4. **Short matches.** A match ends at the clock, minutes rather than hours.
 5. **Two to four players in any team shape.** One against one is the balance
    baseline; four-player free-for-all is a mode.
 
@@ -25,11 +28,11 @@ roster in `sim`, never here.
   player with a structure there; ties break by total army value. A side
   with no entities and an empty reserve is out before the clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
-  count per row, of one shipyard and one constructor. The first wants place
-  them; where a player starts is theirs to choose and hidden until seen.
-- Teammates share sight and nothing else. A player edits only their own
+  count per row, of one shipyard and one constructor. The player's first
+  wants place them at a rock of the player's choosing.
+- Teammates share nothing but a side. A player edits only their own
   compositions.
-- Agents play through the same fogged view and the same verb as humans.
+- Agents play through the same view and the same verb as humans.
   A bot holds a seat like a player and is run by the machine of the
   player who added it.
 - Every machine runs the whole match. A command takes effect at the tick
@@ -88,11 +91,10 @@ HP, and its home rock.
 
 | field | notes |
 |---|---|
-| mass | radar reveals it roughly |
+| mass | right of way in separation |
 | manoeuvring | the manoeuvring limit, far below the movement limit; zero for structures and rocks |
 | HP | |
 | plating | flat damage reduction per hit |
-| sight, radar | detection ranges |
 | weapons | see Weapons |
 | cost | a material triple |
 | capacity | stockpile capacity contributed, per material |
@@ -113,10 +115,9 @@ Every weapon has a kind, and each kind carries its own fields.
 
 - **Damage.** Hitscan, with a range, a rate, a damage, and a falloff that
   reduces damage with distance. Plating is subtracted per hit.
-- **Build.** Spends stockpile at `rate` toward frames at its home rock;
-  repairs damaged friendlies there; scraps surplus there at `rate` with
-  full refund. Scrap is work. It has no range: a builder reaches everything
-  at its own rock and nothing elsewhere.
+- **Build.** Spends stockpile at `rate` toward frames at its home rock and
+  repairs damaged friendlies there. Its reach is the rock's zone: a
+  builder reaches everything inside it and nothing elsewhere.
 - **Extract.** Pulls up to `rate` of each material from its home rock. The
   rock's cap per material is the ceiling: at the cap, it is split equally
   among the extractors there, and any share an extractor cannot use is
@@ -128,16 +129,16 @@ and splits evenly across the frames at their rock. Nothing is reserved. A
 frame is slowed only by the materials it needs, in proportion to what the
 stockpile covers, and resumes as income arrives. Spend never exceeds the
 work a frame has left. Lowering a count cancels frames and refunds what they
-consumed. Build targets: shortfalls, then scrap, then repair. A completed
+consumed. Build targets: shortfalls, then repair. A completed
 frame becomes an entity at the rock: a structure at the rock's state, a
-unit at its place's anchor, offset along the rock's radial direction by one
-spacing (Movement and combat) per unit already there, so no two spawn
+unit at its rock's position, offset along the rock's radial direction by
+one spacing (Movement and combat) per unit already there, so no two spawn
 coincident.
 
-**Target selection is by threat.** A weapon fires at the enemy in range that
-the player can see with the highest DPS through the shooter's plating per
-point of its HP; ties by nearest, then lowest id. Fire requires sight, never
-radar. Fire is never gated by the leash.
+**Target selection is by threat.** A weapon fires at the enemy in range
+with the highest damage per second through the shooter's plating per
+point of its HP;
+ties by nearest, then lowest id. Range is the only gate.
 
 **Shots resolve in order.** Every weapon carries the instant it is next
 ready. Within a tick, shots resolve in ready-time order, then shooter id,
@@ -150,99 +151,86 @@ acts this tick.
 
 ## Compositions
 
-A place is a rock's inner band or its outer band. A composition is a
-player's want at a place: a count per row. Each place holds at most one
-composition per player. The verb sets one count.
+A place is a rock. A composition is a player's want at a place: a count
+per row. Each place holds at most one composition per player. The verb
+sets one count.
 
 - Every entity belongs to one place, its home. A unit in transit counts
-  toward its home. Structures exist only in inner bands.
+  toward its home.
 - **Reserve.** A shortfall is filled from the player's reserve before
   anything else: the entity appears at the place, complete, at once.
 - **Surplus.** When a place has more of a row than its want, the
-  highest-indexed units of that row there are surplus. A shortfall of that
-  row, places taken in order of rock then band then player, is filled from
-  the nearest surplus, rock to rock as of that tick, ties by lowest rock;
-  a surplus unit assigned to a place cancels that place's least-progressed
-  frame of its row, refunded. Surplus with no shortfall anywhere is marked
-  surplus and scrapped by a builder at its place. Structures never move; a
-  surplus structure is scrapped.
+  highest-indexed units of that row there are surplus. Shortfalls are
+  filled in order of rock then player. Each is filled from the nearest
+  surplus, rock to rock as of that tick, ties by lowest rock. A surplus
+  unit sent to a shortfall cancels that place's least-progressed frame of
+  the same row and refunds it. Surplus with no shortfall anywhere stays
+  where it is, complete, until a shortfall wants it. Nothing complete is
+  ever scrapped or refunded; a structure stays until it is destroyed.
 - **Shortfall.** When a place wants more of a row than it has, counting
   units there and in transit and never frames, and neither the reserve nor
   a surplus of that row anywhere can fill it, frames open at that place for
-  builders at that rock to fill.
+  builders at that rock to fill, one frame of a row at a time; rows build
+  in parallel.
 - A unit's home changes only by the surplus rule.
 - A composition with no want, no units, and no frames does not exist.
 
 ## Movement and combat
 
-- **Anchors.** Every place has an anchor: the rock's orbit shifted along
-  that orbit, ahead of the rock along its motion, by the band's amplitude,
-  a distance. An anchor is an orbit: at any tick it gives a position and a
-  velocity. It is never an entity and never drawn. All seats at a place
-  share its anchor.
+- **The zone.** Every rock has a zone: the region within one radius of
+  it, the same radius for every rock, one constant of the belt. A unit at
+  a rock holds inside the zone, a builder reaches
+  everything inside it, a unit chases any enemy inside it, and the
+  display draws it. Zones are small against the spacing of rocks, so no
+  two overlap.
 - **Sends.** Units re-homed in one tick from one place to another make one
-  send. A send is one schedule of thrust, solved when the send begins: a
-  sequence of thrusts, one per tick, each within the movement limit,
-  whose integration by the sim's own propagation carries a ship from the
-  source anchor's orbit to the destination anchor's orbit at the arrival
-  tick, to within a stated tolerance. A schedule exists at an arrival
-  tick when its burns fit the span with a stated margin and its
-  integration meets the tolerance. The arrival tick is the earliest at
-  which a schedule exists. A schedule departs on the tick after the send
-  is issued, the first tick its ships thrust on. Every ship of the send
+  send; units re-homed within a stated window of ticks join the send that
+  is forming. A send is one schedule of thrust, solved when the send
+  begins: a sequence of thrusts, one per tick, each within the movement
+  limit, whose integration by the sim's own propagation carries a ship
+  from the source rock's orbit to the destination rock's orbit at the
+  arrival tick, to within a stated tolerance in position and in speed. A
+  schedule exists at an arrival tick when its burns together take at most
+  a stated share of the span and its integration meets the tolerance. The arrival tick is the earliest at
+  which a schedule exists. A schedule departs on the tick after the send's
+  window closes, the first tick its ships thrust on. Every ship of the send
   departs at once and flies the one schedule, so their offsets from each
-  other at departure are carried to arrival. A unit is flying from the tick it joins a send until its
-  schedule ends, when it is on its destination anchor's orbit and holds
-  there. The tolerance is the schedule's: a ship flying in company ends
-  off its schedule by what the separation term added in flight, and
-  holds onto the anchor afterwards as any unit does.
-- **The attractor.** Each tick every unit has one attractor, a position and
-  a velocity, the first of these that applies: nothing, while it flies a
-  schedule, when manoeuvring serves separation alone; the point at half
-  its longest weapon range from the nearest enemy its seat can see inside
-  the leash, on the line from that enemy toward the ship, moving at that
-  enemy's velocity; otherwise its home anchor. It never retreats. Radar
-  contacts are not chased.
-- **Manoeuvring.** Each tick a unit thrusts once, within its manoeuvring
-  limit, by the sum of two terms. The first is a pull to its attractor,
-  proportional to the offset from the unit's position to the attractor's
-  and to the difference between the unit's velocity and the attractor's.
-  The second is one term per ship of any seat nearer than the cutoff,
-  along the line between the two. Two distances, the spacing and the
-  cutoff, are constants of the rule. Below the spacing the term pushes the
-  pair apart, strongest at half the spacing. Between the spacing and the
-  cutoff it pulls them together, strongest halfway, and never as hard as it
-  pushes, so a crowd cannot compress itself. It is zero at the spacing, at
-  the cutoff, and beyond the cutoff, and it is zero where the two coincide,
-  since there is no line between them.
-- **Right of way.** A pair's term is one magnitude for the pair, split
-  between the two by mass: each ship's share is the other ship's mass over
-  the pair's total mass, so the lighter ship moves more. The manoeuvring
-  limit then caps what a ship can do about being pushed, so a heavy row
-  with a low limit holds its line and a light row gives way.
+  other and from the rock at departure are carried to arrival: a force
+  that leaves spread through its zone arrives spread through the
+  destination's. While its send forms a unit stands at its rock, a
+  shooter and a target there, and is counted toward its destination. A
+  unit is flying from the tick its schedule departs until it ends. The tolerance is the schedule's. Separation in flight
+  can push a ship in company off its schedule by arrival, and it holds
+  from wherever it ends.
+- **Holding.** At its rock a unit moves by the holding rule. Each tick it
+  sums four steering terms and thrusts by the sum, capped at its row's
+  manoeuvring limit. The constants of every term are the row's. Wander: a
+  held force drifts through the zone and never sits still. Return: a pull
+  back that grows with distance outside the zone, so the zone is a soft
+  edge. Separation: a weak push from any ship of any seat nearer than the
+  row's spacing, the distance a pair settles at; weak, since space is
+  large. Chase: a pull toward the nearest enemy inside the zone, to half
+  the unit's longest weapon range from it, holding there. A unit chases
+  the nearest enemy and fires by threat, which may be a different one.
+  The rule is one module and is replaceable whole. In flight a unit
+  thrusts by its schedule and by separation alone.
 - A flying unit is neither a shooter nor a target: battles happen at
   rocks.
-- The leash is the unit's sight, measured from its home anchor.
-- The outer anchor sits farther ahead of the rock than the inner anchor by
-  more than the longest weapon range plus twice the cutoff, so no ship
-  holding in the outer band fights a ship holding in the inner band. Band
-  amplitudes, weapon ranges and the cutoff are small against the spacing of
-  rocks, so no two rocks' bands overlap.
 
-## Fog
+## Visibility
 
-Per player, from the union of their sensors. **Sight** is exact. **Radar**
-gives position, velocity, and rough mass. **Terrain** is every rock, its
-orbit, its caps, and all its future positions, always. Sight is shared
-across a player's entities. The standings are revealed at the clock and
-never before; until then a player knows of another side's rocks and army
-only what sight and radar have shown.
+Everything is visible to every player always: every entity, its row, its
+seat, its position and velocity, every rock with its orbit, its caps and
+all its future positions, and the standings. The standings at any tick
+are what the win rule would decide were the clock now: per side, the
+rocks held, the army value and whether it is still in. Nothing is hidden
+and nothing is remembered, since there is nothing to remember.
 
 ## Build order
 
 1. The display language over synthetic scenes (DISPLAY.md).
 2. The headless sim: roster, orbits, the verb, reserve, surplus and
-   shortfall, anchors and flights, manoeuvring, fire, fog.
+   shortfall, sends, holding, fire.
 3. The playable on the engine over the sim's view.
 4. A scripted agent and the balance harness.
 5. Map generation from seed with regional caps.
@@ -256,9 +244,7 @@ Not rules. Each is a hypothesis the harness confirms or kills.
   force?
 - Does a drifting map force contact, or does turtling win?
 - Does "nearest shortfall" surprise the player often enough to matter?
-- Does a force staged in the outer band get ambushed there, and is that
-  good?
-- What band amplitudes and weapon ranges read well in the densest regions?
+- What zone radius and weapon ranges read well in the densest regions?
 - Do plating and falloff give enough counters without a matrix?
 - Do regional caps make three materials distinct?
 - Do outcomes hold when the tick rate is doubled?

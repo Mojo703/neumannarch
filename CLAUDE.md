@@ -73,7 +73,7 @@ off on without comments.
   boot-time failure, or listed in ARCHITECTURE.md's Invariants with the
   shape change that would delete it. A documented hole is still a hole.
 - No dead code, no placeholder stubs (an architecture-required item may
-  land before its driver, but with a real body and documented contract),
+  land before its driver, but with a real body and a test of its contract),
   no `#[allow]`, no commented-out code.
 - Small single-purpose modules; `pub(crate)` by default, `pub` only for the
   documented surface.

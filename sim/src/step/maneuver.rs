@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{EntityId, SeatId};
+use crate::ids::{EntityId, RockId, SeatId};
 use crate::orbit::body::Body;
-use crate::place::Place;
 use crate::state::sweep::Sweep;
 use crate::state::{Attractor, Entity, Motion, Sight, State};
 use crate::time::Tick;
@@ -49,14 +48,14 @@ impl<'a> Maneuver<'a> {
         }
     }
 
-    pub fn spawn_body(state: &State, place: Place, tick: Tick) -> Body {
-        let anchor = state.anchor(place).at(tick, state.gravity());
+    pub fn spawn_body(state: &State, rock: RockId, tick: Tick) -> Body {
+        let home = state[rock].orbit().at(tick, state.gravity());
         let already = state
-            .entities_at(place)
+            .standing_at(rock)
             .filter(|entity| entity.motion() != Motion::Fixed)
             .count();
-        let radial = anchor.pos.normalized().unwrap_or(Vec3::ZERO);
-        Body::new(anchor.pos + radial * (SPACING * already as f64), anchor.vel)
+        let radial = home.pos.normalized().unwrap_or(Vec3::ZERO);
+        Body::new(home.pos + radial * (SPACING * already as f64), home.vel)
     }
 
     pub fn run(self) -> Thrusts {
@@ -138,22 +137,16 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::ids::{RockId, TeamId};
+    use crate::ids::TeamId;
     use crate::materials::Materials;
     use crate::orbit::body::Gravity;
     use crate::orbit::elements::Orbit;
-    use crate::place::Band;
     use crate::roster::{FRIGATE, Roster};
     use crate::state::{Rock, Seat};
 
     const MU: Gravity = Gravity::new(4.0e13);
 
-    fn place() -> Place {
-        Place {
-            rock: RockId(0),
-            band: Band::Inner,
-        }
-    }
+    const ROCK: RockId = RockId(0);
 
     fn state() -> State {
         let radius = 1.0e7;
@@ -173,20 +166,20 @@ mod tests {
     #[test]
     fn each_unit_spawns_one_spacing_further_out_than_the_last() {
         let mut state = state();
-        let anchor = state.anchor(place()).at(state.tick(), MU);
-        let radial = anchor.pos.normalized().expect("a radius");
+        let home = state.rock_body(ROCK);
+        let radial = home.pos.normalized().expect("a radius");
         for already in 0..3 {
-            let spawn = Maneuver::spawn_body(&state, place(), state.tick());
-            let expected = anchor.pos + radial * (SPACING * f64::from(already));
+            let spawn = Maneuver::spawn_body(&state, ROCK, state.tick());
+            let expected = home.pos + radial * (SPACING * f64::from(already));
             assert!(
                 spawn.pos.distance(expected) < 1e-9,
                 "unit {already} spawns at {spawn:?}"
             );
-            assert_eq!(spawn.vel, anchor.vel);
+            assert_eq!(spawn.vel, home.vel);
             state.spawn(
                 SeatId(0),
                 FRIGATE,
-                place(),
+                ROCK,
                 Motion::Free {
                     body: spawn,
                     flight: None,
@@ -196,13 +189,12 @@ mod tests {
     }
 
     #[test]
-    fn a_structure_at_the_place_does_not_move_a_spawn() {
+    fn a_structure_at_the_rock_does_not_move_a_spawn() {
         let mut state = state();
-        state.spawn(SeatId(0), FRIGATE, place(), Motion::Fixed);
-        let anchor = state.anchor(place()).at(state.tick(), MU);
+        state.spawn(SeatId(0), FRIGATE, ROCK, Motion::Fixed);
         assert_eq!(
-            Maneuver::spawn_body(&state, place(), state.tick()).pos,
-            anchor.pos
+            Maneuver::spawn_body(&state, ROCK, state.tick()).pos,
+            state.rock_body(ROCK).pos
         );
     }
 

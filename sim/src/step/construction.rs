@@ -10,13 +10,6 @@ pub struct Construction<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Scrapping {
-    pub entity: EntityId,
-    pub units: f64,
-    pub completed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Repair {
     pub entity: EntityId,
     pub hp: f64,
@@ -25,7 +18,6 @@ pub struct Repair {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Progress {
     pub spends: Vec<Spend>,
-    pub scrapping: Vec<Scrapping>,
     pub repairs: Vec<Repair>,
 }
 
@@ -42,7 +34,6 @@ impl<'a> Construction<'a> {
             for rock in self.rocks_of(seat) {
                 let rates = self.builders(seat, rock);
                 let left = self.build(&mut progress, seat, rock, &rates, dt, &mut stockpile);
-                let left = self.scrap(&mut progress, seat, rock, left);
                 self.repair(&mut progress, seat, rock, left);
             }
         }
@@ -66,7 +57,7 @@ impl<'a> Construction<'a> {
             .state
             .entities()
             .filter(|entity| entity.seat() == seat && self.rate_of(entity) > 0.0)
-            .map(|entity| entity.home().rock)
+            .filter_map(|entity| entity.standing(self.state.tick()))
             .collect();
         rocks.sort_unstable();
         rocks.dedup();
@@ -75,14 +66,14 @@ impl<'a> Construction<'a> {
 
     fn builders(&self, seat: SeatId, rock: RockId) -> Vec<f64> {
         self.state
-            .entities_at_rock(rock)
-            .filter(|entity| entity.seat() == seat && !entity.is_flying())
+            .standing_at(rock)
+            .filter(|entity| entity.seat() == seat)
             .flat_map(|entity| self.state[entity.row()].builds())
             .collect()
     }
 
     fn rate_of(&self, entity: &Entity) -> f64 {
-        if entity.is_flying() {
+        if entity.is_flying(self.state.tick()) {
             return 0.0;
         }
         self.state[entity.row()].builds().sum()
@@ -126,36 +117,11 @@ impl<'a> Construction<'a> {
         unused + spare
     }
 
-    fn scrap(&self, progress: &mut Progress, seat: SeatId, rock: RockId, effort: f64) -> f64 {
-        let surplus: Vec<&Entity> = self
-            .state
-            .entities_at_rock(rock)
-            .filter(|entity| entity.seat() == seat && entity.is_surplus())
-            .collect();
-        if surplus.is_empty() || effort <= 0.0 {
-            return effort;
-        }
-        let share = effort / surplus.len() as f64;
-        let mut used = 0.0;
-        for entity in surplus {
-            let cost = self.state[entity.row()].cost.total();
-            let left = (cost - entity.scrapped().unwrap_or(0.0)).max(0.0);
-            let units = share.min(left);
-            used += units;
-            progress.scrapping.push(Scrapping {
-                entity: entity.id(),
-                units,
-                completed: units >= left,
-            });
-        }
-        effort - used
-    }
-
     fn repair(&self, progress: &mut Progress, seat: SeatId, rock: RockId, effort: f64) {
         let damaged: Vec<&Entity> = self
             .state
-            .entities_at_rock(rock)
-            .filter(|entity| entity.seat() == seat && !entity.is_surplus())
+            .standing_at(rock)
+            .filter(|entity| entity.seat() == seat)
             .filter(|entity| entity.hp() < self.state[entity.row()].hp.0)
             .collect();
         if damaged.is_empty() || effort <= 0.0 {
@@ -176,7 +142,7 @@ impl<'a> Construction<'a> {
             .frames()
             .iter()
             .enumerate()
-            .filter(|(_, frame)| frame.post().seat == seat && frame.post().place.rock == rock)
+            .filter(|(_, frame)| frame.post().seat == seat && frame.post().rock == rock)
             .map(|(at, _)| at)
             .collect()
     }

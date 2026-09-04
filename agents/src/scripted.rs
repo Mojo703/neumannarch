@@ -50,7 +50,7 @@ mod tests {
     use probe_sim::state::{Batch, Command, Seat, State};
     use probe_sim::state::{Rock, view::View};
     use probe_sim::step::fire::Shots;
-    use probe_sim::{Band, Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Tick};
+    use probe_sim::{Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Tick};
 
     use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION};
 
@@ -122,17 +122,16 @@ mod tests {
             opening.len(),
             state.seat(SeatId(0)).expect("a seat").reserve().len()
         );
-        let places: Vec<_> = opening
+        let rocks: Vec<_> = opening
             .iter()
             .map(|command| match command {
-                Command::Want { place, count, .. } => {
+                Command::Want { rock, count, .. } => {
                     assert_eq!(*count, 1);
-                    *place
+                    *rock
                 }
             })
             .collect();
-        assert!(places.iter().all(|place| place.band == Band::Inner));
-        assert_eq!(places.first(), places.last(), "one rock, not several");
+        assert_eq!(rocks.first(), rocks.last(), "one rock, not several");
     }
 
     #[test]
@@ -203,15 +202,15 @@ mod tests {
         let view = View::of(&state, SeatId(0), &Shots::default());
 
         let opening = agent.decide(&view);
-        let Command::Want { place, .. } = opening.first().copied().expect("an opening");
+        let Command::Want { rock, .. } = opening.first().copied().expect("an opening");
 
         let best = view
             .terrain
             .iter()
             .map(|terrain| terrain.caps.total())
             .fold(0.0, f64::max);
-        let opened = view.terrain_of(place.rock).expect("a rock").caps.total();
+        let opened = view.terrain_of(rock).expect("a rock").caps.total();
         assert!(opened >= 0.9 * best, "opened on {opened} against {best}");
-        assert_ne!(place.rock, RockId(20), "not the thinnest rock on the belt");
+        assert_ne!(rock, RockId(20), "not the thinnest rock on the belt");
     }
 }

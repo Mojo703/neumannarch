@@ -1,6 +1,6 @@
 # Probe Game — display language
 
-What the player sees, as the target. The only input is the sim's fogged
+What the player sees, as the target. The only input is the sim's
 view. Nothing is a numeral, a label, or a panel, except the stockpile's bars
 (The stockpile, below); every other fact is a shape, a position, a
 colour, or a line in the belt. Inside a match the pause and
@@ -12,8 +12,8 @@ by the same rules as everything else, never predicted by the client.
 ## Ships are the truth
 
 Every ship is drawn where the sim has it, always. A held force is readable
-because the sim settles it around its place's anchor (DESIGN.md, Movement
-and combat); the display never rearranges anything.
+because the sim holds it inside its rock's zone (DESIGN.md, Movement and
+combat); the display never rearranges anything.
 
 ## The two layers
 
@@ -29,12 +29,10 @@ and it changes with the sim and with the player's pointer, every frame.
 
 ## The rings
 
-Every rock carries an inner ring at a fixed screen radius, so it reads
-the same at every zoom, for its inner band. A second,
-outer ring at a larger fixed radius stands for the outer band and is drawn
-only when that band holds something or the rock is selected. On a ring,
-runs start at twelve o'clock and are laid clockwise; when more than one
-seat is present, in seat order. Ownership is colour, and colour is the team's; a team's
+Every rock carries one ring at a fixed screen radius, so it reads the
+same at every zoom. A run is one seat's glyphs on a ring (Glyph runs,
+below). Runs start at twelve o'clock and are laid clockwise, in seat
+order, and every seat present owns an equal share of the ring. Ownership is colour, and colour is the team's; a team's
 seats share it, and position tells them apart only where several share a
 ring, which is uncommon. An empty ring
 draws nothing.
@@ -43,13 +41,14 @@ draws nothing.
 
 One glyph per unit present, grouped by row, rows ordered by cost
 descending from the run's start. Glyphs of a row are laid consecutively
-along the ring. When a run would exceed its share of the ring, its glyphs overlap and stack
-like cards; magnitude stays arc length.
+along the ring. When a run would exceed its share of the ring, its glyphs
+shrink and overlap in place like fanned cards, every glyph on the ring's
+own radius, with no floor on the shrink; magnitude stays arc length.
 
 - A unit wanted but absent continues the run as a hollow glyph.
 - A frame in progress is a hollow glyph filling from the bottom to its
   progress fraction.
-- A shortfall with no builder in range shows a dashed hollow glyph.
+- A shortfall with no builder at its rock shows a dashed hollow glyph.
 - A unit that has left this ring and is still in flight stays on the run,
   dimmed, until it arrives.
 - A frame that spent nothing this second for want of a material carries a
@@ -63,9 +62,9 @@ like cards; magnitude stays arc length.
 
 Three rules produce every glyph from its row; no glyph is drawn by hand.
 
-- **Frame:** a triangle for a unit, a square for a structure.
+- **Shape:** a triangle for a unit, a square for a structure.
 - **Marks,** placed on the frame by what earns them, in a sixty-unit
-  cell whose frame is the triangle (30,6) (56,52) (4,52) or the square
+  cell whose shape is the triangle (30,6) (56,52) (4,52) or the square
   from 8 to 52. The mark's outline is white; a hollow mark is stroked, a
   dot is filled. These are the owner's drawings and the game reproduces
   them exactly, scaled to the glyph's size:
@@ -73,14 +72,13 @@ Three rules produce every glyph from its row; no glyph is drawn by hand.
     centre with arms of 6.5 inside the ring on a square that also stores.
   - Extract: a chevron at (30,32) with a half-width of 15, pointing down.
   - Capacity: a ring at the centre, radius 13; radius 15 beside a plus.
-  - Radar above default: an arc at (30,42), radius 11, over a dot of
-    radius 3.5 at its centre.
-  - Damage within sight: a dot at (30,34) of radius 8; at (30,29) of
+  - Damage at short range: a dot at (30,34) of radius 8; at (30,29) of
     radius 7 when a belt sits below it.
   - Plating above zero: a belt, a line at y 45 from x 17 to 43.
-  - Damage beyond sight: a bar at x 30 from y 14 to 48.
-- **Size,** three steps by cost class; the thresholds are constants in the
-  game crate.
+  - Damage at long range: a bar at x 30 from y 14 to 48. The range
+    threshold is a constant in the game crate.
+- **Size,** three steps by cost class: a row's cost against two
+  thresholds, constants in the game crate.
 
 Fill is the owner's colour; the outline is white.
 
@@ -99,7 +97,7 @@ dims, and its hover names the short material.
 
 ## Fights
 
-While shots are exchanged in a band, each engaged seat's run on that ring
+While shots are exchanged at a rock, each engaged seat's run on its ring
 gains an arc just inside it. The arc is full at the fight's start and
 drains clockwise as that player's total HP at the rock falls. Damage from
 the last second and a half trails the drain as a red segment that catches
@@ -118,11 +116,10 @@ from the ship onto the ring.
 ## Editing: the roster wheel
 
 Build is flow, so there is no queue; the player edits wants. Selecting a
-ring, inner or outer, opens a wheel outside both rings at a fixed screen
-radius, editing that band: one slot per roster row, drawn as the row's
-glyph by the same three rules. Structures fill the left half and units the
-right, each half ordered by cost from the top down; the outer band's wheel
-has no structures. The selected ring brightens.
+ring opens a wheel outside it at a fixed screen radius, editing that rock:
+one slot per roster row, drawn as the row's glyph by the same three rules.
+Structures fill the left half and units the right, each half ordered by
+cost from the top down. The selected ring brightens.
 
 A slot is a sector of the wheel's annulus with the glyph at mid radius. Its
 outer band is plus and its inner band is minus; neither carries a symbol,
@@ -133,7 +130,8 @@ is display only.
 
 Hovering plus shows one hollow glyph at half alpha at the end of that row's
 run. Hovering minus dims the last glyph of that row: a hollow one means the
-click cancels a frame, a solid one means it sends a ship away. The click
+click cancels a frame, a solid one means the unit becomes surplus, which
+leaves for a shortfall elsewhere or stays. The click
 lands the change, and the next tick draws the sim's response by the rules
 above: a line from the rock a surplus ship is coming from, a glyph filling,
 a dashed glyph, a ship lifting out toward its new home. The client predicts
@@ -147,11 +145,10 @@ A wheel holds at most twelve slots. Past that, the first level is two
 slots, a square and a triangle, and choosing one opens that category's
 wheel in its place. There is no deeper level.
 
-Sending: drag from a ring to another, on the same rock or another. The
+Sending: drag from one rock's ring to another's. The
 source run dims the glyphs that would go and the destination run shows them
 hollow; the mouse wheel adjusts how many; release issues the two count
-edits, and the flight is the sim's response. Sending a staged force in is
-the drag from a rock's outer ring to its inner ring.
+edits, and the flight is the sim's response.
 
 ## Camera
 
@@ -161,11 +158,15 @@ player's region stays on screen while the belt turns. The focus starts at
 the belt's centre until the player's first placement, then at that rock;
 clicking a rock's ring makes it the focus.
 
-## Fog
+## Ranges
 
-Enemy ships and their glyphs are drawn only inside sight. A radar contact
-is a dot with a short velocity streak and no glyph. Rocks are always
-drawn.
+Every rock's zone is drawn as one faint circle at the zone's radius in
+the belt, always, in the rock's own tint, the tint its ring is stroked
+in. Every armed ship at a rock carries one faint circle at its longest
+weapon range in its owner's colour; a ship in flight carries none, since
+it is not a shooter. Both are painted on the HUD over the belt camera's
+projection, thin, at low alpha, and are never brighter than a ring.
+Nothing else on the HUD states a distance.
 
 ## Controls
 
@@ -188,6 +189,10 @@ A screen's main action, Start or Ready on the lobby, Join on the
 title, shows its reason beside it always when disabled, not only on
 hover, so the way forward is never hidden. Every row of a settings
 column carries its label at the left and its control at the right.
+A guest's control follows the same rule as the host's. If the host's
+edit lands first, the screen shows the room's result and nothing else:
+there is no message for an action that did not take, since the state on
+screen is the truth.
 
 A control whose feature does not exist in this version is not drawn.
 Disabled with a reason is only for a control that exists and cannot act
@@ -200,10 +205,7 @@ reason in one plain sentence beside it: "Waiting for Team 2 to be
 ready", "Only the host changes the clock", "This version cannot host",
 "Closing is not available in this version". The rules are the same
 values the sim and the lobby apply, so a control is never enabled and
-then refused. In a room, a guest's control is enabled by the same rule,
-and if the room's order lands the host's edit first, the screen shows
-the room's result and nothing else; there is no message for an action
-that did not take, since the state on screen is the truth.
+then refused.
 
 The one place a fact cannot be known before the click is joining an
 address. The join field shows the outcome inside itself: "Connecting",

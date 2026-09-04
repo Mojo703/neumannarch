@@ -335,7 +335,10 @@ fn line(state: &State) -> String {
             )
         })
         .collect();
-    let flying = state.entities().filter(|entity| entity.is_flying()).count();
+    let flying = state
+        .entities()
+        .filter(|entity| entity.is_flying(state.tick()))
+        .count();
     format!(
         "{:>4}s  {flying} flying, {} frames, {} posts  |  {}",
         state.tick().seconds() as u64,

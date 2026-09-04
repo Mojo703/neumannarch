@@ -1,6 +1,6 @@
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use probe_sim::roster::MassClass;
-use probe_sim::{Band, RowId, SeatId};
+use probe_sim::{RowId, SeatId};
 
 use crate::display::glyph;
 use crate::display::glyph_quad::seat_color32;
@@ -11,14 +11,10 @@ use crate::display::tint;
 use crate::display::viewport::Viewport;
 use crate::display::wheel::Wheel;
 
-pub const INNER_RADIUS: f32 = 56.0;
+pub const RING_RADIUS: f32 = 56.0;
 
-pub const OUTER_RADIUS: f32 = 88.0;
-
-const _: () = assert!(
-    crate::display::wheel::RADIUS - crate::display::wheel::BAND_WIDTH > OUTER_RADIUS
-        && OUTER_RADIUS > INNER_RADIUS
-);
+const _: () =
+    assert!(crate::display::wheel::RADIUS - crate::display::wheel::BAND_WIDTH > RING_RADIUS);
 
 const STACK_STEP: f32 = 2.5;
 
@@ -33,6 +29,10 @@ const RING_TINT: f32 = 0.5;
 const SELECTED_RING_COLOUR: Color32 = Color32::WHITE;
 
 const ARC_INSET: f32 = 6.0;
+
+const ARC_RADIUS: f32 = RING_RADIUS - ARC_INSET;
+
+const _: () = assert!(ARC_RADIUS < RING_RADIUS && ARC_RADIUS > 0.0);
 
 const ARC_WIDTH: f32 = 3.0;
 
@@ -67,7 +67,7 @@ pub fn paint(scene: &Scene, viewport: &Viewport, wheel: Option<&Wheel>, painter:
         let Some(centre) = centre_of(scene, viewport, ring) else {
             continue;
         };
-        paint_ring(painter, ring, centre, scene.selection == Some(ring.place));
+        paint_ring(painter, ring, centre, scene.selection == Some(ring.rock));
     }
 
     for flight in &scene.flights {
@@ -127,16 +127,9 @@ fn geometry(radius: f32) -> Geometry {
     }
 }
 
-pub fn ring_radius(band: Band) -> f32 {
-    match band {
-        Band::Inner => INNER_RADIUS,
-        Band::Outer => OUTER_RADIUS,
-    }
-}
-
 fn hovered_slot(scene: &Scene, wheel: &Wheel) -> Option<(RowId, WheelBand)> {
     match scene.hover {
-        Some(Hover::Wheel { place, row, band }) if place == wheel.place() => Some((row, band)),
+        Some(Hover::Wheel { rock, row, band }) if rock == wheel.rock() => Some((row, band)),
         _ => None,
     }
 }
@@ -149,8 +142,7 @@ struct Placed<'a> {
 }
 
 fn placed<'a>(ring: &'a RingView, centre: Pos2) -> Vec<Placed<'a>> {
-    let radius = ring_radius(ring.place.band);
-    let layout = Layout::of(&ring.runs, geometry(radius));
+    let layout = Layout::of(&ring.runs, geometry(RING_RADIUS));
     layout
         .placements()
         .iter()
@@ -158,7 +150,7 @@ fn placed<'a>(ring: &'a RingView, centre: Pos2) -> Vec<Placed<'a>> {
             let run = &ring.runs[placement.run];
             let mark = &run.marks[placement.mark];
             let (sin, cos) = placement.angle.sin_cos();
-            let out = radius - f32::from(placement.depth) * STACK_STEP;
+            let out = RING_RADIUS - f32::from(placement.depth) * STACK_STEP;
             Placed {
                 mark,
                 seat: run.seat,
@@ -184,18 +176,20 @@ fn centre_of(scene: &Scene, viewport: &Viewport, ring: &RingView) -> Option<Pos2
     scene
         .rocks
         .iter()
-        .find(|rock| rock.id == ring.place.rock)
+        .find(|rock| rock.id == ring.rock)
         .and_then(|rock| viewport.point_of(rock.pos))
 }
 
 fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: bool) {
-    let radius = ring_radius(ring.place.band);
-
     let (stroke_colour, stroke_width) = match selected {
         true => (SELECTED_RING_COLOUR, SELECTED_RING_WIDTH),
         false => (tint::painted(RING_COLOUR, ring.caps, RING_TINT), RING_WIDTH),
     };
-    painter.circle_stroke(centre, radius, Stroke::new(stroke_width, stroke_colour));
+    painter.circle_stroke(
+        centre,
+        RING_RADIUS,
+        Stroke::new(stroke_width, stroke_colour),
+    );
 
     for placed in placed(ring, centre) {
         Stencil {
@@ -210,21 +204,17 @@ fn paint_ring(painter: &egui::Painter, ring: &RingView, centre: Pos2, selected: 
         .paint(painter);
     }
 
-    let layout = Layout::of(&ring.runs, geometry(radius));
+    let layout = Layout::of(&ring.runs, geometry(RING_RADIUS));
     for arc in &ring.arcs {
         let Some(index) = ring.runs.iter().position(|run| run.seat == arc.seat) else {
             continue;
         };
-        paint_arc(painter, centre, radius, layout.span(index), arc);
+        paint_arc(painter, centre, layout.span(index), arc);
     }
 }
 
-fn arc_radius(ring_radius: f32) -> f32 {
-    ring_radius - ARC_INSET
-}
-
-fn paint_arc(painter: &egui::Painter, centre: Pos2, ring_radius: f32, span: Span, arc: &Arc) {
-    let radius = arc_radius(ring_radius);
+fn paint_arc(painter: &egui::Painter, centre: Pos2, span: Span, arc: &Arc) {
+    let radius = ARC_RADIUS;
     let drained = span.at(arc.fraction);
     paint_arc_segment(
         painter,
@@ -313,30 +303,15 @@ mod tests {
 
     #[test]
     fn consecutive_marks_of_a_run_stand_a_widest_glyph_apart() {
-        let laid = Layout::of(&[run(2)], geometry(INNER_RADIUS));
+        let laid = Layout::of(&[run(2)], geometry(RING_RADIUS));
         let placed = laid.placements();
 
-        let apart = (placed[1].angle - placed[0].angle) * INNER_RADIUS;
+        let apart = (placed[1].angle - placed[0].angle) * RING_RADIUS;
 
         assert!(
             apart >= 2.0 * glyph::HALF * glyph::WIDEST_SCALE - 1e-4,
             "marks {apart} points apart overlap the widest glyph"
         );
-    }
-
-    #[test]
-    fn a_ring_radius_follows_its_band() {
-        assert_eq!(ring_radius(Band::Inner), INNER_RADIUS);
-        assert_eq!(ring_radius(Band::Outer), OUTER_RADIUS);
-    }
-
-    #[test]
-    fn a_fight_arc_is_inset_within_the_ring_it_fights_at_whichever_band() {
-        for radius in [INNER_RADIUS, OUTER_RADIUS] {
-            assert_eq!(arc_radius(radius), radius - ARC_INSET);
-            assert!(arc_radius(radius) < radius);
-        }
-        assert_ne!(arc_radius(INNER_RADIUS), arc_radius(OUTER_RADIUS));
     }
 
     #[test]

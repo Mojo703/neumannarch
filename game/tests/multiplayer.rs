@@ -13,7 +13,7 @@ use probe_protocol::{
 };
 use probe_sim::roster::SHIPYARD;
 use probe_sim::state::{Command, Issued};
-use probe_sim::{Band, Place, RockId, SeatId, Stamped, Tick};
+use probe_sim::{RockId, SeatId, Stamped, Tick};
 
 const TICKS: u64 = 360;
 
@@ -269,10 +269,7 @@ fn sent() -> Stamped {
             seat: SeatId(0),
             seq: 0,
             command: Command::Want {
-                place: Place {
-                    rock: RockId(0),
-                    band: Band::Inner,
-                },
+                rock: RockId(0),
                 row: SHIPYARD,
                 count: 1,
             },

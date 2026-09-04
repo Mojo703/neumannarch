@@ -5,7 +5,7 @@ use probe_sim::roster::MassClass;
 use probe_sim::roster::Roster;
 use probe_sim::state::Rock;
 use probe_sim::state::view::View;
-use probe_sim::{Band, Material, Materials, Place, RockId, RowId, SeatId, Tick, Vec3};
+use probe_sim::{Material, Materials, RockId, RowId, SeatId, Tick, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
@@ -29,7 +29,7 @@ pub enum WheelBand {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hover {
     Wheel {
-        place: Place,
+        rock: RockId,
         row: RowId,
         band: WheelBand,
     },
@@ -83,7 +83,7 @@ pub enum Reason {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RingView {
-    pub place: Place,
+    pub rock: RockId,
     pub caps: Materials,
     pub runs: Vec<Run>,
     pub arcs: Vec<Arc>,
@@ -104,7 +104,7 @@ pub struct Run {
 }
 
 pub struct Client<'a> {
-    pub selection: Option<Place>,
+    pub selection: Option<RockId>,
     pub hover: Option<Hover>,
     pub fights: &'a Fights,
 }
@@ -116,7 +116,7 @@ pub struct Scene {
     pub rings: Vec<RingView>,
     pub flights: Vec<FlightLine>,
     pub blips: Vec<Blip>,
-    pub selection: Option<Place>,
+    pub selection: Option<RockId>,
     pub hover: Option<Hover>,
 }
 
@@ -138,10 +138,7 @@ impl Scene {
                 .iter()
                 .enumerate()
                 .map(|(at, rock)| RingView {
-                    place: Place {
-                        rock: RockId(at as u32),
-                        band: Band::Inner,
-                    },
+                    rock: RockId(at as u32),
                     caps: rock.caps(),
                     runs: Vec::new(),
                     arcs: Vec::new(),
@@ -175,16 +172,7 @@ impl Scene {
             .collect();
         let mut runs = Runs::of(view, roster);
         runs.preview(view, roster, client.hover.as_ref());
-        let drawn =
-            view.terrain
-                .iter()
-                .map(|rock| Place {
-                    rock: rock.rock,
-                    band: Band::Inner,
-                })
-                .chain(client.selection.into_iter().flat_map(|place| {
-                    [Band::Inner, Band::Outer].map(|band| Place { band, ..place })
-                }));
+        let drawn = view.terrain.iter().map(|rock| rock.rock);
         Scene {
             rocks: view
                 .terrain
@@ -214,7 +202,7 @@ impl Scene {
                 .filter_map(|seen| {
                     Some(FlightLine {
                         from: seen.body.pos,
-                        to: seen.home?.rock,
+                        to: seen.home?,
                     })
                 })
                 .collect(),
@@ -237,13 +225,13 @@ impl Scene {
 
 impl RingView {
     fn at<'a>(
-        rings: &'a mut BTreeMap<Place, RingView>,
+        rings: &'a mut BTreeMap<RockId, RingView>,
         caps: &Caps,
-        place: Place,
+        rock: RockId,
     ) -> &'a mut RingView {
-        rings.entry(place).or_insert_with(|| RingView {
-            place,
-            caps: caps.get(&place.rock).copied().unwrap_or(Materials::ZERO),
+        rings.entry(rock).or_insert_with(|| RingView {
+            rock,
+            caps: caps.get(&rock).copied().unwrap_or(Materials::ZERO),
             runs: Vec::new(),
             arcs: Vec::new(),
         })
@@ -255,26 +243,26 @@ type Caps = BTreeMap<RockId, Materials>;
 type Rows = BTreeMap<RowId, Vec<Mark>>;
 
 struct Runs {
-    rows: BTreeMap<(Place, SeatId), Rows>,
+    rows: BTreeMap<(RockId, SeatId), Rows>,
 }
 
 impl Runs {
     fn of(view: &View, roster: &Roster) -> Runs {
-        let mut rows: BTreeMap<(Place, SeatId), Rows> = BTreeMap::new();
-        let mut push = |place: Place, seat: SeatId, row: RowId, mark: Mark| {
-            rows.entry((place, seat))
+        let mut rows: BTreeMap<(RockId, SeatId), Rows> = BTreeMap::new();
+        let mut push = |rock: RockId, seat: SeatId, row: RowId, mark: Mark| {
+            rows.entry((rock, seat))
                 .or_default()
                 .entry(row)
                 .or_default()
                 .push(mark);
         };
         for seen in view.seen.iter().filter(|seen| !seen.flying) {
-            let Some(place) = seen.home else {
+            let Some(rock) = seen.home else {
                 continue;
             };
             let reason = Reason::Here(seen.row);
             push(
-                place,
+                rock,
                 seen.seat,
                 seen.row,
                 mark(roster, seen.row, Fill::Solid, reason),
@@ -295,12 +283,7 @@ impl Runs {
                     seen.row,
                     Mark {
                         dim: true,
-                        ..mark(
-                            roster,
-                            seen.row,
-                            Fill::Solid,
-                            Reason::Leaving(seen.row, to.rock),
-                        )
+                        ..mark(roster, seen.row, Fill::Solid, Reason::Leaving(seen.row, to))
                     },
                 );
                 push(
@@ -311,15 +294,15 @@ impl Runs {
                         roster,
                         seen.row,
                         Fill::Hollow,
-                        Reason::Arriving(seen.row, from.rock),
+                        Reason::Arriving(seen.row, from),
                     ),
                 );
             }
         }
         let builders = builders(view, roster);
         for composition in &view.compositions {
-            let place = composition.place;
-            let unbuilt = builders.binary_search(&place.rock).is_err();
+            let at = composition.rock;
+            let unbuilt = builders.binary_search(&at).is_err();
             for wanted in &composition.rows {
                 for frame in &wanted.frames {
                     let (fill, reason) = match unbuilt {
@@ -330,16 +313,16 @@ impl Runs {
                         ),
                     };
                     push(
-                        place,
+                        at,
                         view.seat,
                         wanted.row,
                         mark(roster, wanted.row, fill, reason),
                     );
                 }
-                let held = wanted.present + wanted.flying + wanted.frames.len() as u32;
+                let held = wanted.present + wanted.transit + wanted.frames.len() as u32;
                 for _ in held..wanted.want {
                     push(
-                        place,
+                        at,
                         view.seat,
                         wanted.row,
                         mark(roster, wanted.row, Fill::Hollow, Reason::Wanted(wanted.row)),
@@ -353,8 +336,8 @@ impl Runs {
     fn preview(&mut self, view: &View, roster: &Roster, hover: Option<&Hover>) {
         match hover {
             None => {}
-            Some(Hover::Wheel { place, row, band }) => {
-                let rows = self.rows.entry((*place, view.seat)).or_default();
+            Some(Hover::Wheel { rock, row, band }) => {
+                let rows = self.rows.entry((*rock, view.seat)).or_default();
                 let marks = rows.entry(*row).or_default();
                 match band {
                     WheelBand::Plus => marks.push(Mark {
@@ -397,7 +380,7 @@ impl Runs {
                                 roster,
                                 row,
                                 Fill::Hollow,
-                                Reason::Arriving(row, sending.from.rock),
+                                Reason::Arriving(row, sending.from),
                             )
                         });
                     }
@@ -411,23 +394,23 @@ impl Runs {
         roster: &Roster,
         fights: &Fights,
         caps: &Caps,
-        drawn: impl Iterator<Item = Place>,
+        drawn: impl Iterator<Item = RockId>,
     ) -> Vec<RingView> {
         let cost = |row: RowId| roster[row].cost.total();
-        let mut rings: BTreeMap<Place, RingView> = BTreeMap::new();
-        for place in drawn {
-            RingView::at(&mut rings, caps, place);
+        let mut rings: BTreeMap<RockId, RingView> = BTreeMap::new();
+        for rock in drawn {
+            RingView::at(&mut rings, caps, rock);
         }
-        for ((place, seat), rows) in self.rows {
+        for ((rock, seat), rows) in self.rows {
             let mut rows: Vec<(RowId, Vec<Mark>)> = rows.into_iter().collect();
             rows.sort_by(|(a, _), (b, _)| cost(*b).total_cmp(&cost(*a)));
-            RingView::at(&mut rings, caps, place).runs.push(Run {
+            RingView::at(&mut rings, caps, rock).runs.push(Run {
                 seat,
                 marks: rows.into_iter().flat_map(|(_, marks)| marks).collect(),
             });
         }
-        for (place, arc) in fights.arcs() {
-            let ring = RingView::at(&mut rings, caps, place);
+        for (rock, arc) in fights.arcs() {
+            let ring = RingView::at(&mut rings, caps, rock);
             if !ring.runs.iter().any(|run| run.seat == arc.seat) {
                 ring.runs.push(Run {
                     seat: arc.seat,
@@ -486,7 +469,7 @@ fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
         .iter()
         .filter(|seen| seen.seat == view.seat && !seen.flying)
         .filter(|seen| roster[seen.row].builds().next().is_some())
-        .filter_map(|seen| Some(seen.home?.rock))
+        .filter_map(|seen| seen.home)
         .collect();
     rocks.sort_unstable();
     rocks.dedup();
@@ -512,23 +495,14 @@ fn nearest_body(bodies: &[(RockId, Body)], pos: Vec3) -> Option<Body> {
 #[cfg(test)]
 mod tests {
     use probe_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
+    use probe_sim::state::Send;
 
     use super::*;
     use crate::display::glyph::Frame;
     use crate::display::local::{Local, PLAYER};
 
-    fn inner(rock: u32) -> Place {
-        Place {
-            rock: RockId(rock),
-            band: Band::Inner,
-        }
-    }
-
-    fn outer(rock: u32) -> Place {
-        Place {
-            rock: RockId(rock),
-            band: Band::Outer,
-        }
+    fn at(rock: u32) -> RockId {
+        RockId(rock)
     }
 
     fn scene(local: &Local, fights: &Fights) -> Scene {
@@ -538,7 +512,7 @@ mod tests {
     fn drawn(
         local: &Local,
         fights: &Fights,
-        selection: Option<Place>,
+        selection: Option<RockId>,
         hover: Option<Hover>,
     ) -> Scene {
         Scene::from_view(
@@ -552,11 +526,11 @@ mod tests {
         )
     }
 
-    fn run_at(scene: &Scene, place: Place) -> Option<Vec<Mark>> {
+    fn run_at(scene: &Scene, rock: RockId) -> Option<Vec<Mark>> {
         scene
             .rings
             .iter()
-            .find(|ring| ring.place == place)?
+            .find(|ring| ring.rock == rock)?
             .runs
             .iter()
             .find(|run| run.seat == PLAYER)
@@ -564,22 +538,12 @@ mod tests {
     }
 
     #[test]
-    fn every_rock_draws_an_inner_ring_and_an_empty_outer_ring_draws_nothing() {
+    fn every_rock_draws_one_ring_and_an_empty_ring_draws_nothing() {
         let local = Local::start(2);
         let scene = scene(&local, &Fights::default());
 
         assert_eq!(scene.rocks.len(), local.session().state().rocks().len());
-        assert_eq!(
-            scene.rings.len(),
-            scene.rocks.len(),
-            "one inner ring per rock and no outer ring"
-        );
-        assert!(
-            scene
-                .rings
-                .iter()
-                .all(|ring| ring.place.band == Band::Inner)
-        );
+        assert_eq!(scene.rings.len(), scene.rocks.len(), "one ring per rock");
         assert!(
             scene.rings.iter().all(|ring| ring.runs.is_empty()),
             "an empty ring draws no run"
@@ -589,9 +553,9 @@ mod tests {
     #[test]
     fn a_placed_structure_draws_one_solid_square_on_its_ring() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), SHIPYARD, 1)]);
 
-        let marks = run_at(&scene(&local, &Fights::default()), inner(0)).expect("its ring");
+        let marks = run_at(&scene(&local, &Fights::default()), at(0)).expect("its ring");
 
         assert_eq!(marks.len(), 1);
         assert_eq!(marks[0].fill, Fill::Solid);
@@ -602,13 +566,13 @@ mod tests {
     #[test]
     fn a_frame_fills_where_a_builder_stands_and_is_dashed_where_none_does() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), SHIPYARD, 1)]);
-        local.want(&[(inner(0), STORAGE, 1), (inner(5), FRIGATE, 1)]);
+        local.want(&[(at(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), STORAGE, 1), (at(5), FRIGATE, 1)]);
         local.run(60);
 
         let scene = scene(&local, &Fights::default());
 
-        let built = run_at(&scene, inner(0)).expect("the shipyard's ring");
+        let built = run_at(&scene, at(0)).expect("the shipyard's ring");
         let filling = built
             .iter()
             .find(|mark| matches!(mark.fill, Fill::Filling(_)))
@@ -619,7 +583,7 @@ mod tests {
             filling.fill
         );
 
-        let unbuilt = run_at(&scene, inner(5)).expect("the far ring");
+        let unbuilt = run_at(&scene, at(5)).expect("the far ring");
         assert_eq!(unbuilt.len(), 1);
         assert_eq!(
             unbuilt[0].fill,
@@ -629,37 +593,21 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_rock_draws_both_its_rings_even_holding_nothing() {
-        let local = Local::start(2);
-
-        let scene = drawn(&local, &Fights::default(), Some(inner(3)), None);
-
-        for place in [inner(3), outer(3)] {
-            let ring = scene
-                .rings
-                .iter()
-                .find(|ring| ring.place == place)
-                .expect("a selected rock draws both bands");
-            assert!(ring.runs.is_empty(), "with no run on either");
-        }
-        assert_eq!(scene.selection, Some(inner(3)));
-    }
-
-    #[test]
     fn a_unit_in_flight_stays_dimmed_on_the_ring_it_left_and_arrives_on_the_ring_it_flies_to() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), CONSTRUCTOR, 1)]);
-        local.want(&[(inner(0), CONSTRUCTOR, 0), (inner(1), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
+        local.run(Send::FORMING_TICKS + 1);
         let scene = scene(&local, &Fights::default());
 
         assert_eq!(scene.flights.len(), 1);
         assert_eq!(scene.flights[0].to, RockId(1));
         assert_eq!(scene.entities.len(), 1, "the ship is drawn on the belt");
-        let left = run_at(&scene, inner(0)).expect("the ring it left draws a run");
+        let left = run_at(&scene, at(0)).expect("the ring it left draws a run");
         assert_eq!(left.len(), 1);
         assert!(left[0].dim && left[0].fill == Fill::Solid);
         assert_eq!(left[0].reason, Reason::Leaving(CONSTRUCTOR, RockId(1)));
-        let arriving = run_at(&scene, inner(1)).expect("the ring it flies to draws a run");
+        let arriving = run_at(&scene, at(1)).expect("the ring it flies to draws a run");
         assert_eq!(arriving.len(), 1);
         assert_eq!(arriving[0].fill, Fill::Hollow);
         assert_eq!(arriving[0].reason, Reason::Arriving(CONSTRUCTOR, RockId(0)));
@@ -668,16 +616,16 @@ mod tests {
     #[test]
     fn the_plus_band_previews_one_dim_hollow_glyph_at_the_end_of_the_run() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), SHIPYARD, 1)]);
         let hover = Hover::Wheel {
-            place: inner(0),
+            rock: at(0),
             row: SHIPYARD,
             band: WheelBand::Plus,
         };
 
         let marks = run_at(
-            &drawn(&local, &Fights::default(), Some(inner(0)), Some(hover)),
-            inner(0),
+            &drawn(&local, &Fights::default(), Some(at(0)), Some(hover)),
+            at(0),
         )
         .expect("its ring");
 
@@ -691,16 +639,16 @@ mod tests {
     #[test]
     fn the_minus_band_dims_the_last_glyph_of_its_row() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), SHIPYARD, 1)]);
         let hover = Hover::Wheel {
-            place: inner(0),
+            rock: at(0),
             row: SHIPYARD,
             band: WheelBand::Minus,
         };
 
         let marks = run_at(
-            &drawn(&local, &Fights::default(), Some(inner(0)), Some(hover)),
-            inner(0),
+            &drawn(&local, &Fights::default(), Some(at(0)), Some(hover)),
+            at(0),
         )
         .expect("its ring");
 
@@ -712,21 +660,21 @@ mod tests {
     #[test]
     fn a_send_drag_dims_the_source_and_shows_the_destination_hollow() {
         let mut local = Local::start(2);
-        local.want(&[(inner(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), CONSTRUCTOR, 1)]);
         let sending = Sending {
-            from: inner(0),
-            to: inner(1),
+            from: at(0),
+            to: at(1),
             count: 1,
         };
 
         let scene = drawn(&local, &Fights::default(), None, Some(Hover::Send(sending)));
 
-        let source = run_at(&scene, inner(0)).expect("the source ring");
+        let source = run_at(&scene, at(0)).expect("the source ring");
         assert_eq!(source.len(), 1);
         assert_eq!(source[0].fill, Fill::Solid);
         assert!(source[0].dim, "the glyph that would go is dimmed");
 
-        let destination = run_at(&scene, inner(1)).expect("the destination ring");
+        let destination = run_at(&scene, at(1)).expect("the destination ring");
         assert_eq!(destination.len(), 1);
         assert_eq!(destination[0].fill, Fill::Hollow);
         assert!(destination[0].dim);

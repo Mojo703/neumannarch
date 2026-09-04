@@ -2,6 +2,7 @@ use super::State;
 use super::entity::Entity;
 use super::sight::Sight;
 use super::sweep::Sweep;
+use crate::belt::Belt;
 use crate::orbit::body::Body;
 use crate::vec3::Vec3;
 
@@ -18,14 +19,8 @@ impl Attractor {
         sight: &Sight,
         sweep: &Sweep,
     ) -> Option<Attractor> {
-        if entity.is_flying() {
-            return None;
-        }
-        let home = Attractor::at(
-            state
-                .anchor(entity.home())
-                .at(state.tick(), state.gravity()),
-        );
+        let standing = entity.standing(state.tick())?;
+        let home = Attractor::at(state.rock_body(standing));
         Some(Attractor::chase(state, entity, sight, sweep, home).unwrap_or(home))
     }
 
@@ -50,10 +45,12 @@ impl Attractor {
         let team = state[entity.seat()].team();
         let body = state.body_of(entity);
         let enemy = sweep
-            .within(home.pos, row.sight.0)
+            .within(home.pos, Belt::ZONE_RADIUS_METERS)
             .filter_map(|id| state.entity(id))
             .filter(|other| {
-                state[other.seat()].team() != team && !other.is_flying() && sight.sees(other.id())
+                state[other.seat()].team() != team
+                    && !other.is_flying(state.tick())
+                    && sight.sees(other.id())
             })
             .map(|other| (state.body_of(other), other.id()))
             .min_by(|(a, first), (b, second)| {

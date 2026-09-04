@@ -1,6 +1,5 @@
 use super::State;
 use crate::ids::{SeatId, TeamId};
-use crate::place::Band;
 use crate::state::Motion;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,8 +32,8 @@ impl State {
         let mut rocks: Vec<_> = self
             .entities()
             .filter(|entity| mine(entity.seat()))
-            .filter(|entity| entity.motion() == Motion::Fixed && entity.home().band == Band::Inner)
-            .map(|entity| entity.home().rock)
+            .filter(|entity| entity.motion() == Motion::Fixed)
+            .map(|entity| entity.home())
             .collect();
         rocks.sort_unstable();
         rocks.dedup();

@@ -45,7 +45,7 @@ pub enum Message {
 #[cfg(test)]
 mod tests {
     use probe_sim::state::{Command, Issued};
-    use probe_sim::{Band, Place, RockId, RowId, TeamId};
+    use probe_sim::{RockId, RowId, TeamId};
 
     use super::*;
     use crate::lobby::Holder;
@@ -85,10 +85,7 @@ mod tests {
                     seat: SeatId(1),
                     seq: 4,
                     command: Command::Want {
-                        place: Place {
-                            rock: RockId(6),
-                            band: Band::Outer,
-                        },
+                        rock: RockId(6),
                         row: RowId(2),
                         count: 3,
                     },

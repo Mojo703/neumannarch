@@ -1,5 +1,6 @@
-use crate::ids::{EntityId, SeatId};
+use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::materials::Materials;
+use crate::post::Post;
 use crate::roster::Kind;
 use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
 use crate::step::construction::{Construction, Progress};
@@ -83,21 +84,8 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
             join(next, *member, send.destination, flight);
         }
     }
-    let ids: Vec<EntityId> = next.entities().map(|entity| entity.id()).collect();
-    for id in ids {
-        let marked = filled.marked.binary_search(&id).is_ok();
-        if let Some(entity) = next.entity_mut(id) {
-            if marked {
-                entity.mark_surplus();
-            } else {
-                entity.clear_surplus();
-            }
-        }
-    }
     for opening in &filled.openings {
-        for _ in 0..opening.count {
-            next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.tick()));
-        }
+        next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.tick()));
     }
     for cancellation in &filled.cancellations {
         let cost = snap[cancellation.row].cost;
@@ -127,17 +115,6 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
         if spend.completed {
             spawn(next, frame.post(), frame.row());
             closing.push(spend.frame);
-        }
-    }
-    for scrapping in &work.scrapping {
-        let Some(entity) = next.entity_mut(scrapping.entity) else {
-            continue;
-        };
-        entity.scrap(scrapping.units);
-        if scrapping.completed {
-            let (seat, row) = (entity.seat(), entity.row());
-            refund(next, seat, snap[row].cost);
-            next.remove_entity(scrapping.entity);
         }
     }
     for repair in &work.repairs {
@@ -201,19 +178,19 @@ fn reap(next: &mut State) {
     }
 }
 
-fn spawn(next: &mut State, post: crate::place::Post, row: crate::ids::RowId) {
+fn spawn(next: &mut State, post: Post, row: RowId) {
     let motion = if next[row].kind() == Kind::Structure {
         Motion::Fixed
     } else {
         Motion::Free {
-            body: Maneuver::spawn_body(next, post.place, next.tick().next()),
+            body: Maneuver::spawn_body(next, post.rock, next.tick().next()),
             flight: None,
         }
     };
-    next.spawn(post.seat, row, post.place, motion);
+    next.spawn(post.seat, row, post.rock, motion);
 }
 
-fn join(next: &mut State, entity: EntityId, destination: crate::place::Place, flight: Flight) {
+fn join(next: &mut State, entity: EntityId, destination: RockId, flight: Flight) {
     let Some(target) = next.entity_mut(entity) else {
         return;
     };
@@ -255,15 +232,14 @@ mod tests {
 
     use super::*;
     use crate::belt::Belt;
-    use crate::ids::{RockId, RowId, TeamId};
+    use crate::ids::TeamId;
     use crate::materials::Material;
-    use crate::place::{Band, Place, Post};
     use crate::real::Real;
     use crate::roster::Roster;
-    use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, SCOUT, SHIPYARD, STORAGE};
+    use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, SCOUT, SHIPYARD, STORAGE};
     use crate::setup::Setup;
     use crate::state::view::View;
-    use crate::state::{Command, MAX_WANT, Schedule, Seat};
+    use crate::state::{Command, Entity, MAX_WANT, Schedule, Seat, Send};
     use crate::step::fire::Hit;
     use crate::time::Tick;
     use crate::{Materials, TICKS_PER_SECOND};
@@ -275,29 +251,26 @@ mod tests {
         State::start(&setup)
     }
 
-    fn inner(rock: u32) -> Place {
-        Place {
-            rock: RockId(rock),
-            band: Band::Inner,
-        }
+    fn rock(at: u32) -> RockId {
+        RockId(at)
     }
 
-    fn post(seat: u8, place: Place) -> Post {
+    fn post(seat: u8, rock: RockId) -> Post {
         Post {
-            place,
+            rock,
             seat: SeatId(seat),
         }
     }
 
-    fn want(seat: u8, place: Place, row: RowId, count: u32) -> Issued {
-        numbered(seat, 0, place, row, count)
+    fn want(seat: u8, rock: RockId, row: RowId, count: u32) -> Issued {
+        numbered(seat, 0, rock, row, count)
     }
 
-    fn numbered(seat: u8, seq: u32, place: Place, row: RowId, count: u32) -> Issued {
+    fn numbered(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
-            command: Command::Want { place, row, count },
+            command: Command::Want { rock, row, count },
         }
     }
 
@@ -338,8 +311,8 @@ mod tests {
         )
     }
 
-    fn count(state: &State, seat: u8, place: Place, row: RowId) -> u32 {
-        state.count(post(seat, place), row)
+    fn count(state: &State, seat: u8, at: RockId, row: RowId) -> u32 {
+        state.count(post(seat, at), row)
     }
 
     fn shot_at(state: &State, target: EntityId, ticks: u64) -> Option<Hit> {
@@ -363,9 +336,9 @@ mod tests {
         let state = start(&[TeamId(0)]);
         let seconds = TICKS_PER_SECOND as u64;
 
-        let state = tick(state, &[want(0, inner(0), SHIPYARD, 1)]);
+        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
 
-        assert_eq!(count(&state, 0, inner(0), SHIPYARD), 1);
+        assert_eq!(count(&state, 0, rock(0), SHIPYARD), 1);
         assert_eq!(state[SeatId(0)].reserved(SHIPYARD), 0);
         assert_eq!(state[SeatId(0)].reserved(CONSTRUCTOR), 1);
         assert_eq!(state.frames().len(), 0, "the reserve needs no frame");
@@ -394,8 +367,8 @@ mod tests {
         };
 
         let a_second_in = |stock| {
-            let state = tick(stocked(stock), &[want(0, inner(0), SHIPYARD, 1)]);
-            let state = tick(state, &[want(0, inner(0), LANCER, 1)]);
+            let state = tick(stocked(stock), &[want(0, rock(0), SHIPYARD, 1)]);
+            let state = tick(state, &[want(0, rock(0), LANCER, 1)]);
             let state = run(state, TICKS_PER_SECOND as u64 + 1);
             View::of(&state, SeatId(0), &Shots::default())
                 .compositions
@@ -416,15 +389,15 @@ mod tests {
     }
 
     #[test]
-    fn a_shortfall_with_a_builder_opens_one_frame_and_completes_it() {
+    fn a_shortfall_with_a_builder_opens_a_frame_and_completes_it() {
         let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, inner(0), SHIPYARD, 1)]);
+        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
         let stock = state[SeatId(0)].stockpile().stock();
 
-        let state = tick(state, &[want(0, inner(0), STORAGE, 1)]);
+        let state = tick(state, &[want(0, rock(0), STORAGE, 1)]);
         assert_eq!(state.frames().len(), 1);
         let state = run(state, 10);
-        assert_eq!(state.frames().len(), 1, "a shortfall opens one frame only");
+        assert_eq!(state.frames().len(), 1);
         assert!(state.frames()[0].progress() > 0.0);
 
         let cost = state[STORAGE].cost;
@@ -434,7 +407,7 @@ mod tests {
             (seconds * f64::from(TICKS_PER_SECOND)).ceil() as u64 + 2,
         );
 
-        assert_eq!(count(&state, 0, inner(0), STORAGE), 1);
+        assert_eq!(count(&state, 0, rock(0), STORAGE), 1);
         assert_eq!(state.frames().len(), 0);
         let spent = stock - state[SeatId(0)].stockpile().stock();
         assert!(
@@ -444,7 +417,35 @@ mod tests {
     }
 
     #[test]
-    fn a_surplus_of_two_rows_flies_the_one_schedule_to_the_nearest_shortfall() {
+    fn a_builder_reaches_the_frames_at_its_own_rock_and_no_others() {
+        let state = start(&[TeamId(0)]);
+        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), STORAGE, 1),
+                numbered(0, 1, rock(5), STORAGE, 1),
+            ],
+        );
+        let state = run(state, u64::from(TICKS_PER_SECOND));
+
+        let progress = |state: &State, at| {
+            state
+                .frames_at(post(0, at))
+                .map(|frame| frame.progress())
+                .sum::<f64>()
+        };
+        assert!(progress(&state, rock(0)) > 0.0, "the builder built nothing");
+        assert_eq!(
+            progress(&state, rock(5)),
+            0.0,
+            "a builder reached a frame a rock away"
+        );
+    }
+
+    #[test]
+    fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
         let state = holding(
             Roster::shipped(),
             BTreeMap::from([(CONSTRUCTOR, 1), (SCOUT, 1)]),
@@ -452,47 +453,192 @@ mod tests {
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), CONSTRUCTOR, 1),
-                numbered(0, 1, inner(0), SCOUT, 1),
+                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+                numbered(0, 1, rock(0), SCOUT, 1),
             ],
         );
-        assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 1);
-        assert_eq!(count(&state, 0, inner(0), SCOUT), 1);
+        assert_eq!(count(&state, 0, rock(0), CONSTRUCTOR), 1);
+        assert_eq!(count(&state, 0, rock(0), SCOUT), 1);
 
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
-                numbered(0, 1, inner(0), SCOUT, 0),
-                numbered(0, 2, inner(1), CONSTRUCTOR, 1),
-                numbered(0, 3, inner(1), SCOUT, 1),
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(0), SCOUT, 0),
+                numbered(0, 2, rock(1), CONSTRUCTOR, 1),
+                numbered(0, 3, rock(1), SCOUT, 1),
             ],
         );
 
-        assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 1, "it counts home");
-        assert_eq!(count(&state, 0, inner(1), SCOUT), 1, "it counts home");
-        assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 0);
+        assert_eq!(count(&state, 0, rock(1), CONSTRUCTOR), 1, "it counts home");
+        assert_eq!(count(&state, 0, rock(1), SCOUT), 1, "it counts home");
+        assert_eq!(count(&state, 0, rock(0), CONSTRUCTOR), 0);
         assert_eq!(state.frames().len(), 0, "a send fills the shortfall");
-        let flying: Vec<(EntityId, Flight)> = state
+        let flights: Vec<Flight> = state
             .entities()
-            .map(|entity| (entity.id(), entity.flight().expect("a flight")))
+            .map(|entity| entity.flight().expect("a flight"))
             .collect();
-        let (first, second) = (flying[0].1, flying[1].1);
-        assert_eq!(first, second, "the two rows fly different schedules");
-        let crossing = first.arrive().0 - state.tick().0;
+        assert_eq!(flights[0], flights[1], "the two rows fly different sends");
+    }
 
+    #[test]
+    fn a_send_lands_on_its_destination_rocks_orbit() {
+        let state = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
+        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
+        let unit = state.entities().next().expect("the constructor").id();
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+            ],
+        );
+
+        let flight = state[unit].flight().expect("a flight");
+        let crossing = flight.arrive().0 - state.tick().0;
         let state = run(state, crossing);
-        for (unit, _) in &flying {
-            assert!(!state[*unit].is_flying(), "{unit:?} is still flying");
-        }
+        assert!(
+            !state[unit].is_flying(state.tick()),
+            "it is still flying at its arrival tick"
+        );
+        let landed = state
+            .body_of(&state[unit])
+            .pos
+            .distance(state.rock_body(rock(1)).pos);
+        assert!(landed < 1.0, "it arrived {landed} meters off its rock");
 
         let state = run(state, 60 * u64::from(TICKS_PER_SECOND));
 
-        let anchor = state.anchor(inner(1)).at(state.tick(), state.gravity());
-        for (unit, _) in flying {
-            let off = state.body_of(&state[unit]).pos.distance(anchor.pos);
-            assert!(off < 1.0, "{unit:?} holds {off} meters off its destination");
-        }
+        let held = state
+            .body_of(&state[unit])
+            .pos
+            .distance(state.rock_body(rock(1)).pos);
+        assert!(held < 1.0, "it holds {held} meters off its rock");
+    }
+
+    #[test]
+    fn units_re_homed_within_the_window_fly_one_send() {
+        let state = holding(
+            Roster::shipped(),
+            BTreeMap::from([(CONSTRUCTOR, 1), (SCOUT, 1)]),
+        );
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+                numbered(0, 1, rock(0), SCOUT, 1),
+            ],
+        );
+        let flight_of = |state: &State, row| {
+            state
+                .entities()
+                .find(|entity| entity.row() == row)
+                .and_then(Entity::flight)
+        };
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+            ],
+        );
+        let first = flight_of(&state, CONSTRUCTOR).expect("the first send formed");
+        let state = run(state, Send::FORMING_TICKS - 1);
+        let state = tick(
+            state,
+            &[
+                numbered(0, 2, rock(0), SCOUT, 0),
+                numbered(0, 3, rock(1), SCOUT, 1),
+            ],
+        );
+
+        assert_eq!(
+            flight_of(&state, SCOUT),
+            Some(first),
+            "a unit re-homed inside the window opened a send of its own"
+        );
+        assert_eq!(state.tick(), first.departs());
+        assert!(
+            state
+                .entities()
+                .all(|entity| entity.is_flying(state.tick())),
+            "the window closed and the send did not depart"
+        );
+    }
+
+    #[test]
+    fn a_unit_re_homed_after_the_window_flies_its_own_send() {
+        let state = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
+        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 2)]);
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+            ],
+        );
+        let first = state
+            .entities()
+            .find_map(Entity::flight)
+            .expect("the first send formed");
+
+        let state = run(state, Send::FORMING_TICKS + 1);
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 2),
+            ],
+        );
+
+        let second = state
+            .entities()
+            .filter_map(Entity::flight)
+            .find(|flight| *flight != first)
+            .expect("the second unit flies a send of its own");
+        assert!(
+            second.departs() > first.departs(),
+            "it joined a send that had already departed"
+        );
+    }
+
+    #[test]
+    fn a_unit_whose_send_is_forming_stands_at_the_rock_it_leaves() {
+        let mut state = start(&[TeamId(0), TeamId(1)]);
+        let prey = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), SHIPYARD, 1),
+                numbered(0, 1, rock(0), FRIGATE, 1),
+            ],
+        );
+        let building = state[FRIGATE].cost.total() / 15.0;
+        let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
+        let shooter = state
+            .entities()
+            .find(|entity| entity.row() == FRIGATE)
+            .expect("the frigate")
+            .id();
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 2, rock(0), FRIGATE, 0),
+                numbered(0, 3, rock(1), FRIGATE, 1),
+            ],
+        );
+
+        assert!(state[shooter].flight().is_some(), "its send is forming");
+        assert!(!state[shooter].is_flying(state.tick()));
+        assert_eq!(state[shooter].standing(state.tick()), Some(rock(0)));
+        assert_eq!(count(&state, 0, rock(1), FRIGATE), 1, "it counts toward it");
+        assert!(
+            shot_at(&state, prey, u64::from(TICKS_PER_SECOND) / 2 + 1).is_some(),
+            "a forming unit stopped shooting"
+        );
     }
 
     #[test]
@@ -501,67 +647,34 @@ mod tests {
             Roster::shipped().moving_at(Real(1e-6)),
             BTreeMap::from([(CONSTRUCTOR, 1)]),
         );
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
+        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
         let unit = state.entities().next().expect("the constructor").id();
 
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
-                numbered(0, 1, inner(1), CONSTRUCTOR, 1),
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
             ],
         );
 
-        assert!(!state[unit].is_flying(), "a unit that cannot fly was sent");
-        assert_eq!(state[unit].home(), inner(0), "it left home");
-        assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 0);
-        assert_eq!(state.frames().len(), 1, "the shortfall opened no frame");
         assert!(
-            !state[unit].is_surplus(),
-            "it was scrapped while a shortfall wants it"
+            state[unit].flight().is_none(),
+            "a unit that cannot fly was sent"
         );
+        assert_eq!(state[unit].home(), rock(0), "it left home");
+        assert_eq!(count(&state, 0, rock(1), CONSTRUCTOR), 0);
+        assert_eq!(state.frames().len(), 1, "the shortfall opened no frame");
     }
 
     #[test]
-    fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
-        let depart = state.tick().next();
-
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
-                numbered(0, 1, inner(1), CONSTRUCTOR, 1),
-            ],
-        );
-
-        let unit = state.entities().next().expect("the constructor").id();
-        let arrive = state[unit].flight().expect("a flight").arrive();
-        let gravity = state.gravity();
-        let source = state.anchor(inner(0)).at(depart, gravity);
-        let limit = state.roster().movement_limit().0;
-        let second = u64::from(TICKS_PER_SECOND);
-        assert!(arrive.0 - depart.0 > second, "the first candidate answered");
-        for step in (second..arrive.0 - depart.0).step_by(second as usize) {
-            let earlier = Tick(depart.0 + step);
-            let target = state.anchor(inner(1)).at(earlier, gravity);
-            assert_eq!(
-                Schedule::between(source, target, depart, earlier, limit, gravity),
-                None,
-                "arriving at {earlier:?} would have fitted"
-            );
-        }
-    }
-
-    #[test]
-    fn a_surplus_with_no_shortfall_is_scrapped_and_refunded() {
+    fn a_surplus_unit_with_no_shortfall_is_never_scrapped() {
         let state = start(&[TeamId(0)]);
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), SHIPYARD, 1),
-                numbered(0, 1, inner(0), CONSTRUCTOR, 1),
+                numbered(0, 0, rock(0), SHIPYARD, 1),
+                numbered(0, 1, rock(0), CONSTRUCTOR, 1),
             ],
         );
         let stock = state[SeatId(0)].stockpile().stock();
@@ -571,49 +684,107 @@ mod tests {
             .expect("the constructor")
             .id();
 
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 0)]);
-        assert!(state[unit].is_surplus(), "it was not marked");
+        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 0)]);
+        let state = run(state, 8 * u64::from(TICKS_PER_SECOND));
 
-        let state = run(state, 4 * u64::from(TICKS_PER_SECOND));
-
-        assert_eq!(state.entity(unit), None, "it was not scrapped");
-        let refunded = state[SeatId(0)].stockpile().stock() - stock;
-        let cost = state[CONSTRUCTOR].cost;
+        assert!(state.entity(unit).is_some(), "the surplus was scrapped");
+        assert_eq!(state[unit].home(), rock(0), "it left the rock it stands on");
+        assert_eq!(state[unit].hp(), state[CONSTRUCTOR].hp.0);
+        let gained = state[SeatId(0)].stockpile().stock() - stock;
         assert!(
-            (refunded.total() - cost.total()).abs() < 1e-6,
-            "refunded {refunded:?} of a {cost:?} constructor"
+            gained.total() < state[CONSTRUCTOR].cost.total(),
+            "a whole cost came back: {gained:?}"
         );
     }
 
     #[test]
-    fn a_want_that_comes_back_lifts_the_surplus_mark() {
+    fn a_post_opens_one_frame_of_a_row_at_a_time_and_rows_build_in_parallel() {
         let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
+        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), STORAGE, 3),
+                numbered(0, 1, rock(0), EXTRACTOR, 2),
+            ],
+        );
+
+        let open = |state: &State, row| {
+            state
+                .frames_at(post(0, rock(0)))
+                .filter(|frame| frame.row() == row)
+                .count()
+        };
+        assert_eq!(open(&state, STORAGE), 1, "a shortfall of three opened more");
+        assert_eq!(open(&state, EXTRACTOR), 1, "rows build in parallel");
+
+        let mut state = state;
+        for _ in 0..30 * u64::from(TICKS_PER_SECOND) {
+            if count(&state, 0, rock(0), STORAGE) == 1 {
+                break;
+            }
+            state = tick(state, &[]);
+        }
+        assert_eq!(count(&state, 0, rock(0), STORAGE), 1, "none completed");
+        assert_eq!(open(&state, STORAGE), 0, "its frame closed on completion");
+
+        let state = tick(state, &[]);
+
+        assert_eq!(open(&state, STORAGE), 1, "the next frame opened");
+        assert_eq!(count(&state, 0, rock(0), STORAGE), 1, "and only the next");
+    }
+
+    #[test]
+    fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
+        let state = start(&[TeamId(0)]);
+        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
+        let depart = Tick(state.tick().0 + Send::FORMING_TICKS).next();
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+            ],
+        );
+
         let unit = state.entities().next().expect("the constructor").id();
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 0)]);
-        assert!(state[unit].is_surplus());
-
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
-
-        assert!(!state[unit].is_surplus());
+        let flight = state[unit].flight().expect("a flight");
+        let arrive = flight.arrive();
+        assert_eq!(flight.departs(), depart);
+        let gravity = state.gravity();
+        let source = state[rock(0)].orbit().at(depart, gravity);
+        let limit = state.roster().movement_limit().0;
+        let second = u64::from(TICKS_PER_SECOND);
+        assert!(arrive.0 - depart.0 > second, "the first candidate answered");
+        for step in (second..arrive.0 - depart.0).step_by(second as usize) {
+            let earlier = Tick(depart.0 + step);
+            let target = state[rock(1)].orbit().at(earlier, gravity);
+            assert_eq!(
+                Schedule::between(source, target, depart, earlier, limit, gravity),
+                None,
+                "arriving at {earlier:?} would have fitted"
+            );
+        }
     }
 
     #[test]
     fn an_armed_unit_kills_an_unarmed_enemy_at_its_rock() {
         let mut state = start(&[TeamId(0), TeamId(1)]);
 
-        let prey = state.spawn(SeatId(1), STORAGE, inner(0), Motion::Fixed);
+        let prey = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), SHIPYARD, 1),
-                numbered(0, 1, inner(0), FRIGATE, 1),
+                numbered(0, 0, rock(0), SHIPYARD, 1),
+                numbered(0, 1, rock(0), FRIGATE, 1),
             ],
         );
 
         let building = state[FRIGATE].cost.total() / 15.0;
         let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        assert_eq!(count(&state, 0, inner(0), FRIGATE), 1);
+        assert_eq!(count(&state, 0, rock(0), FRIGATE), 1);
 
         let interval = u64::from(TICKS_PER_SECOND) / 2;
         let hit = shot_at(&state, prey, interval + 1).expect("the frigate fired");
@@ -639,9 +810,9 @@ mod tests {
         let state = tick(
             state,
             &[
-                numbered(0, 0, inner(0), SHIPYARD, 1),
-                numbered(0, 1, inner(0), FRIGATE, 1),
-                want(1, inner(0), CONSTRUCTOR, 1),
+                numbered(0, 0, rock(0), SHIPYARD, 1),
+                numbered(0, 1, rock(0), FRIGATE, 1),
+                want(1, rock(0), CONSTRUCTOR, 1),
             ],
         );
         let building = state[FRIGATE].cost.total() / 15.0;
@@ -660,12 +831,14 @@ mod tests {
         let state = tick(
             state,
             &[
-                numbered(1, 1, inner(0), CONSTRUCTOR, 0),
-                numbered(1, 2, inner(1), CONSTRUCTOR, 1),
+                numbered(1, 1, rock(0), CONSTRUCTOR, 0),
+                numbered(1, 2, rock(1), CONSTRUCTOR, 1),
             ],
         );
 
-        assert!(state[prey].is_flying());
+        let state = run(state, Send::FORMING_TICKS + 1);
+
+        assert!(state[prey].is_flying(state.tick()));
         assert_eq!(
             shot_at(&state, prey, interval + 1),
             None,
@@ -687,7 +860,7 @@ mod tests {
         assert!(!state[SeatId(0)].alive());
         assert!(state[SeatId(1)].alive());
         assert_eq!(
-            refusal(&state, want(0, inner(0), SHIPYARD, 1)),
+            refusal(&state, want(0, rock(0), SHIPYARD, 1)),
             Some(Rejected::DeadSeat)
         );
     }
@@ -695,17 +868,12 @@ mod tests {
     #[test]
     fn a_want_the_state_cannot_take_is_rejected_by_name_and_changes_nothing() {
         let state = start(&[TeamId(0)]);
-        let outer = Place {
-            rock: RockId(0),
-            band: Band::Outer,
-        };
 
         let refusals = [
-            (want(9, inner(0), SHIPYARD, 1), Rejected::NoSuchSeat),
-            (want(0, inner(99), SHIPYARD, 1), Rejected::NoSuchRock),
-            (want(0, inner(0), RowId(u16::MAX), 1), Rejected::NoSuchRow),
-            (want(0, outer, SHIPYARD, 1), Rejected::StructureOutside),
-            (want(0, inner(0), FRIGATE, MAX_WANT + 1), Rejected::TooMany),
+            (want(9, rock(0), SHIPYARD, 1), Rejected::NoSuchSeat),
+            (want(0, rock(99), SHIPYARD, 1), Rejected::NoSuchRock),
+            (want(0, rock(0), RowId(u16::MAX), 1), Rejected::NoSuchRow),
+            (want(0, rock(0), FRIGATE, MAX_WANT + 1), Rejected::TooMany),
         ];
 
         for (issued, why) in refusals {
@@ -713,7 +881,7 @@ mod tests {
             let (next, _) = state.step(&batch(&[issued]));
             assert_eq!(next.posts().count(), 0, "{issued:?} left a want behind");
         }
-        assert_eq!(refusal(&state, want(0, inner(0), FRIGATE, MAX_WANT)), None);
+        assert_eq!(refusal(&state, want(0, rock(0), FRIGATE, MAX_WANT)), None);
     }
 
     #[test]
@@ -721,10 +889,10 @@ mod tests {
         let state = start(&[TeamId(0), TeamId(1)]);
 
         let issued = [
-            numbered(0, 0, inner(0), FRIGATE, 3),
-            numbered(0, 1, inner(0), FRIGATE, 7),
-            numbered(1, 0, inner(2), CONSTRUCTOR, 1),
-            numbered(0, 2, inner(1), SHIPYARD, 1),
+            numbered(0, 0, rock(0), FRIGATE, 3),
+            numbered(0, 1, rock(0), FRIGATE, 7),
+            numbered(1, 0, rock(2), CONSTRUCTOR, 1),
+            numbered(0, 2, rock(1), SHIPYARD, 1),
         ];
 
         let (ordered, _) = state.step(&batch(&issued));
@@ -736,7 +904,7 @@ mod tests {
         assert_eq!(ordered, arrived);
         assert_eq!(
             ordered
-                .wants(post(0, inner(0)))
+                .wants(post(0, rock(0)))
                 .map(|wants| wants.get(FRIGATE)),
             Some(7),
             "the seat's later command is the one that stands"
@@ -748,13 +916,13 @@ mod tests {
     fn one_tick_of_a_full_belt_fits_the_budget() {
         let mut state = start(&[TeamId(0), TeamId(1)]);
         for at in 0..100u32 {
-            let place = inner(at % 21);
+            let home = rock(at % 21);
             let seat = SeatId((at / 21 % 2) as u8);
             let motion = Motion::Free {
-                body: Maneuver::spawn_body(&state, place, state.tick()),
+                body: Maneuver::spawn_body(&state, home, state.tick()),
                 flight: None,
             };
-            state.spawn(seat, FRIGATE, place, motion);
+            state.spawn(seat, FRIGATE, home, motion);
         }
         let entities = state.entities().count();
         let rocks = state.rocks().len();

@@ -43,7 +43,6 @@ mod tests {
     use crate::materials::Materials;
     use crate::orbit::body::{Body, Gravity};
     use crate::orbit::elements::Orbit;
-    use crate::place::{Band, Place};
     use crate::roster::{FRIGATE, Roster, SCOUT};
     use crate::state::rock::Rock;
     use crate::state::seat::Seat;
@@ -53,12 +52,7 @@ mod tests {
 
     const MU: Gravity = Gravity::new(4.4e17);
 
-    fn place() -> Place {
-        Place {
-            rock: RockId(0),
-            band: Band::Inner,
-        }
-    }
+    const ROCK: RockId = RockId(0);
 
     fn state() -> State {
         let radius = 1.0e7;
@@ -80,16 +74,16 @@ mod tests {
     #[test]
     fn a_seat_sees_its_team_and_what_its_team_is_near() {
         let mut state = state();
-        let anchor = state.anchor(place()).at(Tick::ZERO, MU);
+        let home = state.rock_body(ROCK);
         let at = |offset: f64| Motion::Free {
-            body: Body::new(anchor.pos + Vec3::new(offset, 0.0, 0.0), anchor.vel),
+            body: Body::new(home.pos + Vec3::new(offset, 0.0, 0.0), home.vel),
             flight: None,
         };
-        let mine = state.spawn(SeatId(0), FRIGATE, place(), at(0.0));
-        let ally = state.spawn(SeatId(1), FRIGATE, place(), at(100.0));
-        let near = state.spawn(SeatId(2), FRIGATE, place(), at(6.0));
-        let near_the_ally = state.spawn(SeatId(2), FRIGATE, place(), at(104.0));
-        let far = state.spawn(SeatId(2), FRIGATE, place(), at(50.0));
+        let mine = state.spawn(SeatId(0), FRIGATE, ROCK, at(0.0));
+        let ally = state.spawn(SeatId(1), FRIGATE, ROCK, at(100.0));
+        let near = state.spawn(SeatId(2), FRIGATE, ROCK, at(6.0));
+        let near_the_ally = state.spawn(SeatId(2), FRIGATE, ROCK, at(104.0));
+        let far = state.spawn(SeatId(2), FRIGATE, ROCK, at(50.0));
         let sweep = state.sweep();
 
         let sight = Sight::of(&state, SeatId(0), &sweep);
@@ -108,13 +102,13 @@ mod tests {
     #[test]
     fn a_longer_ranged_row_widens_what_its_seat_sees() {
         let mut state = state();
-        let anchor = state.anchor(place()).at(Tick::ZERO, MU);
+        let home = state.rock_body(ROCK);
         let at = |offset: f64| Motion::Free {
-            body: Body::new(anchor.pos + Vec3::new(offset, 0.0, 0.0), anchor.vel),
+            body: Body::new(home.pos + Vec3::new(offset, 0.0, 0.0), home.vel),
             flight: None,
         };
-        state.spawn(SeatId(0), SCOUT, place(), at(0.0));
-        let enemy = state.spawn(SeatId(2), FRIGATE, place(), at(15.0));
+        state.spawn(SeatId(0), SCOUT, ROCK, at(0.0));
+        let enemy = state.spawn(SeatId(2), FRIGATE, ROCK, at(15.0));
         let sweep = state.sweep();
         assert!(Sight::of(&state, SeatId(0), &sweep).sees(enemy));
     }
@@ -122,7 +116,7 @@ mod tests {
     #[test]
     fn a_seat_the_match_lacks_sees_nothing() {
         let mut state = state();
-        state.spawn(SeatId(0), FRIGATE, place(), Motion::Fixed);
+        state.spawn(SeatId(0), FRIGATE, ROCK, Motion::Fixed);
         let sweep = state.sweep();
         assert_eq!(Sight::of(&state, SeatId(9), &sweep).iter().count(), 0);
     }

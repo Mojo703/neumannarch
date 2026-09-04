@@ -14,7 +14,7 @@ use probe_game::display::scene::{
 use probe_game::display::viewport::Viewport;
 use probe_game::display::{belt, hud};
 use probe_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD};
-use probe_sim::{Band, Materials, Place, RockId, RowId, SeatId, Vec3};
+use probe_sim::{Materials, RockId, RowId, SeatId, Vec3};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
@@ -103,10 +103,10 @@ fn caps_of(id: u32) -> Materials {
     }
 }
 
-fn ring(place: Place, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
+fn ring(rock: RockId, runs: Vec<Run>, arcs: Vec<Arc>) -> RingView {
     RingView {
-        place,
-        caps: caps_of(place.rock.0),
+        rock,
+        caps: caps_of(rock.0),
         runs,
         arcs,
     }
@@ -142,18 +142,9 @@ fn region_scene() -> Scene {
         rock(2, Vec3::new(-50.0, 0.0, 40.0), 4.0),
     ];
 
-    let inner_a = Place {
-        rock: RockId(0),
-        band: Band::Inner,
-    };
-    let inner_b = Place {
-        rock: RockId(1),
-        band: Band::Inner,
-    };
-    let inner_c = Place {
-        rock: RockId(2),
-        band: Band::Inner,
-    };
+    let inner_a = RockId(0);
+    let inner_b = RockId(1);
+    let inner_c = RockId(2);
 
     let entities = vec![
         ship(0, RAIDER, Vec3::new(4.0, 0.0, 2.0)),
@@ -211,10 +202,7 @@ fn region_camera() -> BeltCamera {
 
 fn fight_scene() -> Scene {
     let rocks = vec![rock(0, Vec3::ZERO, 6.0)];
-    let inner = Place {
-        rock: RockId(0),
-        band: Band::Inner,
-    };
+    let inner = RockId(0);
 
     let entities = vec![
         ship(0, FRIGATE, Vec3::new(5.0, 0.0, 1.0)),
@@ -288,10 +276,7 @@ fn belt_scene() -> Scene {
         .enumerate()
         .map(|(index, (_, seat))| {
             ring(
-                Place {
-                    rock: RockId(index as u32),
-                    band: Band::Inner,
-                },
+                RockId(index as u32),
                 vec![present(seat, &[FRIGATE])],
                 vec![],
             )
