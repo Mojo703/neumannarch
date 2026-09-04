@@ -1,28 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use crate::TICKS_PER_SECOND;
 use crate::ids::{EntityId, RowId, SeatId};
 use crate::place::{Place, Post};
 use crate::roster::Kind;
-use crate::state::{Entity, Schedule, State};
-use crate::time::Tick;
-
-const SEARCH_STEP: u64 = TICKS_PER_SECOND as u64;
-
-const SEARCH_BOUND: u64 = 600 * TICKS_PER_SECOND as u64;
+use crate::state::{Entity, Send, State};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     pub post: Post,
     pub row: RowId,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Send {
-    pub source: Place,
-    pub destination: Place,
-    pub schedules: BTreeMap<RowId, Schedule>,
-    pub members: Vec<EntityId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -47,43 +33,6 @@ pub struct Assigned {
     pub openings: Vec<Opening>,
     pub cancellations: Vec<Cancellation>,
     pub marked: Vec<EntityId>,
-}
-
-impl Send {
-    pub(crate) fn solved(
-        state: &State,
-        source: Place,
-        destination: Place,
-        members: &[EntityId],
-    ) -> Option<Send> {
-        let gravity = state.gravity();
-        let depart = state.tick().next();
-        let from = state.anchor(source).at(depart, gravity);
-        let rows: BTreeSet<RowId> = members
-            .iter()
-            .filter_map(|id| state.entity(*id))
-            .map(Entity::row)
-            .collect();
-        (SEARCH_STEP..=SEARCH_BOUND)
-            .step_by(SEARCH_STEP as usize)
-            .find_map(|step| {
-                let arrive = Tick(depart.0 + step);
-                let to = state.anchor(destination).at(arrive, gravity);
-                let schedules: BTreeMap<RowId, Schedule> = rows
-                    .iter()
-                    .filter_map(|row| {
-                        Schedule::between(from, to, depart, arrive, state[*row].accel.0, gravity)
-                            .map(|schedule| (*row, schedule))
-                    })
-                    .collect();
-                (schedules.len() == rows.len()).then(|| Send {
-                    source,
-                    destination,
-                    schedules,
-                    members: members.to_vec(),
-                })
-            })
-    }
 }
 
 pub struct Fulfilment<'a> {

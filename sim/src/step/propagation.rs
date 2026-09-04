@@ -65,8 +65,7 @@ mod tests {
     use crate::orbit::elements::Orbit;
     use crate::place::{Band, Place};
     use crate::roster::{FRIGATE, Roster, SCOUT, SHIPYARD};
-    use crate::state::{Rock, Seat};
-    use crate::step::fulfilment::Send;
+    use crate::state::{Rock, Seat, Send};
     use crate::step::maneuver::Maneuver;
     use crate::time::Tick;
     use crate::vec3::Vec3;
@@ -243,22 +242,21 @@ mod tests {
     fn a_send_of_two_rows_stops_flying_together_and_holds_at_its_destination_anchor() {
         let mut world = World::with(SLOW);
         let (from, to) = (inner(0), inner(1));
-        let rows = [FRIGATE, SCOUT];
-        let units: Vec<EntityId> = rows
+        let units: Vec<EntityId> = [FRIGATE, SCOUT]
             .into_iter()
             .map(|row| world.spawn(SeatId(0), row, to, 0.0))
             .collect();
         let send =
             Send::solved(&world.state, from, to, &units).expect("a send of a frigate and a scout");
-        for (at, (unit, row)) in units.iter().zip(rows).enumerate() {
+        for (at, unit) in units.iter().enumerate() {
             world.send(
                 *unit,
                 from,
                 at as f64 * CLEAR,
-                Flight::new(from, send.schedules[&row]),
+                Flight::new(from, send.schedule),
             );
         }
-        let arrive = send.schedules[&FRIGATE].arrive();
+        let arrive = send.schedule.arrive();
 
         world.run(arrive.0 - world.state.tick().0);
 

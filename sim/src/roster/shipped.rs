@@ -14,7 +14,7 @@ pub const LANCER: RowId = RowId(7);
 
 const STORE: Materials = Materials::new(500.0, 500.0, 500.0);
 
-const MANEUVER_SHARE: f64 = 0.25;
+pub(super) const MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED: f64 = 4.0;
 
 pub(super) fn rows() -> Vec<Row> {
     vec![
@@ -22,7 +22,7 @@ pub(super) fn rows() -> Vec<Row> {
             "constructor",
             Materials::new(30.0, 10.0, 10.0),
             50.0,
-            4.0,
+            1.0,
             6.0,
             vec![Weapon::Build { rate: Real(3.0) }],
         ),
@@ -62,7 +62,7 @@ pub(super) fn rows() -> Vec<Row> {
                 "scout",
                 Materials::new(5.0, 10.0, 0.0),
                 15.0,
-                10.0,
+                2.5,
                 20.0,
                 vec![],
             )
@@ -71,7 +71,7 @@ pub(super) fn rows() -> Vec<Row> {
             "raider",
             Materials::new(20.0, 20.0, 5.0),
             40.0,
-            8.0,
+            2.0,
             12.0,
             vec![Weapon::Damage {
                 range: Real(3.0),
@@ -86,7 +86,7 @@ pub(super) fn rows() -> Vec<Row> {
                 "frigate",
                 Materials::new(80.0, 10.0, 30.0),
                 150.0,
-                2.0,
+                0.5,
                 8.0,
                 vec![Weapon::Damage {
                     range: Real(6.0),
@@ -102,7 +102,7 @@ pub(super) fn rows() -> Vec<Row> {
                 "lancer",
                 Materials::new(40.0, 5.0, 40.0),
                 60.0,
-                3.0,
+                0.75,
                 5.0,
                 vec![Weapon::Damage {
                     range: Real(14.0),
@@ -119,7 +119,7 @@ fn row(
     name: &'static str,
     cost: Materials,
     hp: f64,
-    accel: f64,
+    manoeuvring: f64,
     sight: f64,
     weapons: Vec<Weapon>,
 ) -> Row {
@@ -127,8 +127,7 @@ fn row(
         name,
         cost,
         mass: Real(cost.metals),
-        accel: Real(accel),
-        maneuver: Real(accel * MANEUVER_SHARE),
+        manoeuvring: Real(manoeuvring),
         hp: Real(hp),
         plating: Real(0.0),
         sight: Real(sight),
@@ -172,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn structures_are_the_rows_that_cannot_accelerate() {
+    fn the_shipped_structures_are_the_rows_with_no_manoeuvring() {
         for (id, row) in Roster::shipped().iter() {
             let expected = if [EXTRACTOR, STORAGE, SHIPYARD].contains(&id) {
                 Kind::Structure
@@ -200,13 +199,6 @@ mod tests {
             .filter(|(id, _)| ![SCOUT, LANCER].contains(id))
         {
             assert_eq!(row.radar.0, row.sight.0 * 2.0, "{id:?}");
-        }
-    }
-
-    #[test]
-    fn every_row_manoeuvres_at_a_quarter_of_its_movement_limit() {
-        for row in rows() {
-            assert_eq!(row.maneuver.0, row.accel.0 * MANEUVER_SHARE, "{}", row.name);
         }
     }
 

@@ -106,7 +106,7 @@ pub struct State {
     clock: Tick,                    // the match ends here
     gravity: Gravity,               // the central mass's μ
     seats: Vec<Seat>,               // team, alive, stockpile, reserve
-    roster: Roster,                 // Vec<Row>, indexed by RowId
+    roster: Roster,                 // the movement limit and Vec<Row>
     rocks: Vec<Rock>,               // orbit, caps, radius; indexed by RockId
     entities: BTreeMap<EntityId, Entity>,   // dead ones removed
     next_entity: EntityId,          // the id the next spawn takes
@@ -132,6 +132,8 @@ pub struct Body { pub pos: Vec3, pub vel: Vec3 }            // inertial frame
 pub struct Flight { source: Place, schedule: Schedule }
 pub struct Schedule { burns: [Burn; 2], arrive: Tick }
 struct Burn { from: Tick, ticks: NonZeroU32, accel: Vec3 }  // held whole ticks
+pub struct Send { source: Place, destination: Place,        // one schedule,
+                  schedule: Schedule, members: Vec<EntityId> }   // every member
 ```
 
 - Ids are newtypes over the index into their store: `RockId(u32)`,
@@ -150,10 +152,13 @@ struct Burn { from: Tick, ticks: NonZeroU32, accel: Vec3 }  // held whole ticks
   elliptic conic as equinoctial elements with the tick its mean longitude
   is stated at; a rock never thrusts, so its body at any tick is
   `Orbit::at`.
-- `Roster` owns the rows. The shipped eight are built by `Roster::shipped()`
-  from `roster/shipped.rs`; `Roster::add(Row) -> RowId` serves harness
-  variants. A row's kind is `Row::kind()`: `Structure` when acceleration is
-  zero, else `Unit`. No `Copy` of a row lives anywhere but the roster.
+- `Roster` owns the movement limit and the rows. The shipped eight are built
+  by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`
+  and `Roster::moving_at(Real) -> Roster` serve harness variants.
+  `Roster::movement_limit()` is the one acceleration every unit transfers at,
+  so it hashes with the state and a faction can skew it. A row's kind is
+  `Row::kind()`: `Structure` when its manoeuvring limit is zero, else `Unit`.
+  No `Copy` of a row lives anywhere but the roster.
 - `Frame { post: Post, row: RowId, progress: Real }`: the work done so far,
   in cost units. An entity marked surplus carries its own scrapping the
   same way, in `Entity::scrap`, which is `None` until fulfilment marks it.
@@ -318,9 +323,9 @@ order; anything sorted is sorted by a total key ending in an id.
   body at a tick is `Orbit::at`. `Band::amplitude()` holds the two
   constants. An anchor is an orbit, and `Orbit::at` is its body at a
   tick; it is never an entity and never a body in state.
-- **Schedules.** A `Schedule` is one row's thrust for one send: two `Burn`s
+- **Schedules.** A `Schedule` is one send's thrust: two `Burn`s
   and the arrival tick, a burn being an acceleration held over whole ticks.
-  A burn is built only from a delta-v and the row's movement limit, so its
+  A burn is built only from a delta-v and the roster's movement limit, so its
   tick count is the ceiling of the delta-v over the limit and its
   acceleration is at or below the limit by construction. `Schedule::coasting`
   builds both burns and answers `Some` only when they leave a coast between
@@ -329,7 +334,7 @@ order; anything sorted is sorted by a total key ending in an id.
   `BURN_SHARE_OF_SPAN` of the span. That margin is the existence predicate,
   and it is free, so a candidate arrival tick failing it is never integrated.
   `Schedule::between(source, target, depart, arrive, limit, gravity)` solves
-  one row at one candidate arrival tick: `orbit::lambert::solve` from the
+  one candidate arrival tick: `orbit::lambert::solve` from the
   source anchor's body at `depart` to an aim point, prograde and single
   revolution, gives the impulses; `coasting` builds the schedule; the
   schedule is integrated; the aim moves by the miss at `arrive` and the
@@ -343,12 +348,15 @@ order; anything sorted is sorted by a total key ending in an id.
   bounds, far inside the tolerance the solver accepted against, and every
   machine runs this code, so the contract between solver and step is the
   tolerance, not the arithmetic.
-  `Send::solved(state, source, destination, members)` walks candidate arrival
-  ticks upward one second at a time from the tick after the current one,
-  which is the tick a member first thrusts, and takes the first at which
-  every row in the send has a schedule; past its bound it answers `None`.
-  A flight is a `Schedule` and the place it left, carried by the unit
-  itself, so an arrived unit drops it and no store is reaped.
+- **Sends.** `Send::solved(state, source, destination, members)` walks
+  candidate arrival ticks upward one second at a time from the tick after
+  the current one, which is the tick a member first thrusts, and takes the
+  first with a schedule at the roster's movement limit; past its bound it
+  answers `None`. A `Send` holds that one schedule and its members, so
+  every ship of it flies the same burns and arrives on the same tick,
+  whatever rows they are. A flight is a `Schedule` and the place it left,
+  carried by the unit itself, so an arrived unit drops it and no store is
+  reaped.
 - **The attractor.** `Attractor::pulling(state, &Entity, &Sight, &Sweep) ->
   Option<Attractor>` reads the snapshot and applies DESIGN.md's order:
   nothing while the unit flies a schedule, the half-range point off the
@@ -357,10 +365,11 @@ order; anything sorted is sorted by a total key ending in an id.
   (Sight, below), and is the only such query.
 - **Manoeuvring.** `Maneuver::of(&State).run() -> Thrusts` is one thrust
   per free unit in id order, each the pull to its attractor plus one pair
-  term per ship within the cutoff, clamped to the row's `maneuver`. A unit
-  with no attractor has no pull, so in flight the rule serves separation
-  alone. Propagation adds the schedule's thrust for the tick on top, which
-  is within the row's movement limit by construction. The manoeuvring
+  term per ship within the cutoff, clamped to the row's `manoeuvring`. A
+  unit with no attractor has no pull, so in flight the rule serves
+  separation alone. Propagation adds the schedule's thrust for the tick on
+  top, so a flying ship spends both limits, its manoeuvring on keeping
+  apart as at home. The manoeuvring
   constants are the stiffness, the damping, the spacing, the cutoff and the
   pair strength; the module stores nothing in state and reads only the
   snapshot, so it can be replaced whole.
@@ -909,13 +918,14 @@ sim/src/
   time.rs           Tick, Moment
   ids.rs            RockId, EntityId, RowId, SeatId, TeamId
   place.rs          Band, Place, Post
-  roster/           mod.rs Roster; row.rs Row, Weapon, Kind, MassClass;
-                    shipped.rs the eight
+  roster/           mod.rs Roster and the movement limit; row.rs Row,
+                    Weapon, Kind, MassClass; shipped.rs the eight
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
                     entity.rs Entity, Motion; schedule.rs Flight,
-                    Schedule, Burn, the solve;
+                    Schedule, Burn, the solve; send.rs Send and the
+                    search for its arrival tick;
                     attractor.rs; sight.rs Sight; radar.rs Radar;
                     wants.rs Wants; frame.rs Frame, its fraction and what
                     it went short of; ready.rs; command.rs Command,

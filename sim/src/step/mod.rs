@@ -78,11 +78,9 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
         }
     }
     for send in &filled.sends {
-        for (row, schedule) in &send.schedules {
-            let flight = Flight::new(send.source, *schedule);
-            for member in send.members.iter().filter(|id| snap[**id].row() == *row) {
-                join(next, *member, send.destination, flight);
-            }
+        let flight = Flight::new(send.source, send.schedule);
+        for member in &send.members {
+            join(next, *member, send.destination, flight);
         }
     }
     let ids: Vec<EntityId> = next.entities().map(|entity| entity.id()).collect();
@@ -261,8 +259,8 @@ mod tests {
     use crate::materials::Material;
     use crate::place::{Band, Place, Post};
     use crate::real::Real;
-    use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, SHIPYARD, STORAGE};
-    use crate::roster::{Roster, Row};
+    use crate::roster::Roster;
+    use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, SCOUT, SHIPYARD, STORAGE};
     use crate::setup::Setup;
     use crate::state::view::View;
     use crate::state::{Command, MAX_WANT, Schedule, Seat};
@@ -327,6 +325,17 @@ mod tests {
             state = tick(state, &[]);
         }
         state
+    }
+
+    fn holding(roster: Roster, reserve: BTreeMap<RowId, u32>) -> State {
+        State::new(
+            CLOCK,
+            0,
+            Belt::GRAVITY,
+            roster,
+            Belt::fixed(Belt::GRAVITY),
+            vec![Seat::new(TeamId(0), Materials::new(1e4, 1e4, 1e4), reserve)],
+        )
     }
 
     fn count(state: &State, seat: u8, place: Place, row: RowId) -> u32 {
@@ -435,10 +444,65 @@ mod tests {
     }
 
     #[test]
-    fn a_surplus_flies_to_the_nearest_shortfall_and_arrives_on_its_anchors_orbit() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
+    fn a_surplus_of_two_rows_flies_the_one_schedule_to_the_nearest_shortfall() {
+        let state = holding(
+            Roster::shipped(),
+            BTreeMap::from([(CONSTRUCTOR, 1), (SCOUT, 1)]),
+        );
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, inner(0), CONSTRUCTOR, 1),
+                numbered(0, 1, inner(0), SCOUT, 1),
+            ],
+        );
         assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 1);
+        assert_eq!(count(&state, 0, inner(0), SCOUT), 1);
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
+                numbered(0, 1, inner(0), SCOUT, 0),
+                numbered(0, 2, inner(1), CONSTRUCTOR, 1),
+                numbered(0, 3, inner(1), SCOUT, 1),
+            ],
+        );
+
+        assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 1, "it counts home");
+        assert_eq!(count(&state, 0, inner(1), SCOUT), 1, "it counts home");
+        assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 0);
+        assert_eq!(state.frames().len(), 0, "a send fills the shortfall");
+        let flying: Vec<(EntityId, Flight)> = state
+            .entities()
+            .map(|entity| (entity.id(), entity.flight().expect("a flight")))
+            .collect();
+        let (first, second) = (flying[0].1, flying[1].1);
+        assert_eq!(first, second, "the two rows fly different schedules");
+        let crossing = first.arrive().0 - state.tick().0;
+
+        let state = run(state, crossing);
+        for (unit, _) in &flying {
+            assert!(!state[*unit].is_flying(), "{unit:?} is still flying");
+        }
+
+        let state = run(state, 60 * u64::from(TICKS_PER_SECOND));
+
+        let anchor = state.anchor(inner(1)).at(state.tick(), state.gravity());
+        for (unit, _) in flying {
+            let off = state.body_of(&state[unit]).pos.distance(anchor.pos);
+            assert!(off < 1.0, "{unit:?} holds {off} meters off its destination");
+        }
+    }
+
+    #[test]
+    fn a_send_the_movement_limit_cannot_fly_leaves_its_units_home_and_opens_frames() {
+        let state = holding(
+            Roster::shipped().moving_at(Real(1e-6)),
+            BTreeMap::from([(CONSTRUCTOR, 1)]),
+        );
+        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
+        let unit = state.entities().next().expect("the constructor").id();
 
         let state = tick(
             state,
@@ -448,71 +512,9 @@ mod tests {
             ],
         );
 
-        assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 1, "it counts home");
-        assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 0);
-        assert_eq!(state.frames().len(), 0, "a send fills the shortfall");
-        let unit = state.entities().next().expect("the constructor").id();
-        let arrive = state[unit].flight().expect("a flight").arrive();
-        let flying = arrive.0 - state.tick().0;
-
-        let state = run(state, flying);
-
-        assert!(
-            !state[unit].is_flying(),
-            "it is still flying at its arrival"
-        );
-        let anchor = state.anchor(inner(1)).at(state.tick(), state.gravity());
-        let body = state.body_of(&state[unit]);
-        let off = body.pos.distance(anchor.pos);
-        let drift = body.vel.distance(anchor.vel);
-        assert!(
-            off <= Schedule::ARRIVAL_POSITION_METERS,
-            "it arrived {off} meters off"
-        );
-        assert!(
-            drift <= Schedule::ARRIVAL_SPEED_METERS_PER_SECOND,
-            "it arrived {drift} meters per second across"
-        );
-    }
-
-    #[test]
-    fn a_send_no_row_can_fly_leaves_its_units_home_and_opens_frames() {
-        let mut roster = Roster::shipped();
-        let crawler = roster.add(Row {
-            name: "crawler",
-            accel: Real(1e-6),
-            maneuver: Real(2.5e-7),
-            ..roster[CONSTRUCTOR].clone()
-        });
-        let state = State::new(
-            CLOCK,
-            0,
-            Belt::GRAVITY,
-            roster,
-            Belt::fixed(Belt::GRAVITY),
-            vec![Seat::new(
-                TeamId(0),
-                Materials::new(1e4, 1e4, 1e4),
-                BTreeMap::from([(crawler, 1)]),
-            )],
-        );
-        let state = tick(state, &[want(0, inner(0), crawler, 1)]);
-        let unit = state.entities().next().expect("the crawler").id();
-
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, inner(0), crawler, 0),
-                numbered(0, 1, inner(1), crawler, 1),
-            ],
-        );
-
-        assert!(
-            !state[unit].is_flying(),
-            "a crawler that cannot fly was sent"
-        );
+        assert!(!state[unit].is_flying(), "a unit that cannot fly was sent");
         assert_eq!(state[unit].home(), inner(0), "it left home");
-        assert_eq!(count(&state, 0, inner(1), crawler), 0);
+        assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 0);
         assert_eq!(state.frames().len(), 1, "the shortfall opened no frame");
         assert!(
             !state[unit].is_surplus(),
@@ -521,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_arrives_at_the_earliest_tick_every_rows_schedule_exists() {
+    fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
         let state = start(&[TeamId(0)]);
         let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
         let depart = state.tick().next();
@@ -538,7 +540,7 @@ mod tests {
         let arrive = state[unit].flight().expect("a flight").arrive();
         let gravity = state.gravity();
         let source = state.anchor(inner(0)).at(depart, gravity);
-        let limit = state[CONSTRUCTOR].accel.0;
+        let limit = state.roster().movement_limit().0;
         let second = u64::from(TICKS_PER_SECOND);
         assert!(arrive.0 - depart.0 > second, "the first candidate answered");
         for step in (second..arrive.0 - depart.0).step_by(second as usize) {

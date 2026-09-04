@@ -18,42 +18,28 @@ best system is no system. Every brief from now carries a net-line
 budget, the agent reports lines added against deleted, and a unit that
 grows the codebase names each new type and what it made unrepresentable.
 
-1. Movement redone: one thrust schedule per row per send, solved at
-   departure by Lambert plus finite burns plus integrate-and-correct, to
-   end on the destination anchor's orbit within a tolerance; every ship
-   departs at once; ships of a row share a schedule and keep their
-   offsets; the manoeuvring rule serves separation only in flight; no
-   virtual anchor, no arrival snap. DESIGN.md Sends and Attractor
-   rewritten 2026-09-03; ARCHITECTURE.md's Flights section still states
-   the two-impulse shape and is rewritten by this unit. Opus, critique
-   answered, fresh brief carrying the rulings below. Red-state: the
-   two-impulse `Flight` and the arrival snap are deleted first and the
-   agent stops at full red for review.
-   Its critique: the old plan never integrated a trajectory (burns merely
-   fitted), both burns sat on the wrong side of their impulses, arrival
-   was an unbounded 3 m snap so a ship could fly forever unshot, and an
-   unschedulable send silently counted its shortfall as filled and
-   suppressed frames. Rulings: an unschedulable send leaves units home
-   and opens frames; ~10 ms per row per send acceptable with a
-   three-iteration correction cap; position and velocity tolerances; one
-   thrusting-tick method on `Body` shared by step and solver.
+1. One movement limit for every unit (owner, 2026-09-05): the roster's
+   acceleration field goes; the movement limit is one value of the roster
+   (hashed with the state, a faction's to skew later); a row's kind
+   derives from its manoeuvring limit (zero for a structure); a send is
+   one schedule; DESIGN.md rewritten by the overseer (World, Materials,
+   Entity, Sends; the slowest-row harness question deleted). Opus,
+   critique stop first, in flight.
 
-Owner rulings 2026-09-05: every comment in the codebase is deleted,
-rustdoc and module docs included, and none is written from now; CLAUDE.md
-states it. A tolerated runtime failure's verdict moves from a comment to
-ARCHITECTURE.md's Invariants. The networking vocabulary is renamed per the
-Sonnet judge's report and the overseer's mapping (Request, Notice,
-Relayed on the wire; Connection, WebSocket, Codec; Screen, Room, Connect,
-Action, Outcome, Join; Listener, NoListener; Holder, Occupant, Match;
-Outbound, Recipient, Forwarding, Log); the owner did the type renames in
-the editor and a Sonnet sweep finished identifiers, files, tests and
-ARCHITECTURE.md. The socket is read once: the wire carries Request,
-Notice and Relayed, decoded once into the inbox each reader drains.
-Open for the owner's ruling, found by the sweep agent under the
-confused-agent rule: `Holder` (a lobby slot's) and `Occupant` (a frozen
-seat's) are two enums over one domain told apart only by when they
-apply, and `SeatSlot.control` is a field named for the type it no
-longer has; proposed `Seated { Player, Bot }` and `holder`.
+Discussed and held (owner, 2026-09-05), not scheduled: the solve leaving
+the sim, with a send's schedule as a stamped command from the machine
+that owns its units, validated in apply by one integration against the
+tolerance and the limit, so the solver may warm-start, cache and run
+off the step and the docs state only what the sim checks; and, only
+after that, a planner memo keyed by place pair and quantised phase.
+The overseer's view: the right shape, its own unit, after one speed.
+
+Movement landed and committed da0a169 (2026-09-05): a schedule of two
+burns built only from a delta-v and the limit, existence by an
+eight-percent burn share of the span plus three aim corrections, coasts
+as one propagation in the solver and tick by tick in the step, a flight
+on its ship, no arrival snap, an unschedulable send opening frames.
+Measured: 2.8 ms per accepted candidate, 5.8 ms per row per send.
 
 ## Docs ahead of code
 
@@ -75,73 +61,108 @@ against the code at every session start. Verified 2026-09-05.
   Unit 4.
 - DISPLAY The stockpile: the whole section; the view carries no income
   or spend. Plan item 5.
-- DESIGN Sends and Attractor: schedules; the sim flies two impulses and
-  ARCHITECTURE Flights describes that. Unit 1.
+- DESIGN World, Entity and Sends: one movement limit; the sim solves one
+  schedule per row from a per-row acceleration. Unit 1.
 
-## Plan, in order
+## Plan, in order (owner and overseer, 2026-09-05)
 
-4. Screens on egui's own layout and widgets under one `Style`, driven
+Priority: holes against the invariants first, then the belt, since its
+rock count and ship count set every other number, then measurement
+before any store rewrite, then the screens the owner needs to judge by
+play, then the programme.
+
+2. Vectors, Sonnet: the connection's inboxes and both websockets' queues
+   gain a stated cap on frame count, past which the connection closes
+   (a peer past the cap has broken the protocol); the kept records as a
+   deque; the agent memory's rock sets as sorted slices; about 75 fields
+   and return types that are never mutated after construction become
+   `Box<[T]>` and `Box<str>` at the constructor sites the 2026-09-05
+   review named (protocol 6, server 9, sim 19, agents 12, game 15).
+   The per-frame wheel rebuild joins item 9. Net lines below zero.
+3. The belt and the star, design conversation first, then Opus: map
+   generation from seed with regional caps; the star as a distant light
+   and a disc; the lobby's seed changes the belt; the preview at
+   whole-belt zoom. The conversation settles the rock count, the belt's
+   spread against the schedule search bound, and the ship count a match
+   is expected to reach, which is the number items 4 and 5 answer to.
+4. The harness for scale and truth, Sonnet: a scale check that plays a
+   full bot match at the stated ship count on a release build and prints
+   milliseconds per tick; a per-tick invariant mode that checks while a
+   match plays (no thrust above a limit, every flier on an unended
+   schedule, wants against holdings after fulfilment, a re-stepped tick's
+   hash against the kept one, stock within capacity, both machines'
+   settled hashes) and names the tick and the rule on a violation; the
+   gate keeps one short match through it and the long matrices and the
+   scale check run before a sim commit. With it the test audit: every sim
+   test mapped to the DESIGN.md sentence it pins, read-only report first,
+   then the tests with no sentence deleted (the 2026-09-03 audit's ~185
+   lines are the floor).
+5. The entity columns with one vision per step, Opus, on item 4's
+   number: the entity store transposed to one column per field over a
+   dense position with a sorted id index, an entity a view over the
+   columns, iteration still in id order, `Vision { sweep, sight per
+   team }` built once per step, manoeuvring folded into propagation,
+   `PerSeat<T>`; one hash re-baseline. Ready moments onto the entity in
+   the same unit. Until then every brief carries: no rule holds an
+   entity across a tick or indexes the store by anything but an id.
+6. Screens on egui's own layout and widgets under one `Style`, driven
    headlessly through `Session::offer_ui`; deletes `control.rs`,
-   `field.rs`, every `Places` and width constant (about 1,100 lines of
-   3,200 in screens/). In the same unit: the lobby loses its Seat column
-   and the team choice carries the team's colour square; colour is the
-   team's everywhere (DISPLAY.md rings and lobby); a control for an
-   unbuilt feature is not drawn (Surrender, Settings). Opus.
-5. The stockpile bar, DISPLAY.md "The stockpile": per material an icon,
-   a bar of stock over capacity, stock and capacity stacked as numerals,
-   income and spend as signed numerals; the HUD's one numeral exception;
-   wheel slots dim when unaffordable with the short material on hover.
-   The view gains income and spend per material. Sonnet.
-6. Wire the engine work that landed 2026-09-03: `ctx.close` for Quit on
-   the desktop (not drawn in the browser), `pixels_per_point` on the
-   frame context (deletes five `ctx.ui` preambles), `set_tick_interval`
-   for pacing instead of dropping steps. Sonnet.
-7. The structural programme from the Opus audit, in its order, each unit
-   rewriting ARCHITECTURE.md and re-baselining the hash: small collapses
-   (Attractor is Body; View::want and rock_body; a two-method Transport;
-   Room folded into Socket; one belt-drawing frame preamble; one sim test
-   fixture module); a weapon's ready moment on its entity; a flight on
-   its members and `FlightId` deleted (after 3, which reshapes flights);
-   a frame on its post; one `Vision` per step with manoeuvring folded
-   into propagation and `PerSeat`; one rock type from sim to pixel; one
-   mark state replacing `Fill` and `Reason`; `Layout` yielding placed
-   marks and one `Dial` for polar geometry; mark geometry as primitives
-   painted once and rasterised once, then re-judged; one `Log` type; the
-   agent's knowledge as one row per rock (behaviour moves; play tests
-   re-run). With them: all in-body comments removed except a required
-   verdict line, rustdoc one sentence on public items only; the Sonnet
-   audits' 530 lines (tests ~185, comments ~120, duplicates ~60, agents
-   and display ~56); the seat-index rule (done in 1); `Unplanned`
-   deleted (owner). Opus for the sim stores and the agents; Sonnet for
-   the rest. Every brief carries a line ceiling; `check.sh` gains a
-   duplication check. Item 14 (the roster out of the hashed state) only
-   if the two ignored cost reports move on a measured prototype.
-8. From play, ruled: a post builds one frame of a row at a time (DESIGN
-   Build is flow and Shortfall, fulfilment, the ring's fills); a selected
-   rock owns the focus each tick until a pan releases it (DISPLAY Camera,
-   main loop).
-9. A proper belt and the star: map generation from seed with regional
-   caps; the star as a distant light and a disc; the lobby's seed then
-   changes the belt. Design conversation first.
-10. From the harness: seat 0's edge isolated and removed; territory
-    that varies with composition; combat before the last third of a
-    match; the tick-rate-doubling check; timeouts instead of iteration
-    caps in the slow tests.
-11. Held for the owner's play or ruling: rocks sub-pixel at region zoom;
+   `field.rs`, every `Places` and width constant. In the same unit: the
+   lobby loses its Seat column and the team choice carries the team's
+   colour square; colour is the team's everywhere; a control for an
+   unbuilt feature is not drawn (Surrender, Settings); Quit through
+   `ctx.close` on the desktop and not drawn in the browser;
+   `pixels_per_point` on the frame context; `set_tick_interval` for
+   pacing instead of dropping steps. Opus. Clears five ledger lines.
+7. The stockpile bar, DISPLAY.md "The stockpile", Sonnet: the view
+   gains income and spend per material; the HUD's one numeral
+   exception; wheel slots dim when unaffordable with the short material
+   on hover. Clears the last ledger line.
+8. Held for a ruling after item 4's numbers: the solve leaving the sim
+   as a stamped schedule command from the owning machine, validated in
+   apply by one integration against the tolerance and the limit (the
+   host's planner for a bot's seat; a left machine's units hold home);
+   then a planner memo by place pair and quantised phase. The
+   overseer's view: the right shape if a played match shows the solve
+   in the tick's budget, and not otherwise.
+9. The structural programme's remainder, in the audit's order, each unit
+   rewriting ARCHITECTURE.md: the small collapses (Attractor is Body;
+   View::want; Room folded into Socket where anything of it remains; one
+   belt-drawing preamble; the sim test fixture module; Materials::
+   bottleneck as binding; Material::ALL); a frame on its post; one rock
+   type from sim to pixel; one mark state replacing Fill and Reason;
+   Layout yielding placed marks and one Dial; mark geometry as primitives
+   painted once and rasterised once, then re-judged; one Log type; the
+   agent's knowledge as one row per rock; the wheel built once on
+   selection; the Maneuver phase and module spelt manoeuvring; the
+   unit-newtype question over every measured f64 field. Done already:
+   the seating authority, the flow, the comment sweep, the flights on
+   their members. Opus for the sim stores and the agents; Sonnet for the
+   rest; a line ceiling per brief; `check.sh` gains a duplication check.
+10. From play, ruled: a post builds one frame of a row at a time (DESIGN
+    Build is flow and Shortfall, fulfilment, the ring's fills); a selected
+    rock owns the focus each tick until a pan releases it (DISPLAY Camera,
+    main loop).
+11. From the harness: seat 0's edge isolated and removed; territory that
+    varies with composition; combat before the last third of a match;
+    the tick-rate-doubling check; timeouts instead of iteration caps in
+    the slow tests.
+12. Held for the owner's play or ruling: rocks sub-pixel at region zoom;
     the ring inside the rock at close zoom and far from the ships it
     counts; the fight arc refilling on reinforcement; repair at 15 HP/s
     beating a frigate's 12 DPS; elimination before the clock unreachable
     from a fogged view; crowd packing past half the spacing; a fresh-eyes
-    judgement after every display change.
-12. Later: fog in the display; gamepad; the twelve-slot wheel; hulls as
+    judgement after every display change; the scout's manoeuvring at
+    more than half the movement limit against DESIGN's "far below".
+13. Later: fog in the display; gamepad; the twelve-slot wheel; hulls as
     meshes with a level-of-detail rule, the stencil icon, and a DESIGN
     line that a faction skews the hull's dialect and never the glyph
     (owner's models); Haiku playtesting agents over the same trait; a
-    room list over the server; nicknames on the wire; the map preview
-    at whole-belt zoom.
+    room list over the server; nicknames on the wire; factions as skews
+    over one roster, the movement limit among them.
 
 ## Audit findings, 2026-09-03 (the reports themselves are gone; this is
-## the record the programme in item 7 is built from)
+## the record the programme in item 9 is built from)
 
 Duplicated facts (Sonnet): `is_structure` written twice in agents
 (plan.rs, survey.rs) and inlined twice in memory.rs, belongs on
@@ -242,6 +263,12 @@ step/mod.rs and history/session.rs move.
   unit. The codebase sweep (plan) audits for duplicates crate by crate.
 - Match setup, bots included, is the start menu's job (owner,
   2026-09-03); the playable takes no command-line arguments.
+- Store rule for every sim brief (overseer, 2026-09-05, for plan item 5):
+  no rule holds an entity across a tick or indexes the entity store by
+  anything but an id, so the columns land without touching a rule.
+- Brief rules in force (owner, 2026-09-05): no comments of any kind; a
+  confused agent is a naming defect; a net-line budget per unit with
+  lines added against deleted reported; Edit and Write only.
 
 ## Engine friction
 

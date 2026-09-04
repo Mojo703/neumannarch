@@ -60,10 +60,12 @@ roster in `sim`, never here.
   are fixed from the start and every future position is known. Nothing is
   attached to anything: bodies on similar orbits stay near each other
   because the same gravity moves them.
-- Units thrust with infinite fuel, under two constant limits per row: the
-  movement limit, spent only on a transfer between rocks, and the
-  manoeuvring limit, far below it, spent holding position and fighting.
-  Movement and combat states how each is used.
+- Units thrust with infinite fuel, under two constant limits: the
+  movement limit, one value for every unit, spent only on a transfer
+  between rocks, and a manoeuvring limit per row, far below it, spent
+  holding position, keeping apart and fighting, in flight as at home. Every send crosses the same distance in
+  the same time whatever is in it; rows differ in how they hold, chase
+  and give way. Movement and combat states how each is used.
 - No collisions. Entity size is visual. Arrival is the end of a schedule
   (Movement and combat), never a distance.
 
@@ -75,7 +77,7 @@ roster in `sim`, never here.
   lost, and the rows that carry capacity add to that. A hypothesis.
 - Materials differ only by where they are. Map generation gives rocks
   regionally distinct cap triples.
-- Cost vectors split roles: fast rows are volatile-heavy, armoured rows
+- Cost vectors split roles: nimble rows are volatile-heavy, armoured rows
   metal-heavy, long-range and fast-building rows energy-heavy.
 - Capacity comes from the rows that carry it, storage among them.
 
@@ -87,8 +89,7 @@ HP, and its home rock.
 | field | notes |
 |---|---|
 | mass | radar reveals it roughly |
-| acceleration | the movement limit; zero for structures and rocks |
-| manoeuvring | the manoeuvring limit, far below acceleration; zero for structures and rocks |
+| manoeuvring | the manoeuvring limit, far below the movement limit; zero for structures and rocks |
 | HP | |
 | plating | flat damage reduction per hit |
 | sight, radar | detection ranges |
@@ -97,12 +98,12 @@ HP, and its home rock.
 | capacity | stockpile capacity contributed, per material |
 | orbit, caps | rocks only |
 
-- **Rocks** are entities: huge mass, zero acceleration, indestructible,
+- **Rocks** are entities: huge mass, no manoeuvring, indestructible,
   always visible, a per-material extraction cap.
-- **Structures** have zero acceleration. A structure is built at its rock's
+- **Structures** have no manoeuvring. A structure is built at its rock's
   position and velocity, and since neither ever thrusts, it stays with the
   rock.
-- **Units** have acceleration above zero.
+- **Units** have manoeuvring above zero and move at the movement limit.
 - All builders build everything. A shipyard is a fast builder.
 - Roles emerge from ratios. There is no role field.
 
@@ -180,19 +181,17 @@ composition per player. The verb sets one count.
   velocity. It is never an entity and never drawn. All seats at a place
   share its anchor.
 - **Sends.** Units re-homed in one tick from one place to another make one
-  send. A send is one schedule of thrust per row in it, solved when the
-  send begins: a sequence of thrusts, one per tick, each within the row's
-  movement limit, whose integration by the sim's own propagation carries
-  a ship from the source anchor's orbit to the destination anchor's orbit
-  at the arrival tick, to within a stated tolerance. A row's schedule
-  exists at an arrival tick when its burns fit the span with a stated
-  margin and its integration meets the tolerance. The arrival tick is
-  the earliest at which every row's schedule exists, so a send arrives
-  together and the slowest row sets the tick. A schedule departs on the
-  tick after the send is issued, the first tick its ships thrust on.
-  Every ship of the send departs at once; ships of one row fly one
-  schedule, so their offsets from each other at departure are carried to
-  arrival. A unit is flying from the tick it joins a send until its
+  send. A send is one schedule of thrust, solved when the send begins: a
+  sequence of thrusts, one per tick, each within the movement limit,
+  whose integration by the sim's own propagation carries a ship from the
+  source anchor's orbit to the destination anchor's orbit at the arrival
+  tick, to within a stated tolerance. A schedule exists at an arrival
+  tick when its burns fit the span with a stated margin and its
+  integration meets the tolerance. The arrival tick is the earliest at
+  which a schedule exists. A schedule departs on the tick after the send
+  is issued, the first tick its ships thrust on. Every ship of the send
+  departs at once and flies the one schedule, so their offsets from each
+  other at departure are carried to arrival. A unit is flying from the tick it joins a send until its
   schedule ends, when it is on its destination anchor's orbit and holds
   there. The tolerance is the schedule's: a ship flying in company ends
   off its schedule by what the separation term added in flight, and
@@ -262,7 +261,6 @@ Not rules. Each is a hypothesis the harness confirms or kills.
 - What band amplitudes and weapon ranges read well in the densest regions?
 - Do plating and falloff give enough counters without a matrix?
 - Do regional caps make three materials distinct?
-- Does a send that must arrive together lose too much to the slowest row?
 - Do outcomes hold when the tick rate is doubled?
 - How fast must rocks orbit, relative to a match, for neighbours to
   change?

@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn no_thrust_of_a_schedule_exceeds_its_rows_movement_limit() {
+    fn no_thrust_of_a_schedule_exceeds_the_movement_limit() {
         let (schedule, _, _) = solved();
 
         for at in DEPART.0..schedule.arrive().0 {
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_that_cannot_thrust_has_no_schedule() {
+    fn a_movement_limit_of_zero_has_no_schedule() {
         assert!((60..=600).all(|seconds| transfer(0.0, seconds).is_none()));
     }
 

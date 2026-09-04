@@ -219,13 +219,12 @@ mod tests {
         ("lancer", &[GlyphMark::Bar]),
     ];
 
-    fn row(cost: f64, accel: f64, sight: f64, weapons: Vec<Weapon>) -> Row {
+    fn row(cost: f64, manoeuvring: f64, sight: f64, weapons: Vec<Weapon>) -> Row {
         Row {
             name: "test",
             cost: Materials::new(cost, 0.0, 0.0),
             mass: Real(1.0),
-            accel: Real(accel),
-            maneuver: Real(accel),
+            manoeuvring: Real(manoeuvring),
             hp: Real(1.0),
             plating: Real(0.0),
             sight: Real(sight),

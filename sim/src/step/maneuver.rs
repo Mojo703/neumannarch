@@ -83,7 +83,7 @@ impl<'a> Maneuver<'a> {
         let accel = pull + self.pairs(entity, body);
         Some(Thrust {
             entity: entity.id(),
-            accel: within(accel, row.maneuver.0),
+            accel: within(accel, row.manoeuvring.0),
         })
     }
 

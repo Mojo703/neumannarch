@@ -23,8 +23,7 @@ pub struct Row {
     pub name: &'static str,
     pub cost: Materials,
     pub mass: Real,
-    pub accel: Real,
-    pub maneuver: Real,
+    pub manoeuvring: Real,
     pub hp: Real,
     pub plating: Real,
     pub sight: Real,
@@ -51,7 +50,7 @@ pub enum Weapon {
 
 impl Row {
     pub fn kind(&self) -> Kind {
-        if self.accel.0 == 0.0 {
+        if self.manoeuvring.0 == 0.0 {
             Kind::Structure
         } else {
             Kind::Unit
@@ -137,13 +136,12 @@ impl Weapon {
 mod tests {
     use super::*;
 
-    fn row(accel: f64, weapons: Vec<Weapon>) -> Row {
+    fn row(manoeuvring: f64, weapons: Vec<Weapon>) -> Row {
         Row {
             name: "test",
             cost: Materials::new(1.0, 0.0, 0.0),
             mass: Real(1.0),
-            accel: Real(accel),
-            maneuver: Real(accel * 0.25),
+            manoeuvring: Real(manoeuvring),
             hp: Real(1.0),
             plating: Real(0.0),
             sight: Real(1.0),
@@ -163,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn a_structure_is_exactly_a_row_that_cannot_accelerate() {
+    fn a_row_with_no_manoeuvring_is_a_structure_and_any_other_a_unit() {
         assert_eq!(row(0.0, vec![]).kind(), Kind::Structure);
         assert_eq!(row(0.5, vec![]).kind(), Kind::Unit);
     }

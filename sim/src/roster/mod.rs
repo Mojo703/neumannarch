@@ -4,17 +4,31 @@ pub use row::{Kind, MassClass, Row, Weapon};
 pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SCOUT, SHIPYARD, STORAGE};
 
 use crate::ids::RowId;
+use crate::real::Real;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Roster {
+    movement_limit: Real,
     rows: Vec<Row>,
 }
 
 impl Roster {
     pub fn shipped() -> Roster {
         Roster {
+            movement_limit: Real(shipped::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED),
             rows: shipped::rows(),
         }
+    }
+
+    pub fn moving_at(self, movement_limit: Real) -> Roster {
+        Roster {
+            movement_limit,
+            ..self
+        }
+    }
+
+    pub fn movement_limit(&self) -> Real {
+        self.movement_limit
     }
 
     pub fn add(&mut self, row: Row) -> RowId {
@@ -67,6 +81,15 @@ mod tests {
         assert_eq!(roster.get(id), Some(&variant));
         assert_eq!(roster.iter().last(), Some((id, &variant)));
         assert_eq!(roster.len(), 9);
+    }
+
+    #[test]
+    fn moving_at_sets_the_movement_limit_and_keeps_the_rows() {
+        let shipped = Roster::shipped();
+        let slow = shipped.clone().moving_at(Real(1e-6));
+        assert_eq!(slow.movement_limit(), Real(1e-6));
+        assert_eq!(slow.len(), shipped.len());
+        assert_eq!(slow[LANCER], shipped[LANCER]);
     }
 
     #[test]
