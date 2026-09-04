@@ -5,8 +5,8 @@ use probe_sim::state::view::View;
 use probe_sim::state::{Command, MAX_WANT};
 use probe_sim::{Materials, RockId, RowId};
 
+use crate::commitments::Commitments;
 use crate::dice::Dice;
-use crate::memory::Memory;
 use crate::personality::Personality;
 use crate::survey::Survey;
 
@@ -16,18 +16,13 @@ const STORE_TRIGGER: f64 = 0.9;
 
 const REACH: f64 = 2_000.0;
 
-const STALE: f64 = 60.0;
-
 const CHOICES: usize = 2;
-
-const SPOTTERS: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Opening,
     Defence,
     Economy,
-    Scouting,
     Army,
 }
 
@@ -48,7 +43,7 @@ impl Plan {
     pub fn of(
         survey: &Survey,
         personality: &Personality,
-        memory: &mut Memory,
+        commitments: &mut Commitments,
         dice: &mut Dice,
     ) -> Plan {
         let mut plan = Plan {
@@ -57,9 +52,8 @@ impl Plan {
             budget: survey.view.stockpile.stock() + survey.income * BUILD_HORIZON,
         };
         plan.opening(survey);
-        plan.economy(survey, personality, memory, dice);
-        plan.scouting(survey, personality, memory);
-        plan.army(survey, personality, memory);
+        plan.economy(survey, personality, commitments, dice);
+        plan.army(survey, personality, commitments);
         plan
     }
 
@@ -115,7 +109,7 @@ impl Plan {
         &mut self,
         survey: &Survey,
         personality: &Personality,
-        memory: &mut Memory,
+        commitments: &mut Commitments,
         dice: &mut Dice,
     ) {
         let Some(home) = survey.home else {
@@ -134,7 +128,7 @@ impl Plan {
             }
         }
         self.stores(survey, personality, home);
-        self.expand(survey, personality, memory, dice, home);
+        self.expand(survey, personality, commitments, dice, home);
     }
 
     fn stand(&mut self, survey: &Survey, rock: RockId) {
@@ -157,7 +151,7 @@ impl Plan {
         &mut self,
         survey: &Survey,
         personality: &Personality,
-        memory: &mut Memory,
+        commitments: &mut Commitments,
         dice: &mut Dice,
         home: RockId,
     ) {
@@ -168,7 +162,7 @@ impl Plan {
         let mut spare = at_home.saturating_sub(personality.masons);
         let mut sent = 0;
         let mut short = 0;
-        for claim in claimed(survey, memory) {
+        for claim in claimed(survey, commitments) {
             let arriving = survey.count(claim, mason);
             if arriving > 0 {
                 self.keep(Priority::Economy, claim, mason, arriving);
@@ -182,60 +176,27 @@ impl Plan {
         }
 
         if spare > 0
-            && wants_another(survey, personality, memory)
-            && let Some(rock) = expansion(survey, memory, dice)
+            && wants_another(survey, personality, commitments)
+            && let Some(rock) = expansion(survey, commitments, dice)
         {
             spare -= 1;
             sent += 1;
-            memory.claim(rock, survey.view.tick);
+            commitments.claim(rock, survey.view.tick);
             self.want(survey, Priority::Economy, rock, mason, 1);
         }
 
-        let wanted = short > 0 || wants_another(survey, personality, memory);
+        let wanted = short > 0 || wants_another(survey, personality, commitments);
         let replacing = u32::from(sent == 0 && spare == 0 && wanted);
         let staying = at_home.saturating_sub(sent).max(personality.masons);
         self.want(survey, Priority::Economy, home, mason, staying + replacing);
     }
 
-    fn scouting(&mut self, survey: &Survey, personality: &Personality, memory: &mut Memory) {
-        let Some(scout) = first(&survey.roles.scouts).next() else {
-            return;
-        };
-        let Some(home) = survey.home else {
-            return;
-        };
-        let owned = survey.owned(scout);
-        let walking: Vec<RockId> = memory
-            .scouting
-            .iter()
-            .copied()
-            .filter(|rock| memory.watched(*rock).at != survey.view.tick)
-            .take(owned.min(personality.scouts) as usize)
-            .collect();
-        memory.scouting = walking;
-        while memory.scouting.len() < owned.min(personality.scouts) as usize {
-            let Some(rock) = unwatched(survey, memory) else {
-                break;
-            };
-            memory.scouting.push(rock);
-        }
-
-        for rock in memory.scouting.clone() {
-            self.want(survey, Priority::Scouting, rock, scout, 1);
-        }
-        let walking = memory.scouting.len() as u32;
-        let count = personality.scouts.saturating_sub(walking);
-        if count > 0 {
-            self.want(survey, Priority::Scouting, home, scout, count);
-        }
-    }
-
-    fn army(&mut self, survey: &Survey, personality: &Personality, memory: &mut Memory) {
+    fn army(&mut self, survey: &Survey, personality: &Personality, commitments: &mut Commitments) {
         let weights = personality.weights(
             survey.roster,
             survey.roles,
-            memory.enemy_plating,
-            memory.enemy_range,
+            survey.enemy_plating,
+            survey.enemy_range,
         );
         let mut left = (personality.army_ratio * survey.enemy).max(personality.army_floor);
         let mut threatened: Vec<(RockId, f64)> = survey
@@ -253,7 +214,7 @@ impl Plan {
         if left <= 0.0 {
             return;
         }
-        let Some(rock) = staging(survey, personality, memory) else {
+        let Some(rock) = staging(survey, personality, commitments) else {
             return;
         };
         self.force(survey, Priority::Army, rock, left, &weights);
@@ -267,7 +228,6 @@ impl Plan {
         value: f64,
         weights: &[(RowId, f64)],
     ) {
-        let mut blind = false;
         for (row, share) in weights {
             let Some(stats) = survey.roster.get(*row) else {
                 continue;
@@ -277,12 +237,6 @@ impl Plan {
                 continue;
             }
             self.want(survey, priority, rock, *row, count);
-            blind |= stats.max_damage_range() > stats.sight.0;
-        }
-        if blind {
-            for row in first(&survey.roles.scouts) {
-                self.want(survey, priority, rock, row, SPOTTERS);
-            }
         }
     }
 
@@ -403,21 +357,22 @@ fn extractors(survey: &Survey, personality: &Personality, rock: RockId, row: Row
     personality.extractors_per_rock.min(saturating)
 }
 
-fn claimed(survey: &Survey, memory: &Memory) -> Vec<RockId> {
+fn claimed(survey: &Survey, commitments: &Commitments) -> Vec<RockId> {
     survey
         .view
         .terrain
         .iter()
         .map(|terrain| terrain.rock)
-        .filter(|rock| memory.claimed(*rock))
+        .filter(|rock| commitments.claimed(*rock))
         .collect()
 }
 
-fn wants_another(survey: &Survey, personality: &Personality, memory: &Memory) -> bool {
-    survey.held.len() + memory.claims() < personality.rocks && memory.claims() < personality.claims
+fn wants_another(survey: &Survey, personality: &Personality, commitments: &Commitments) -> bool {
+    survey.held.len() + commitments.claims() < personality.rocks
+        && commitments.claims() < personality.claims
 }
 
-fn expansion(survey: &Survey, memory: &Memory, dice: &mut Dice) -> Option<RockId> {
+fn expansion(survey: &Survey, commitments: &Commitments, dice: &mut Dice) -> Option<RockId> {
     let from = survey.home?;
     let mut rated: Vec<(RockId, f64)> = survey
         .view
@@ -425,7 +380,7 @@ fn expansion(survey: &Survey, memory: &Memory, dice: &mut Dice) -> Option<RockId
         .iter()
         .map(|terrain| terrain.rock)
         .filter(|rock| !survey.occupied.contains(rock))
-        .filter(|rock| !memory.claimed(*rock) && !memory.barred(*rock))
+        .filter(|rock| !commitments.claimed(*rock) && !commitments.barred(*rock))
         .filter(|rock| !survey.enemy_rocks.contains(rock))
         .filter_map(|rock| {
             let caps = survey.view.terrain_of(rock)?.caps.total();
@@ -439,20 +394,25 @@ fn expansion(survey: &Survey, memory: &Memory, dice: &mut Dice) -> Option<RockId
     rated.get(at).map(|(rock, _)| *rock)
 }
 
-fn staging(survey: &Survey, personality: &Personality, memory: &mut Memory) -> Option<RockId> {
-    if let Some(rock) = memory.committed {
+fn staging(
+    survey: &Survey,
+    personality: &Personality,
+    commitments: &mut Commitments,
+) -> Option<RockId> {
+    if let Some(rock) = commitments.committed {
         let taken = survey.held.contains(&rock) || !survey.enemy_rocks.contains(&rock);
         if taken {
-            memory.committed = None;
+            commitments.committed = None;
         } else {
             return Some(rock);
         }
     }
     let target = nearest(survey, &survey.enemy_rocks);
     if let Some(rock) = target
-        && survey.army >= personality.attack_ratio * defended(survey, personality, rock)
+        && survey.army > 0.0
+        && survey.army >= personality.attack_ratio * defended(survey, rock)
     {
-        memory.committed = Some(rock);
+        commitments.committed = Some(rock);
         return Some(rock);
     }
     match target {
@@ -470,13 +430,8 @@ fn staging(survey: &Survey, personality: &Personality, memory: &mut Memory) -> O
     }
 }
 
-fn defended(survey: &Survey, personality: &Personality, rock: RockId) -> f64 {
-    survey
-        .threats
-        .get(&rock)
-        .copied()
-        .unwrap_or_default()
-        .max(personality.army_floor)
+fn defended(survey: &Survey, rock: RockId) -> f64 {
+    survey.threats.get(&rock).copied().unwrap_or_default()
 }
 
 fn nearest(survey: &Survey, rocks: &[RockId]) -> Option<RockId> {
@@ -488,20 +443,89 @@ fn nearest(survey: &Survey, rocks: &[RockId]) -> Option<RockId> {
     })
 }
 
-fn unwatched(survey: &Survey, memory: &Memory) -> Option<RockId> {
-    let from = survey.home?;
-    let now = survey.view.tick.seconds();
-    survey
-        .view
-        .terrain
-        .iter()
-        .map(|terrain| terrain.rock)
-        .filter(|rock| !survey.occupied.contains(rock))
-        .filter(|rock| !memory.scouting.contains(rock))
-        .filter(|rock| now - memory.watched(*rock).at.seconds() >= STALE)
-        .min_by(|a, b| {
-            survey
-                .between(from, *a)
-                .total_cmp(&survey.between(from, *b))
-        })
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use probe_sim::belt::Belt;
+    use probe_sim::roster::{RAIDER, SHIPYARD};
+    use probe_sim::state::view::View;
+    use probe_sim::state::{Batch, Issued, Seat, State};
+    use probe_sim::step::fire::Shots;
+    use probe_sim::{Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick};
+
+    use super::*;
+    use crate::personality::Personality;
+    use crate::roles::Roles;
+
+    const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+
+    const ALLY_ROCK: RockId = RockId(4);
+
+    const ENEMY_ROCK: RockId = RockId(9);
+
+    fn sided() -> State {
+        let reserve = BTreeMap::from([(SHIPYARD, 1), (RAIDER, 4)]);
+        let seat = |team| Seat::new(TeamId(team), Materials::new(1e4, 1e4, 1e4), reserve.clone());
+        State::new(
+            CLOCK,
+            0,
+            Belt::GRAVITY,
+            Roster::shipped(),
+            Belt::fixed(Belt::GRAVITY),
+            vec![seat(0), seat(0), seat(1)],
+        )
+    }
+
+    fn want(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
+        Issued {
+            seat: SeatId(seat),
+            seq,
+            command: Command::Want { rock, row, count },
+        }
+    }
+
+    #[test]
+    fn an_allys_army_is_no_threat_and_its_rock_is_never_attacked() {
+        let mut batch = Batch::new();
+        for (seat, rock) in [(1, ALLY_ROCK), (2, ENEMY_ROCK)] {
+            for (seq, row) in [SHIPYARD, RAIDER].into_iter().enumerate() {
+                let count = if row == RAIDER { 4 } else { 1 };
+                assert_eq!(
+                    batch.insert(want(seat, seq as u32, rock, row, count)),
+                    Ok(())
+                );
+            }
+        }
+        let (state, outcome) = sided().step(&batch);
+        assert_eq!(outcome.rejected, Vec::new());
+        let view = View::of(&state, SeatId(0), &Shots::default());
+        assert!(
+            view.present.iter().any(|it| it.seat == SeatId(1)),
+            "the ally's force is in the view like any other"
+        );
+
+        let roster = Roster::shipped();
+        let roles = Roles::of(&roster);
+        let survey = Survey::of(&view, &roster, &roles);
+
+        assert_eq!(survey.enemy_rocks, vec![ENEMY_ROCK]);
+        assert_eq!(survey.threats.get(&ALLY_ROCK), None);
+        assert!(survey.threats.contains_key(&ENEMY_ROCK));
+        assert_eq!(survey.enemy, state[RAIDER].cost.total() * 4.0);
+
+        let plan = Plan::of(
+            &survey,
+            &Personality::expand(),
+            &mut Commitments::default(),
+            &mut Dice::new(0),
+        );
+
+        assert!(
+            plan.commands(&view)
+                .iter()
+                .all(|Command::Want { rock, .. }| *rock != ALLY_ROCK),
+            "the plan asked for something at the ally's rock"
+        );
+    }
 }

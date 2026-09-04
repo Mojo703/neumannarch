@@ -1,36 +1,27 @@
 use std::collections::BTreeMap;
 
 use super::State;
-use super::radar::Radar;
 use super::schedule::Flight;
-use super::sight::Sight;
+use super::seat::Seat;
 use crate::belt::Belt;
 use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
 use crate::post::Post;
-use crate::roster::MassClass;
 use crate::state::standings::Standings;
 use crate::step::fire::{Exchange, Shots};
 use crate::time::Tick;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Seen {
-    pub entity: EntityId,
-    pub seat: SeatId,
+pub struct Present {
+    pub id: EntityId,
     pub row: RowId,
+    pub seat: SeatId,
     pub body: Body,
     pub hp: f64,
-    pub flying: bool,
-    pub home: Option<RockId>,
+    pub home: RockId,
     pub from: Option<RockId>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Blip {
-    pub body: Body,
-    pub mass: MassClass,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,18 +62,16 @@ pub struct View {
     pub stockpile: Stockpile,
     pub reserve: BTreeMap<RowId, u32>,
     pub compositions: Vec<Composition>,
-    pub seen: Vec<Seen>,
-    pub blips: Vec<Blip>,
+    pub present: Vec<Present>,
+    pub teams: Box<[TeamId]>,
     pub exchanges: Vec<Exchange>,
     pub terrain: Vec<Terrain>,
     pub zone: f64,
-    pub standings: Option<Standings>,
+    pub standings: Standings,
 }
 
 impl View {
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View {
-        let sweep = state.sweep();
-        let sight = Sight::of(state, seat, &sweep);
         View {
             seat,
             tick: state.tick(),
@@ -95,12 +84,23 @@ impl View {
                 .seat(seat)
                 .map_or_else(BTreeMap::new, |seat| seat.reserve().clone()),
             compositions: compositions(state, seat),
-            seen: seen(state, &sight, state.seat(seat).map(|seat| seat.team())),
-            blips: blips(state, &Radar::beyond(state, seat, &sweep, &sight)),
-            exchanges: shots.exchanges(state, &sight),
+            present: present(state),
+            teams: state.seats().iter().map(Seat::team).collect(),
+            exchanges: shots.exchanges(state),
             terrain: terrain(state),
             zone: Belt::ZONE_RADIUS_METERS,
-            standings: Some(state.standings()).filter(Standings::over),
+            standings: state.standings(),
+        }
+    }
+
+    pub fn team_of(&self, seat: SeatId) -> Option<TeamId> {
+        self.teams.get(usize::from(seat.0)).copied()
+    }
+
+    pub fn is_enemy(&self, seat: SeatId) -> bool {
+        match (self.team_of(self.seat), self.team_of(seat)) {
+            (Some(mine), Some(theirs)) => mine != theirs,
+            _ => false,
         }
     }
 
@@ -146,33 +146,20 @@ fn wanted(state: &State, post: Post, row: RowId, want: u32) -> Wanted {
     }
 }
 
-fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
-    sight
-        .iter()
-        .filter_map(|id| state.entity(id))
-        .map(|entity| {
-            let own = team == Some(state[entity.seat()].team());
-            Seen {
-                entity: entity.id(),
-                seat: entity.seat(),
-                row: entity.row(),
-                body: state.body_of(entity),
-                hp: entity.hp(),
-                flying: entity.is_flying(state.tick()),
-                home: (!entity.is_flying(state.tick()) || own).then(|| entity.home()),
-                from: entity.flight().filter(|_| own).map(Flight::source),
-            }
-        })
-        .collect()
-}
-
-fn blips(state: &State, radar: &Radar) -> Vec<Blip> {
-    radar
-        .iter()
-        .filter_map(|contact| state.entity(contact))
-        .map(|entity| Blip {
+fn present(state: &State) -> Vec<Present> {
+    state
+        .entities()
+        .map(|entity| Present {
+            id: entity.id(),
+            row: entity.row(),
+            seat: entity.seat(),
             body: state.body_of(entity),
-            mass: state[entity.row()].mass_class(),
+            hp: entity.hp(),
+            home: entity.home(),
+            from: entity
+                .flight()
+                .filter(|_| entity.is_flying(state.tick()))
+                .map(Flight::source),
         })
         .collect()
 }
@@ -194,136 +181,97 @@ fn terrain(state: &State) -> Vec<Terrain> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixture::World;
     use crate::ids::TeamId;
     use crate::roster::{FRIGATE, SHIPYARD, STORAGE};
-    use crate::setup::Setup;
-    use crate::state::{Batch, Command, Issued, Motion, Send};
-    use crate::step::fire::Fire;
+    use crate::state::{Issued, Send};
 
-    fn quiet(state: &State, seat: SeatId) -> View {
-        View::of(state, seat, &Shots::default())
-    }
+    const ROCK: RockId = RockId(0);
 
-    fn started(clock: Tick) -> State {
-        let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, clock).expect("two seats");
-        State::start(&setup)
-    }
-
-    fn state() -> State {
-        started(Tick(1_000))
-    }
-
-    fn tick(state: &State, issued: &[Issued]) -> State {
-        let mut batch = Batch::new();
-        for issued in issued {
-            assert_eq!(batch.insert(*issued), Ok(()));
-        }
-        let (next, outcome) = state.step(&batch);
-        assert_eq!(outcome.rejected, Vec::new(), "the commands were rejected");
-        next
-    }
-
-    fn want(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
-        Issued {
-            seat: SeatId(seat),
-            seq,
-            command: Command::Want { rock, row, count },
-        }
-    }
-
-    fn rock(at: u32) -> RockId {
-        RockId(at)
+    fn world() -> World {
+        World::started(&[TeamId(0), TeamId(1)])
     }
 
     #[test]
     fn a_view_holds_the_seats_own_posts_and_no_others() {
-        let mut state = state();
-        state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
-        let state = tick(
-            &state,
-            &[
-                want(0, 0, rock(0), FRIGATE, 2),
-                want(1, 0, rock(5), FRIGATE, 3),
-            ],
-        );
+        let mut world = world();
+        world.fix(0, SHIPYARD, ROCK);
+        world.tick(&[
+            Issued::want(0, ROCK, FRIGATE, 2),
+            Issued::want(1, RockId(5), FRIGATE, 3),
+        ]);
 
-        let view = quiet(&state, SeatId(0));
+        let view = world.view(0);
 
         assert_eq!(view.compositions.len(), 1);
-        assert_eq!(view.compositions[0].rock, rock(0));
+        assert_eq!(view.compositions[0].rock, ROCK);
         assert_eq!(view.compositions[0].rows[0].row, FRIGATE);
         assert_eq!(view.compositions[0].rows[0].want, 2);
         assert_eq!(view.compositions[0].rows[0].present, 0);
         assert_eq!(view.reserve[&SHIPYARD], 1);
-        assert_eq!(view.terrain.len(), state.rocks().len());
+        assert_eq!(view.terrain.len(), world.state.rocks().len());
     }
 
     #[test]
-    fn a_view_holds_what_the_seat_sees_and_leaves_out_what_it_does_not() {
-        let mut state = state();
-        let mine = state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
-        let near = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-        let far = state.spawn(SeatId(1), STORAGE, rock(9), Motion::Fixed);
+    fn every_seat_holds_every_entity_of_the_match() {
+        let mut world = world();
+        let mine = world.fix(0, SHIPYARD, ROCK);
+        let near = world.fix(1, STORAGE, ROCK);
+        let far = world.fix(1, STORAGE, RockId(9));
 
-        let view = quiet(&state, SeatId(0));
-        let seen: Vec<EntityId> = view.seen.iter().map(|seen| seen.entity).collect();
-
-        assert!(seen.contains(&mine));
-        assert!(seen.contains(&near), "an enemy at its own rock is seen");
-        assert!(!seen.contains(&far), "a rock away is beyond every sensor");
-        assert!(
-            view.blips.is_empty(),
-            "nothing is in radar but out of sight"
-        );
-        let hp = view
-            .seen
-            .iter()
-            .find(|seen| seen.entity == near)
-            .expect("the enemy")
-            .hp;
-        assert_eq!(hp, state[STORAGE].hp.0);
+        for seat in [0, 1, 9] {
+            let held: Vec<EntityId> = world.view(seat).present.iter().map(|it| it.id).collect();
+            assert_eq!(held, vec![mine, near, far], "seat {seat} was told less");
+        }
+        let theirs = world.present(0, far).expect("an enemy a belt away");
+        assert_eq!(theirs.seat, SeatId(1));
+        assert_eq!(theirs.row, STORAGE);
+        assert_eq!(theirs.home, RockId(9));
+        assert_eq!(theirs.hp, world.state[STORAGE].hp.0);
+        assert_eq!(theirs.body, world.state.rock_body(RockId(9)));
+        assert_eq!(theirs.from, None, "it is not flying");
     }
 
     #[test]
-    fn a_radar_contact_carries_a_mass_class_and_no_row() {
-        let mut state = state();
+    fn a_flying_unit_names_the_rock_it_left_and_the_one_it_flies_to() {
+        let mut world = world();
+        let mine = world.hold(0, FRIGATE, ROCK, 0.0);
+        let theirs = world.hold(1, FRIGATE, ROCK, 0.0);
+        world.tick(&[
+            Issued::numbered(0, 0, ROCK, FRIGATE, 0),
+            Issued::numbered(0, 1, RockId(1), FRIGATE, 1),
+            Issued::numbered(1, 0, ROCK, FRIGATE, 0),
+            Issued::numbered(1, 1, RockId(1), FRIGATE, 1),
+        ]);
+        world.run(Send::FORMING_TICKS + 1);
 
-        let watcher = state.spawn(SeatId(0), crate::roster::SCOUT, rock(0), Motion::Fixed);
-        let body = state.body_of(&state[watcher]);
-        let heavy = Motion::Free {
-            body: Body::new(body.pos + crate::Vec3::new(30.0, 0.0, 0.0), body.vel),
-            flight: None,
-        };
-        state.spawn(SeatId(1), FRIGATE, rock(0), heavy);
-
-        let view = quiet(&state, SeatId(0));
-
-        assert_eq!(view.seen.len(), 1, "only the scout itself is seen");
-        assert_eq!(view.blips.len(), 1);
-        assert_eq!(view.blips[0].mass, MassClass::Medium);
+        for unit in [mine, theirs] {
+            let flier = world.present(0, unit).expect("both fliers are in the view");
+            assert_eq!(flier.home, RockId(1), "a send names where to");
+            assert_eq!(flier.from, Some(ROCK), "a send names where from");
+        }
     }
 
     #[test]
-    fn the_standings_are_hidden_until_the_clock_runs_out() {
-        let state = state();
-        assert_eq!(quiet(&state, SeatId(0)).standings, None);
+    fn the_standings_are_in_every_view_and_say_whether_the_clock_has_run() {
+        let mut world = world();
+        world.fix(0, SHIPYARD, ROCK);
 
-        let over = started(Tick::ZERO);
+        let standings = world.view(1).standings;
 
-        let view = quiet(&over, SeatId(0));
+        assert!(!standings.over());
+        assert_eq!(standings.teams().len(), 2);
+        assert_eq!(standings.teams()[0].rocks, 1, "team zero holds one rock");
+        assert_eq!(standings.teams()[1].rocks, 0);
 
-        assert_eq!(view.standings.as_ref().map(Standings::over), Some(true));
-        assert_eq!(
-            view.standings.expect("the clock has run out").teams().len(),
-            2
-        );
+        let ended = World::timed(&[TeamId(0), TeamId(1)], Tick::ZERO);
+
+        assert!(ended.view(0).standings.over());
     }
 
     #[test]
-    fn a_seat_the_match_lacks_sees_only_the_terrain() {
-        let view = quiet(&state(), SeatId(9));
-        assert!(view.seen.is_empty());
-        assert!(view.blips.is_empty());
+    fn a_seat_the_match_lacks_holds_no_composition_of_its_own() {
+        let view = world().view(9);
         assert!(view.compositions.is_empty());
         assert!(view.reserve.is_empty());
         assert_eq!(view.terrain.len(), 21);
@@ -331,78 +279,37 @@ mod tests {
 
     #[test]
     fn a_view_reads_its_terrain_at_the_gravity_it_carries() {
-        let state = state();
+        let world = world();
 
-        let view = quiet(&state, SeatId(0));
+        let view = world.view(0);
 
-        assert_eq!(view.gravity, state.gravity());
+        assert_eq!(view.gravity, world.state.gravity());
         let rock = view.terrain[3];
         assert_eq!(
             rock.orbit.at(view.tick, view.gravity),
-            state.rock_body(rock.rock)
+            world.state.rock_body(rock.rock)
         );
     }
 
     #[test]
     fn a_view_reads_a_rock_by_id() {
-        let state = state();
-        let at = rock(4);
+        let world = world();
+        let at = RockId(4);
 
-        let view = quiet(&state, SeatId(0));
+        let view = world.view(0);
 
         assert_eq!(view.terrain_of(at).map(|rock| rock.rock), Some(at));
-        assert_eq!(view.rock_body(at), Some(state.rock_body(at)));
+        assert_eq!(view.rock_body(at), Some(world.state.rock_body(at)));
         assert_eq!(view.terrain_of(RockId(99)), None);
         assert_eq!(view.rock_body(RockId(99)), None);
     }
 
     #[test]
-    fn a_flying_units_home_is_its_destination_and_an_enemys_is_hidden() {
-        let mut state = state();
-        state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
-
-        let mine = state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
-        let theirs = state.spawn(SeatId(1), FRIGATE, rock(0), holding(&state, rock(0)));
-        let state = sent(state, &[(0, mine), (1, theirs)]);
-
-        let view = quiet(&state, SeatId(0));
-        let of = |id| view.seen.iter().find(|seen| seen.entity == id).copied();
-
-        let mine = of(mine).expect("a seat sees its own unit");
-        assert!(mine.flying);
-        assert_eq!(mine.home, Some(rock(1)), "its own send names where to");
-        let theirs = of(theirs).expect("the enemy is at the same rock");
-        assert!(theirs.flying);
-        assert_eq!(
-            theirs.home, None,
-            "sight does not give a send's destination"
-        );
-    }
-
-    #[test]
-    fn a_holding_entity_names_its_rock_whoever_owns_it() {
-        let mut state = state();
-        let mine = state.spawn(SeatId(0), SHIPYARD, rock(0), Motion::Fixed);
-        let theirs = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-
-        let view = quiet(&state, SeatId(0));
-
-        for id in [mine, theirs] {
-            let seen = view
-                .seen
-                .iter()
-                .find(|seen| seen.entity == id)
-                .expect("both are at the seat's own rock");
-            assert_eq!(seen.home, Some(rock(0)));
-        }
-    }
-
-    #[test]
     fn an_exchange_names_the_rock_the_shooter_fired_from_and_the_target_was_hit_at() {
-        let mut state = state();
-        let shooter = state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
-        let target = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-        let shots = Fire::of(&state).run();
+        let mut world = world();
+        let shooter = world.hold(0, FRIGATE, ROCK, 0.0);
+        let target = world.fix(1, STORAGE, ROCK);
+        let shots = world.shots();
         assert!(
             shots
                 .hits
@@ -411,65 +318,24 @@ mod tests {
             "the frigate fired on the storage"
         );
 
-        let view = View::of(&state, SeatId(0), &shots);
+        let view = View::of(&world.state, SeatId(0), &shots);
 
         assert_eq!(
             view.exchanges,
             vec![
                 Exchange {
-                    rock: rock(0),
+                    rock: ROCK,
                     seat: SeatId(0),
                     fired: true,
                     landed: false,
                 },
                 Exchange {
-                    rock: rock(0),
+                    rock: ROCK,
                     seat: SeatId(1),
                     fired: false,
                     landed: true,
                 },
             ]
         );
-    }
-
-    #[test]
-    fn a_seat_that_sees_neither_side_of_a_fight_is_told_nothing_of_it() {
-        let setup =
-            Setup::new(vec![TeamId(0), TeamId(1), TeamId(2)], 0, Tick(1_000)).expect("three seats");
-        let mut state = State::start(&setup);
-        state.spawn(SeatId(0), FRIGATE, rock(0), holding(&state, rock(0)));
-        state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-        state.spawn(SeatId(2), STORAGE, rock(9), Motion::Fixed);
-        let shots = Fire::of(&state).run();
-        assert!(!shots.hits.is_empty(), "the fight happened");
-
-        let view = View::of(&state, SeatId(2), &shots);
-
-        assert!(view.exchanges.is_empty());
-    }
-
-    fn holding(state: &State, at: RockId) -> Motion {
-        Motion::Free {
-            body: state.rock_body(at),
-            flight: None,
-        }
-    }
-
-    fn sent(state: State, units: &[(u8, EntityId)]) -> State {
-        let issued: Vec<Issued> = units
-            .iter()
-            .flat_map(|(seat, entity)| {
-                let row = state[*entity].row();
-                [
-                    want(*seat, 0, rock(0), row, 0),
-                    want(*seat, 1, rock(1), row, 1),
-                ]
-            })
-            .collect();
-        let mut state = tick(&state, &issued);
-        for _ in 0..=Send::FORMING_TICKS {
-            state = tick(&state, &[]);
-        }
-        state
     }
 }

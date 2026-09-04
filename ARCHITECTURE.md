@@ -116,6 +116,11 @@ pub struct State {
 }
 
 pub struct Post { pub rock: RockId, pub seat: SeatId }      // one composition
+pub struct Seat { team: TeamId, alive: bool, stockpile: Stockpile,
+                  base_capacity: Materials, reserve: BTreeMap<RowId, u32> }
+pub struct Rock { orbit: Orbit, caps: Materials, radius: Real }
+pub struct Frame { post: Post, row: RowId, progress: Real }
+pub struct Ready { entity: EntityId, weapon: u8, at: Moment }
 
 pub struct Entity {
     id: EntityId, seat: SeatId, row: RowId, home: RockId, hp: Real,
@@ -147,30 +152,27 @@ the two differ only for a unit whose send is still forming.
 - `Wants` is a `BTreeMap<RowId, u32>` with no zero entries. A post whose
   wants are empty, whose entities are gone and whose frames are closed is
   removed at the end of the step; that is the whole existence rule.
-- `Seat { team, alive, stockpile, base_capacity, reserve }`. `Seat::new`
-  takes the stock the seat starts with, which is also its base capacity;
-  every tick the capacity is that base plus the capacity of its living
-  entities, so nothing a seat starts with is lost.
-- `Rock { orbit: Orbit, caps: Materials, radius: Real }`. `Orbit` is an
-  elliptic conic as equinoctial elements with the tick its mean longitude
-  is stated at; a rock never thrusts, so its body at any tick is
-  `Orbit::at`. `radius` is the rock's own size, for drawing;
+- `Seat::new` takes the stock the seat starts with, which is also its base
+  capacity; every tick the capacity is that base plus the capacity of its
+  living entities, so nothing a seat starts with is lost.
+- A rock's `Orbit` is an elliptic conic as equinoctial elements with the
+  tick its mean longitude is stated at; a rock never thrusts, so its body
+  at any tick is `Orbit::at`. Its `radius` is its own size, for drawing;
   `Belt::ZONE_RADIUS_METERS` is the zone, one constant of the belt for
   every rock, which `belt.rs` owns and one test holds against the belt's
   own spacing.
-- `Roster` owns the movement limit and the rows. The shipped eight are built
+- `Roster` owns the movement limit and the rows. The shipped seven are built
   by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`
   and `Roster::moving_at(Real) -> Roster` serve harness variants.
   `Roster::movement_limit()` is the one acceleration every unit transfers at,
   so it hashes with the state and a faction can skew it. A row's kind is
   `Row::kind()`: `Structure` when its manoeuvring limit is zero, else `Unit`.
   No `Copy` of a row lives anywhere but the roster.
-- `Frame { post: Post, row: RowId, progress: Real }`: the work done so far,
-  in cost units. Nothing complete is ever scrapped, so no entity carries
-  work of its own; surplus is `count` above `want` and is read where it is
-  needed, never stored.
-- `Ready { entity: EntityId, weapon: u8, at: Moment }`: one per damage
-  weapon of a living entity; never earlier than the current tick.
+- A `Frame`'s progress is the work done so far, in cost units. Nothing
+  complete is ever scrapped, so no entity carries work of its own; surplus
+  is `count` above `want` and is read where it is needed, never stored.
+- One `Ready` exists per damage weapon of a living entity, and is never
+  earlier than the current tick.
 
 ## Sim: commands and the session
 
@@ -298,19 +300,22 @@ on `State` is a missing type.
 
 ```rust
 let snap = &applied;                                   // commands applied
-let thrusts = Maneuver::of(snap).run();                // Thrusts: one per free unit
+let sweep = snap.sweep();                              // one spatial index a tick
+let thrusts = Maneuver::of(snap, &sweep).run();        // Thrusts: one per free unit
 let moved   = Propagation::of(snap, &thrusts).run();   // Moved: bodies one tick on, flights ended
 let filled  = Fulfilment::of(snap).run();              // Assigned: reserve, surplus, frames opened
 let income  = Extraction::of(snap).run();              // Income: per seat
 let work    = Construction::of(snap).run();            // Progress: spend, completions
-let shots   = Fire::of(snap).run();                    // Shots: ordered, with pending damage
+let shots   = Fire::of(snap, &sweep).run();            // Shots: ordered, with pending damage
 State::next(snap, moved, filled, income, work, shots)  // deaths, reaping, elimination, tick+1
 ```
 
 Phases do not see each other's effects; `next` applies them in that fixed
 order and then removes the dead, closes empty posts, eliminates seats with
 nothing left, and advances the tick. Within a phase, iteration is in id
-order; anything sorted is sorted by a total key ending in an id.
+order; anything sorted is sorted by a total key ending in an id. A phase
+that queries by range takes the tick's one `Sweep` as its second argument,
+since a read-only index of the snapshot is not an effect.
 
 ## Sim: motion
 
@@ -382,13 +387,13 @@ order; anything sorted is sorted by a total key ending in an id.
   `standing`, so a forming unit is a shooter and a target where it
   stands; `State::holding` counts by the flight itself, so it counts
   toward its destination from the tick it joins.
-- **The attractor.** `Attractor::pulling(state, &Entity, &Sight, &Sweep) ->
+- **The attractor.** `Attractor::pulling(state, &Entity, &Sweep) ->
   Option<Attractor>` reads the snapshot and applies DESIGN.md's order:
   nothing while the unit flies a schedule, the half-range point off the
-  nearest seen enemy inside the zone of the rock it stands at, else that
-  rock. `state::sight::Sight` answers which entities a seat sees, over the
-  `Sweep` (Sight, below), and is the only such query.
-- **Manoeuvring.** `Maneuver::of(&State).run() -> Thrusts` is one thrust
+  nearest enemy standing at the rock it stands at, else that rock. The
+  chase asks the sweep for the zone and then `Entity::standing`, the one
+  predicate for being at a rock that Fire asks too.
+- **Manoeuvring.** `Maneuver::of(&State, &Sweep).run() -> Thrusts` is one thrust
   per free unit in id order, each the pull to its attractor plus one pair
   term per ship within the cutoff, clamped to the row's `manoeuvring`. A
   unit with no attractor has no pull, so in flight the rule serves
@@ -436,18 +441,21 @@ order; anything sorted is sorted by a total key ending in an id.
   flying, sorts by `(Moment, EntityId, weapon)`, and resolves each in
   order against the snapshot plus a `BTreeMap<EntityId, f64>` of damage
   assigned so far this tick, skipping targets whose assigned damage is
-  lethal. Target choice is DESIGN.md's threat rule over entities standing
-  at the shooter's own rock, inside the weapon's range, that the
-  shooter's seat's team sees; standing at one rock is the zone by another
-  name, since no two zones overlap, and a flying entity stands nowhere
-  and so is neither shooter nor target. Damage is the weapon's damage cut by its falloff over
-  the range, less the target's plating, floored at zero. A weapon that
-  fires is next ready one interval on, never before this tick; a weapon
-  with nothing to shoot keeps the moment it has, so it fires the instant a
-  target arrives. `Shots` is the list of hits and the new ready moments.
-- **Sight** is a `Sweep`: entities sorted by their belt-plane `x` once per
-  step, with range queries by window. Fire and fog use it; nothing scans
-  every entity against every sensor.
+  lethal. Target choice is DESIGN.md's threat rule over the enemies
+  standing at the shooter's own rock inside the weapon's range; range is
+  the only gate, since everything is visible. Standing at one rock is the
+  zone by another name, as no two zones overlap, and a flying entity
+  stands nowhere and so is neither shooter nor target. Damage is the
+  weapon's damage cut by its falloff over the range, less the target's
+  plating, floored at zero. A weapon that fires is next ready one interval
+  on, never before this tick; a weapon with nothing to shoot keeps the
+  moment it has, so it fires the instant a target arrives. `Shots` is the
+  list of hits and the new ready moments.
+- **The sweep** is the tick's one spatial index: entities sorted by their
+  belt-plane `x`, with range queries by window. `State::sweep` builds it
+  and `step` hands it to Fire and to Maneuver, whose chase and separation
+  are the other range queries; nothing scans every entity against every
+  other.
 - **Deaths, reaping, elimination** live in `State::next`: entities at or
   below zero HP are removed, their `Ready` entries with them; a seat with
   no entities and an empty reserve
@@ -457,59 +465,90 @@ order; anything sorted is sorted by a total key ending in an id.
 
 ## Sim: what leaves the sim
 
-- `View::of(&State, seat, &Shots) -> View`: the fogged state for a display
-  or an agent, built once per tick from that tick's shots. It is a
-  projection and derives nothing itself: every fact it carries is asked
-  of the type that owns it — `State::holding` for a post's row, present
-  and in transit; `Frame::fraction` and `Frame::starved_material` for a frame
-  under construction; `Shots::exchanges` for the tick's fire; `Sight` and
-  `Radar` for what a seat sees and what it merely detects; `Row::mass_class`
-  for what radar can tell of a contact. Own compositions with wants,
-  counts present and in transit, and each frame's progress with the material
-  it has spent nothing on this second for want of; the reserve and
-  stockpile; seen entities with id, row, seat, body, HP, whether they
-  fly, the rock they belong to and, for the seat's own fliers, the rock
-  they left, both `None` for a flying entity of another team, whose
-  destination sight does not give; radar
-  blips with body and mass class, which are the entities inside a team
-  sensor's radar range and outside its sight; the tick's `Exchange`s,
-  which say per rock and seat whether a shot the seat saw was fired or
-  landed there; the gravity its terrain's orbits are read at; every rock
-  with its orbit and caps; the zone every rock's circle is drawn at; the
-  standings, `Some` only once the clock has run out.
-  Nothing in a `View` refers to anything a seat cannot see. The roster is
-  match-constant and travels with the initial state, so a client holds it
-  from the session rather than from a view.
+```rust
+pub struct View {
+    seat: SeatId, tick: Tick, clock: Tick, gravity: Gravity,
+    stockpile: Stockpile, reserve: BTreeMap<RowId, u32>,
+    compositions: Vec<Composition>,      // the seat's own posts
+    present: Vec<Present>,               // every entity of the match
+    teams: Box<[TeamId]>,                // the seating, indexed by seat
+    exchanges: Vec<Exchange>,            // the tick's fire, per rock and seat
+    terrain: Vec<Terrain>,               // every rock: orbit, caps, radius
+    zone: f64,
+    standings: Standings,
+}
+pub struct Present { id: EntityId, row: RowId, seat: SeatId, body: Body,
+                     hp: f64, home: RockId, from: Option<RockId> }
+pub struct Wanted { row: RowId, want: u32, present: u32, transit: u32,
+                    frames: Vec<Building> }
+pub struct Building { progress: f64, starved_of: Option<Material> }
+
+impl View {
+    pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View;
+    pub fn team_of(&self, seat: SeatId) -> Option<TeamId>;
+    pub fn is_enemy(&self, seat: SeatId) -> bool;   // its team differs from the viewer's
+}
+```
+
+- Everything is visible (DESIGN.md, Visibility), so a view is the whole
+  state projected for one seat, built once per tick from that tick's
+  shots. Only what a seat owns is its own: the compositions, the reserve
+  and the stockpile.
+- It derives nothing itself; every fact is asked of the type that owns
+  it — `State::holding` for a row present and in transit, `Frame::fraction`
+  and `Frame::starved_material` for a frame, `Shots::exchanges` for the
+  tick's fire, `State::standings` for the standings.
+- A view carries the seating's teams, so a side is a fact of the view and
+  not a guess from the seat: `is_enemy` is the one question an agent asks
+  about another seat, and a teammate is never one.
+- `Present::from` is `Some` exactly while the entity flies, and names the
+  rock it left; `home` is where it belongs, which for a flier is where it
+  is going. Together they are the whole of a flight, so no separate flag
+  says whether an entity is in the air.
+- The roster is match-constant and travels with the initial state, so a
+  client holds it from the session rather than from a view.
 - `State::hash() -> u64`: FNV-1a over `Hash` of the whole state. The hasher
   widens every `usize` to `u64` and writes integers little-endian, so a
   `Vec` length prefix hashes the same on wasm32 and native.
 - `State::standings() -> Standings`: per team, the rocks where it has a
   structure, the cost total of its living entities, and whether any of its
-  seats is still in; `over()` says the clock has run out and `leaders()`
-  applies DESIGN.md's tie-break. The clock is a field of the state, so the
-  end is a query.
+  seats is still in. `over()` says the clock has run out and `leaders()`
+  applies DESIGN.md's tie-break; the clock is a field of the state, so the
+  end is a query. `Standings::new` builds one from those parts, which is
+  what a hand-built view in `look` and in tests needs.
 
 ## Game: the display library
 
-- `Scene`: everything one frame draws, built from a `View` by
-  `Scene::from_view(view, roster, client)`, from the belt alone by
-  `Scene::of_belt(rocks, gravity, tick)`, which is what the lobby and
-  loading screens draw before a match exists to have a view of, or by
-  hand in `look`. `Scene::centre` is the middle of its rocks, which a
-  camera frames the map from. Rocks with
-  positions, radii and caps; entities with position, glyph and seat; per ring,
-  per seat, the run as a list of `Mark { glyph, fill, dim, reason }` where
-  `fill` is `Solid`, `Hollow`, `Filling(f32)` or `Dashed`, `dim` is what
-  the pointer says is leaving or arriving, and `reason` is the state the
-  glyph stands in, whose `sentence` is what hovering it shows; per ring,
-  per seat, an optional
-  `Arc { fraction, trailing }`; flights as lines to a rock; radar blips as
-  a position, a drift past the nearest rock and a mass class; the
-  selection and the `Hover`, which is a wheel band or a `Sending`. Every
-  rock draws one ring, at `hud::RING_RADIUS`, and a ring is named by its
-  rock.
-- `Client { selection, hover, fights }`: what the client, not the sim,
-  decides about a frame, the third argument of `Scene::from_view`.
+```rust
+pub struct Scene {
+    rocks: Vec<RockView>,          // position, radius, caps
+    entities: Vec<EntityView>,     // position, glyph, seat
+    rings: Vec<RingView>,          // per rock: caps, the runs on it, the fight arcs
+    flights: Vec<FlightLine>,      // every flying ship, whoever owns it
+    selection: Option<RockId>,
+    hover: Option<Hover>,          // a wheel band or a Sending
+}
+pub struct Run { seat: SeatId, marks: Vec<Mark> }
+pub struct Mark { glyph: Glyph, fill: Fill, dim: bool, reason: Reason }
+pub enum Fill { Solid, Hollow, Filling(f32), Dashed }
+pub struct Client<'a> { selection, hover, fights: &'a Fights }
+
+impl Scene {
+    pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene;
+    pub fn of_belt(rocks: &[Rock], gravity: Gravity, tick: Tick) -> Scene;
+    pub fn centre(&self) -> Vec3;
+}
+```
+
+- `of_belt` is what the lobby and loading screens draw before a match
+  exists to have a view of; `look` builds scenes by hand. `centre` is the
+  middle of the rocks, which a camera frames the map from.
+- `Mark::dim` is what the pointer says is leaving or arriving, and
+  `reason` is the state the glyph stands in, whose `sentence` is what
+  hovering it shows.
+- Every rock draws one ring, at `hud::RING_RADIUS`, and a ring is named by
+  its rock.
+- `Client` is what the client, not the sim, decides about a frame.
 - `fights::Fights`: the fight memory, kept by the client because no field
   of the state records a shot. `observe(&View)` once per tick starts an arc
   where the view reports shots exchanged, drains it as the seat's HP at the
@@ -521,7 +560,9 @@ order; anything sorted is sorted by a total key ending in an id.
   glyphs the scene dims and the edits the release issues cannot disagree.
 - `glyph::Glyph { frame, marks, size }`: `Glyph::of(&Row)` by DISPLAY.md's
   three rules, a pure function with a test per rule. `glyph::HALF` is a
-  glyph's nominal half-width, which both layers size by.
+  glyph's nominal half-width, which both layers size by, and
+  `LONG_RANGE_FROM_METERS` is the range at which a damage weapon's mark
+  becomes a bar instead of a dot.
 - `tint::toward(base, caps, strength)`: a rock's colour from its caps, so
   a region reads as one hue. `belt` paints a rock's mesh with it and `hud`
   strokes that rock's rings with it, faintly, since a lobby and a match
@@ -558,8 +599,8 @@ order; anything sorted is sorted by a total key ending in an id.
   `Scene` and a `Screen` to the engine's draws — rocks, one light, and
   ships, in 3D. `hud`: one function from a `Scene`, a `Screen`, the open
   wheel and an `egui::Painter` to painted shapes — rings, runs, arcs, the
-  wheel, flight lines, radar contacts, the selection and the hover
-  preview; it calls `ring::Layout` and paints glyphs through `Stencil`.
+  wheel, flight lines, the selection and the hover preview; it calls
+  `ring::Layout` and paints glyphs through `Stencil`.
 - The binary is the playable: a `Game` whose `tick` and `frame` are the
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped
@@ -606,17 +647,32 @@ binary. `Agent::decide(&mut self, view: &View) -> Vec<Command>` is
 called on `DECISION_INTERVAL`, at most `MAX_COMMANDS_PER_DECISION` per
 call. `Seated { seat, agent }` builds the view and stamps the seat and
 the sequence, so no caller does. `Scripted` is the shipped opponent: a
-`Personality`'s constants read through `Survey` (one decision's tally of a
-view, with memory folded in) into a `Plan` (a target composition per
-rock, diffed against the view into `Want`s), stepping a `Memory` (what
-the view carries no history of) and a `Dice` (the one seeded,
-deterministic source of variation an agent has). `Roles` reads the roster
-once into the row an agent prefers per job, so no agent names a row by
-id. `Personality::of(protocol::Bot)` is the one place a lobby's bot
-becomes constants, and it is exhaustive, so a bot the protocol can name
-always has a way of playing. A bot in a lobby is a `Seated` agent run by
-the machine that owns its seat, through `game`'s bot controller; the sim
-never knows.
+`Personality`'s constants read through `Survey` into a `Plan`, stepping
+its `Commitments` and a `Dice`.
+
+- `Survey` is one decision's tally of one view and derives everything it
+  answers from that view alone, own and enemy alike: the rocks a seat
+  holds, occupies and builds at, its income and army, the enemy's army
+  and the rocks it holds, the threat at each rock, and the worst plating
+  and range the enemy fields. An enemy is a seat the view says is on
+  another team, so a teammate is neither a threat nor a target. Nothing is
+  remembered, since nothing is hidden (DESIGN.md, Visibility).
+- `Commitments` is what the agent has decided and the view cannot say: the
+  rocks it has claimed and how long it will wait for each, the rocks a
+  lapsed claim bars for a while, and the rock it has committed an attack
+  to. `settle(&View, &Roster)` retires a claim the seat has taken and
+  bars one it gave up on.
+- `Plan` is a target composition per rock, diffed against the view into
+  `Want`s, in priority order: the opening, defence, economy, then army.
+  An attack commits to the nearest enemy rock once the army it can see it
+  needs is standing.
+- `Roles` reads the roster once into the row an agent prefers per job, so
+  no agent names a row by id.
+- `Personality::of(protocol::Bot)` is the one place a lobby's bot becomes
+  constants, and it is exhaustive, so a bot the protocol can name always
+  has a way of playing. A bot in a lobby is a `Seated` agent run by the
+  machine that owns its seat, through `game`'s bot controller; the sim
+  never knows.
 
 `harness`, native only, no feature gate: `match` seats agents and plays
 one to the clock, tracing standings as it goes; `replay` checks the
@@ -855,9 +911,9 @@ exists.
   the frame the hold begins. Results holds the score, the belt the
   match ended on and the lobby it came from, and returns to that lobby
   for a rematch or to the title. Results is reached when the view's
-  `Standings` arrive, which is the clock: DESIGN.md's fog reveals them
-  then and never before, so a client cannot see another side's
-  elimination, and the end at elimination is the unit that can.
+  standings say the clock has run out; every earlier tick carries them
+  too, and no screen but this one reads them yet. Ending a match at an
+  elimination is a later unit.
   The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
   widest view whose rings stand apart, and lays its seats out by team:
   one heading per team that holds a seat, and its seats under it, each a
@@ -946,8 +1002,9 @@ sim/src/
   time.rs           Tick, Moment
   ids.rs            RockId, EntityId, RowId, SeatId, TeamId
   post.rs           Post
+  fixture.rs        the crate's one test world, behind cfg(test)
   roster/           mod.rs Roster and the movement limit; row.rs Row,
-                    Weapon, Kind, MassClass; shipped.rs the eight
+                    Weapon, Kind; shipped.rs the seven
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
@@ -955,11 +1012,12 @@ sim/src/
                     schedule.rs Flight, Schedule, Burn, the solve;
                     send.rs Send, its forming window and the search for
                     its arrival tick;
-                    attractor.rs; sight.rs Sight; radar.rs Radar;
+                    attractor.rs;
                     wants.rs Wants; frame.rs Frame, its fraction and what
                     it went short of; ready.rs; command.rs Command,
                     Issued, Stamped, Batch, Sequence, Rejected, Refused,
-                    apply; sweep.rs; view.rs View; hash.rs;
+                    apply; sweep.rs Sweep, the tick's spatial index;
+                    view.rs View, Present; hash.rs;
                     standings.rs Standings
   step/             mod.rs step, next; maneuver.rs; propagation.rs;
                     fulfilment.rs; extraction.rs; construction.rs;
@@ -980,7 +1038,7 @@ protocol/src/
   wire.rs           Codec, the one encoding
 agents/src/
   lib.rs            Agent, Seated, DECISION_INTERVAL; the surface
-  dice.rs  memory.rs  roles.rs  survey.rs  plan.rs  personality.rs
+  dice.rs  commitments.rs  roles.rs  survey.rs  plan.rs  personality.rs
   scripted.rs       Scripted
   bin/harness.rs    native only: match, replay, rollback, matrix
 game/src/
@@ -1021,6 +1079,16 @@ server/src/
 ```
 
 One concern per file; a file that needs a section comment is two files.
+A section of this document is its type block plus the facts the block
+cannot state; a paragraph that restates a signature or a field list is
+deleted.
+
+`sim` has one test fixture, `fixture::World`: a state and the ways to
+drive it — a match off a `Setup`, a hand-seated belt, or a ring of
+circular rocks at a chosen gravity; `tick` and `run` step it, `moves`
+advances motion alone, and `fix`, `hold`, `free` and `launch` place
+entities. Every test that builds a state builds it there, so the world a
+rule is tested in is one shape.
 
 ## Conventions
 

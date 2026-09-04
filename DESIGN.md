@@ -100,8 +100,8 @@ HP, and its home rock.
 | capacity | stockpile capacity contributed, per material |
 | orbit, caps | rocks only |
 
-- **Rocks** are entities: huge mass, no manoeuvring, indestructible,
-  always visible, a per-material extraction cap.
+- **Rocks** are entities: huge mass, no manoeuvring, indestructible, a
+  per-material extraction cap.
 - **Structures** have no manoeuvring. A structure is built at its rock's
   position and velocity, and since neither ever thrusts, it stays with the
   rock.
@@ -202,18 +202,35 @@ sets one count.
   unit is flying from the tick its schedule departs until it ends. The tolerance is the schedule's. Separation in flight
   can push a ship in company off its schedule by arrival, and it holds
   from wherever it ends.
+- **Power.** Every unit has a power: its damage per second times its
+  remaining HP. It is the one number the fields below sum and it falls
+  as a unit is hurt.
+- **The fields.** Each tick, at each rock, each side has a strength
+  field: at any point, the sum over that side's units at the rock of
+  the unit's power times a smooth kernel of its distance from the point,
+  the kernel's scale a constant of the zone. A unit reads the two fields
+  at its own position, its side's and the enemy's, and the fraction of
+  the strength there that is its own side's, so it knows who is strong
+  here without knowing any absolute number.
 - **Holding.** At its rock a unit moves by the holding rule. Each tick it
-  sums four steering terms and thrusts by the sum, capped at its row's
-  manoeuvring limit. The constants of every term are the row's. Wander: a
-  held force drifts through the zone and never sits still. Return: a pull
-  back that grows with distance outside the zone, so the zone is a soft
-  edge. Separation: a weak push from any ship of any seat nearer than the
-  row's spacing, the distance a pair settles at; weak, since space is
-  large. Chase: a pull toward the nearest enemy inside the zone, to half
-  the unit's longest weapon range from it, holding there. A unit chases
-  the nearest enemy and fires by threat, which may be a different one.
-  The rule is one module and is replaceable whole. In flight a unit
-  thrusts by its schedule and by separation alone.
+  sums the steering terms below and thrusts by the sum, capped at its
+  row's manoeuvring limit. Each term's weight is the row's. Wander: a
+  held force drifts through the zone and never sits still. Return: a
+  pull back that grows with distance outside the zone, so the zone is a
+  soft edge. Separation: a weak push from any ship of any seat nearer
+  than the row's spacing, the distance a pair settles at; weak, since
+  space is large. Cohesion: a pull up the gradient of its own side's
+  field, toward where its allies' strength is. Caution: a push down the
+  gradient of the enemy's field, weighted by how outnumbered the unit is
+  where it stands, so a unit in a strong group ignores it and a lone
+  unit falls back toward its allies. Chase: a pull toward the enemy
+  inside the zone its fire rule would choose (Weapons, Target
+  selection), to half the unit's longest weapon range from it, holding
+  there; the unit it chases is the unit it fires at. Cohesion is
+  weighted so a force closes on its target as one body, which is what
+  makes a battle predictable; there is no facing. The rule is one module
+  and is replaceable whole. In flight a unit thrusts by its schedule and
+  by separation alone.
 - A flying unit is neither a shooter nor a target: battles happen at
   rocks.
 
@@ -234,7 +251,7 @@ and nothing is remembered, since there is nothing to remember.
 3. The playable on the engine over the sim's view.
 4. A scripted agent and the balance harness.
 5. Map generation from seed with regional caps.
-6. Factions as skews over one roster; rows beyond the first eight.
+6. Factions as skews over one roster; rows beyond the first seven.
 
 ## Questions for the harness
 

@@ -54,6 +54,10 @@ impl State {
 }
 
 impl Standings {
+    pub fn new(teams: Vec<Team>, over: bool) -> Standings {
+        Standings { teams, over }
+    }
+
     pub fn teams(&self) -> &[Team] {
         &self.teams
     }

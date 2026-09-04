@@ -1,11 +1,10 @@
 use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
-use probe_sim::roster::MassClass;
 use probe_sim::{RowId, SeatId};
 
 use crate::display::glyph;
 use crate::display::glyph_quad::seat_color32;
 use crate::display::ring::{Geometry, Layout, Span};
-use crate::display::scene::{Arc, Blip, Hover, Mark, RingView, Scene, WheelBand};
+use crate::display::scene::{Arc, Hover, Mark, RingView, Scene, WheelBand};
 use crate::display::stencil::Stencil;
 use crate::display::tint;
 use crate::display::viewport::Viewport;
@@ -54,14 +53,6 @@ const FLIGHT_FAINT_ALPHA: f32 = 0.15;
 
 const FLIGHT_FULL_ALPHA: f32 = 0.9;
 
-const BLIP_COLOUR: Color32 = Color32::from_gray(170);
-
-const BLIP_RADII: [f32; 3] = [2.0, 3.0, 4.5];
-
-const STREAK_SECONDS: f64 = 20.0;
-
-const STREAK_MAX: f32 = 18.0;
-
 pub fn paint(scene: &Scene, viewport: &Viewport, wheel: Option<&Wheel>, painter: &egui::Painter) {
     for ring in &scene.rings {
         let Some(centre) = centre_of(scene, viewport, ring) else {
@@ -81,10 +72,6 @@ pub fn paint(scene: &Scene, viewport: &Viewport, wheel: Option<&Wheel>, painter:
             continue;
         };
         paint_flight_line(painter, from, to);
-    }
-
-    for blip in &scene.blips {
-        paint_blip(painter, viewport, blip);
     }
 
     if let Some(wheel) = wheel {
@@ -257,30 +244,6 @@ fn paint_arc_segment(
     painter.add(Shape::line(points, stroke));
 }
 
-fn paint_blip(painter: &egui::Painter, viewport: &Viewport, blip: &Blip) {
-    let Some(at) = viewport.point_of(blip.pos) else {
-        return;
-    };
-    painter.circle_filled(at, radius_of(blip.mass), BLIP_COLOUR);
-    let Some(ahead) = viewport.point_of(blip.pos + blip.drift * STREAK_SECONDS) else {
-        return;
-    };
-    let along = ahead - at;
-    let held = match along.length() > STREAK_MAX {
-        true => at + along.normalized() * STREAK_MAX,
-        false => ahead,
-    };
-    painter.line_segment([at, held], Stroke::new(1.0, BLIP_COLOUR));
-}
-
-fn radius_of(mass: MassClass) -> f32 {
-    BLIP_RADII[match mass {
-        MassClass::Light => 0,
-        MassClass::Medium => 1,
-        MassClass::Heavy => 2,
-    }]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,11 +275,5 @@ mod tests {
             apart >= 2.0 * glyph::HALF * glyph::WIDEST_SCALE - 1e-4,
             "marks {apart} points apart overlap the widest glyph"
         );
-    }
-
-    #[test]
-    fn a_heavier_contact_draws_a_bigger_dot() {
-        assert!(radius_of(MassClass::Light) < radius_of(MassClass::Medium));
-        assert!(radius_of(MassClass::Medium) < radius_of(MassClass::Heavy));
     }
 }

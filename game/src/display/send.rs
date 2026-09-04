@@ -55,14 +55,14 @@ impl Sending {
 
 fn run(view: &View, rock: RockId, roster: &Roster) -> Vec<(RowId, u32)> {
     let mut held: BTreeMap<RowId, u32> = BTreeMap::new();
-    for seen in view
-        .seen
+    for unit in view
+        .present
         .iter()
-        .filter(|seen| seen.seat == view.seat && !seen.flying)
-        .filter(|seen| seen.home == Some(rock))
-        .filter(|seen| roster[seen.row].kind() == Kind::Unit)
+        .filter(|unit| unit.seat == view.seat && unit.from.is_none())
+        .filter(|unit| unit.home == rock)
+        .filter(|unit| roster[unit.row].kind() == Kind::Unit)
     {
-        *held.entry(seen.row).or_insert(0) += 1;
+        *held.entry(unit.row).or_insert(0) += 1;
     }
     let mut rows: Vec<(RowId, u32)> = held.into_iter().collect();
     rows.sort_by(|(a, _), (b, _)| {

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ids::{EntityId, RockId, SeatId};
 use crate::roster::Weapon;
 use crate::state::sweep::Sweep;
-use crate::state::{Entity, Ready, Sight, State};
+use crate::state::{Entity, Ready, State};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,22 +30,12 @@ pub struct Shots {
 
 pub struct Fire<'a> {
     state: &'a State,
-    sweep: Sweep,
-    sights: BTreeMap<SeatId, Sight>,
+    sweep: &'a Sweep,
 }
 
 impl<'a> Fire<'a> {
-    pub fn of(state: &'a State) -> Fire<'a> {
-        let sweep = state.sweep();
-        let sights = (0..state.seats().len())
-            .map(|seat| SeatId(seat as u8))
-            .map(|seat| (seat, Sight::of(state, seat, &sweep)))
-            .collect();
-        Fire {
-            state,
-            sweep,
-            sights,
-        }
+    pub fn of(state: &'a State, sweep: &'a Sweep) -> Fire<'a> {
+        Fire { state, sweep }
     }
 
     pub fn run(self) -> Shots {
@@ -122,7 +112,6 @@ impl<'a> Fire<'a> {
         range: f64,
         assigned: &BTreeMap<EntityId, f64>,
     ) -> Option<(EntityId, f64)> {
-        let sight = self.sights.get(&shooter.seat())?;
         let team = self.state[shooter.seat()].team();
         let from = self.state.body_of(shooter).pos;
         let plating = self.state[shooter.row()].plating.0;
@@ -134,7 +123,6 @@ impl<'a> Fire<'a> {
             .filter(|target| {
                 self.state[target.seat()].team() != team
                     && target.standing(now) == Some(here)
-                    && sight.sees(target.id())
                     && target.hp() > assigned.get(&target.id()).copied().unwrap_or(0.0)
             })
             .map(|target| {
@@ -160,12 +148,9 @@ impl Shots {
         damage
     }
 
-    pub fn exchanges(&self, state: &State, sight: &Sight) -> Vec<Exchange> {
+    pub fn exchanges(&self, state: &State) -> Vec<Exchange> {
         let mut found: BTreeMap<(RockId, SeatId), (bool, bool)> = BTreeMap::new();
         let mut note = |id: EntityId, landed: bool| {
-            if !sight.sees(id) {
-                return;
-            }
             let Some(entity) = state.entity(id) else {
                 return;
             };

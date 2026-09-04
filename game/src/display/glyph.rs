@@ -6,7 +6,7 @@ pub const SMALL_BELOW: f64 = 50.0;
 
 pub const LARGE_FROM: f64 = 150.0;
 
-pub const RADAR_ABOVE_DEFAULT: f64 = 2.0;
+pub const LONG_RANGE_FROM_METERS: f64 = 10.0;
 
 const SIZE_SCALE: [f32; 3] = [0.85, 1.0, 1.2];
 
@@ -50,7 +50,6 @@ pub enum GlyphMark {
     Bar,
     Plus,
     Chevron,
-    Arc,
     Belt,
     Ring,
 }
@@ -67,7 +66,6 @@ pub enum Primitive {
     Dot { at: (f32, f32), radius: f32 },
     Line(Vec<(f32, f32)>),
     Ring { at: (f32, f32), radius: f32 },
-    Arc { at: (f32, f32), radius: f32 },
 }
 
 impl Frame {
@@ -97,14 +95,7 @@ impl Glyph {
 }
 
 fn marks_of(row: &Row) -> Vec<GlyphMark> {
-    let mut marks: Vec<GlyphMark> = row
-        .weapons
-        .iter()
-        .map(|weapon| GlyphMark::of_weapon(weapon, row.sight.0))
-        .collect();
-    if row.radar.0 > RADAR_ABOVE_DEFAULT * row.sight.0 {
-        marks.push(GlyphMark::Arc);
-    }
+    let mut marks: Vec<GlyphMark> = row.weapons.iter().map(GlyphMark::of_weapon).collect();
     if row.plating.0 > 0.0 {
         marks.push(GlyphMark::Belt);
     }
@@ -115,9 +106,9 @@ fn marks_of(row: &Row) -> Vec<GlyphMark> {
 }
 
 impl GlyphMark {
-    fn of_weapon(weapon: &Weapon, sight: f64) -> GlyphMark {
+    fn of_weapon(weapon: &Weapon) -> GlyphMark {
         match weapon {
-            Weapon::Damage { range, .. } if range.0 <= sight => GlyphMark::Dot,
+            Weapon::Damage { range, .. } if range.0 < LONG_RANGE_FROM_METERS => GlyphMark::Dot,
             Weapon::Damage { .. } => GlyphMark::Bar,
             Weapon::Build { .. } => GlyphMark::Plus,
             Weapon::Extract { .. } => GlyphMark::Chevron,
@@ -148,16 +139,6 @@ fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primi
         GlyphMark::Plus if paired => plus_lines((30.0, 30.0), 6.5),
         GlyphMark::Plus => plus_lines((30.0, 38.0), 8.5),
         GlyphMark::Chevron => vec![chevron_line((30.0, 32.0), 15.0)],
-        GlyphMark::Arc => vec![
-            Primitive::Arc {
-                at: (30.0, 42.0),
-                radius: 11.0,
-            },
-            Primitive::Dot {
-                at: (30.0, 43.0),
-                radius: 3.5,
-            },
-        ],
         GlyphMark::Belt => vec![Primitive::Line(vec![(17.0, 45.0), (43.0, 45.0)])],
         GlyphMark::Ring => vec![Primitive::Ring {
             at: (30.0, 30.0),
@@ -208,18 +189,17 @@ mod tests {
 
     use super::*;
 
-    const SHIPPED_MARKS: [(&str, &[GlyphMark]); 8] = [
+    const SHIPPED_MARKS: [(&str, &[GlyphMark]); 7] = [
         ("constructor", &[GlyphMark::Plus]),
         ("extractor", &[GlyphMark::Chevron]),
         ("storage", &[GlyphMark::Ring]),
         ("shipyard", &[GlyphMark::Plus, GlyphMark::Ring]),
-        ("scout", &[GlyphMark::Arc]),
         ("raider", &[GlyphMark::Dot]),
         ("frigate", &[GlyphMark::Dot, GlyphMark::Belt]),
         ("lancer", &[GlyphMark::Bar]),
     ];
 
-    fn row(cost: f64, manoeuvring: f64, sight: f64, weapons: Vec<Weapon>) -> Row {
+    fn row(cost: f64, manoeuvring: f64, weapons: Vec<Weapon>) -> Row {
         Row {
             name: "test",
             cost: Materials::new(cost, 0.0, 0.0),
@@ -227,8 +207,6 @@ mod tests {
             manoeuvring: Real(manoeuvring),
             hp: Real(1.0),
             plating: Real(0.0),
-            sight: Real(sight),
-            radar: Real(sight),
             capacity: Materials::ZERO,
             weapons,
         }
@@ -245,20 +223,16 @@ mod tests {
 
     #[test]
     fn a_structure_is_a_square_and_a_unit_a_triangle() {
-        assert_eq!(Glyph::of(&row(60.0, 0.0, 5.0, vec![])).frame, Frame::Square);
-        assert_eq!(
-            Glyph::of(&row(60.0, 1.0, 5.0, vec![])).frame,
-            Frame::Triangle
-        );
+        assert_eq!(Glyph::of(&row(60.0, 0.0, vec![])).frame, Frame::Square);
+        assert_eq!(Glyph::of(&row(60.0, 1.0, vec![])).frame, Frame::Triangle);
     }
 
     #[test]
-    fn damage_marks_a_dot_within_sight_and_a_bar_beyond() {
-        let sight = 8.0;
-        let marks = |range| Glyph::of(&row(60.0, 1.0, sight, vec![damage(range)])).marks;
-        assert_eq!(marks(sight - 1.0), vec![GlyphMark::Dot]);
-        assert_eq!(marks(sight), vec![GlyphMark::Dot]);
-        assert_eq!(marks(sight + 1.0), vec![GlyphMark::Bar]);
+    fn damage_marks_a_dot_below_the_long_range_threshold_and_a_bar_from_it() {
+        let marks = |range| Glyph::of(&row(60.0, 1.0, vec![damage(range)])).marks;
+        assert_eq!(marks(LONG_RANGE_FROM_METERS - 1.0), vec![GlyphMark::Dot]);
+        assert_eq!(marks(LONG_RANGE_FROM_METERS), vec![GlyphMark::Bar]);
+        assert_eq!(marks(LONG_RANGE_FROM_METERS + 1.0), vec![GlyphMark::Bar]);
     }
 
     #[test]
@@ -268,35 +242,25 @@ mod tests {
             Weapon::Extract { rate: Real(1.0) },
         ];
         assert_eq!(
-            Glyph::of(&row(60.0, 0.0, 5.0, weapons)).marks,
+            Glyph::of(&row(60.0, 0.0, weapons)).marks,
             vec![GlyphMark::Plus, GlyphMark::Chevron]
         );
     }
 
     #[test]
-    fn radar_above_twice_sight_earns_the_arc_mark() {
-        let mut plain = row(60.0, 1.0, 5.0, vec![]);
-        plain.radar = Real(10.0);
-        assert_eq!(Glyph::of(&plain).marks, vec![]);
-        let mut radared = row(60.0, 1.0, 5.0, vec![]);
-        radared.radar = Real(10.01);
-        assert_eq!(Glyph::of(&radared).marks, vec![GlyphMark::Arc]);
-    }
-
-    #[test]
     fn plating_above_zero_earns_the_belt_mark() {
-        let mut plated = row(60.0, 1.0, 5.0, vec![]);
+        let mut plated = row(60.0, 1.0, vec![]);
         plated.plating = Real(1.0);
         assert_eq!(Glyph::of(&plated).marks, vec![GlyphMark::Belt]);
     }
 
     #[test]
     fn capacity_above_zero_earns_the_ring_mark_alongside_a_build_plus() {
-        let mut stores = row(60.0, 0.0, 5.0, vec![]);
+        let mut stores = row(60.0, 0.0, vec![]);
         stores.capacity = Materials::new(1.0, 0.0, 0.0);
         assert_eq!(Glyph::of(&stores).marks, vec![GlyphMark::Ring]);
 
-        let mut yards = row(60.0, 0.0, 5.0, vec![Weapon::Build { rate: Real(1.0) }]);
+        let mut yards = row(60.0, 0.0, vec![Weapon::Build { rate: Real(1.0) }]);
         yards.capacity = Materials::new(1.0, 0.0, 0.0);
         assert_eq!(
             Glyph::of(&yards).marks,
@@ -306,7 +270,7 @@ mod tests {
 
     #[test]
     fn size_steps_at_the_thresholds() {
-        let size = |cost| Glyph::of(&row(cost, 1.0, 5.0, vec![])).size;
+        let size = |cost| Glyph::of(&row(cost, 1.0, vec![])).size;
         assert_eq!(size(SMALL_BELOW - 1.0), Size::Small);
         assert_eq!(size(SMALL_BELOW), Size::Medium);
         assert_eq!(size(LARGE_FROM - 1.0), Size::Medium);

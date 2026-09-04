@@ -145,7 +145,7 @@ impl Play {
     }
 
     pub fn over(&self) -> bool {
-        self.view.standings.is_some()
+        self.view.standings.over()
     }
 
     pub fn ends(&self) -> results::Results {
@@ -315,10 +315,10 @@ impl Play {
         }
         let Some(home) = self
             .view
-            .seen
+            .present
             .iter()
-            .filter(|seen| seen.seat == self.machine.seat())
-            .find_map(|seen| seen.home)
+            .find(|present| present.seat == self.machine.seat())
+            .map(|present| present.home)
         else {
             return;
         };

@@ -190,7 +190,6 @@ fn region_scene() -> Scene {
         entities,
         rings,
         flights,
-        blips: Vec::new(),
         selection: None,
         hover: None,
     }
@@ -237,7 +236,6 @@ fn fight_scene() -> Scene {
         entities,
         rings,
         flights: vec![],
-        blips: Vec::new(),
         selection: Some(inner),
         hover: None,
     }
@@ -291,7 +289,6 @@ fn belt_scene() -> Scene {
             from: flight_from,
             to: RockId(1),
         }],
-        blips: Vec::new(),
         selection: None,
         hover: None,
     }

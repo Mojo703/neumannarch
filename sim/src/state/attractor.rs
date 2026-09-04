@@ -1,8 +1,8 @@
 use super::State;
 use super::entity::Entity;
-use super::sight::Sight;
 use super::sweep::Sweep;
 use crate::belt::Belt;
+use crate::ids::RockId;
 use crate::orbit::body::Body;
 use crate::vec3::Vec3;
 
@@ -13,15 +13,10 @@ pub struct Attractor {
 }
 
 impl Attractor {
-    pub fn pulling(
-        state: &State,
-        entity: &Entity,
-        sight: &Sight,
-        sweep: &Sweep,
-    ) -> Option<Attractor> {
+    pub fn pulling(state: &State, entity: &Entity, sweep: &Sweep) -> Option<Attractor> {
         let standing = entity.standing(state.tick())?;
         let home = Attractor::at(state.rock_body(standing));
-        Some(Attractor::chase(state, entity, sight, sweep, home).unwrap_or(home))
+        Some(Attractor::chase(state, entity, sweep, standing, home).unwrap_or(home))
     }
 
     fn at(body: Body) -> Attractor {
@@ -34,8 +29,8 @@ impl Attractor {
     fn chase(
         state: &State,
         entity: &Entity,
-        sight: &Sight,
         sweep: &Sweep,
+        here: RockId,
         home: Attractor,
     ) -> Option<Attractor> {
         let row = &state[entity.row()];
@@ -48,9 +43,7 @@ impl Attractor {
             .within(home.pos, Belt::ZONE_RADIUS_METERS)
             .filter_map(|id| state.entity(id))
             .filter(|other| {
-                state[other.seat()].team() != team
-                    && !other.is_flying(state.tick())
-                    && sight.sees(other.id())
+                state[other.seat()].team() != team && other.standing(state.tick()) == Some(here)
             })
             .map(|other| (state.body_of(other), other.id()))
             .min_by(|(a, first), (b, second)| {

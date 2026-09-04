@@ -91,6 +91,17 @@ Measured: 2.8 ms per accepted candidate, 5.8 ms per row per send.
   collisions do not matter. The spiral's replacement: stacked glyphs
   shrink and overlap in place on the ring. Ranges drawn always, subtly.
 
+- Rulings 2026-09-05 on the overseer's design notes: the chase and the
+  fire target are algorithmically one choice (the fire rule's target,
+  inside the zone); a unit also stays close to allies and never chases
+  into the middle of an enemy formation, by a cohesion term toward
+  nearby allies weighted against the chase, boids-fashion (DESIGN
+  Holding rewritten); the scout row is deleted, other rows considered
+  after testing (into unit 1b's build); standings in a match are shown
+  as Beyond All Reason shows stats, a page over the match toggled by a
+  key with per-team standings, a design conversation on its content
+  before DISPLAY.md gains it (plan item 7 grows into it).
+
 ## Docs ahead of code
 
 Rewritten 2026-09-05 for the play rulings, the code still on the old
@@ -144,9 +155,17 @@ play, then the programme.
    fire and the chase gate on range and the zone; standings in every
    view; the glyph's radar mark goes.
 1c. The holding rule, Opus (sim): `Attractor` and the pair term replaced
-   by one module with per-row constants: wander, soft return past the
-   zone, weak separation, the chase to half range; replaceable whole;
-   in flight schedule plus separation. Design numbers as hypotheses.
+   by one module, DESIGN's Power, The fields and Holding (2026-09-05):
+   per rock and side, a strength field computed once per tick (power =
+   damage per second times remaining HP, times a kernel of distance at
+   the zone's scale), sampled by every unit there; six terms with
+   per-row weights: wander, return, weak separation, cohesion up the own
+   field's gradient, caution down the enemy field's gradient weighted by
+   being outnumbered, chase to the fire rule's target; no facing;
+   cohesion weighted so a force closes as one body. The agent sets the
+   first constants as hypotheses with a harness sweep and two tests: a
+   lone unit falls back to its allies, a group closes on its target as
+   one body. `Motion::Free` renamed here. Replaceable whole.
 1d. Display follow-through, Sonnet: one ring per rock; stacked glyphs
    shrink in place with no radial step; the two range circles (the view
    carries the zone already); the wheel's gap off the one ring re-set;
@@ -225,7 +244,11 @@ play, then the programme.
    painted once and rasterised once, then re-judged; one Log type; the
    agent's knowledge as one row per rock; the wheel built once on
    selection; the Maneuver phase and module spelt manoeuvring; the
-   unit-newtype question over every measured f64 field. Done already:
+   units question: not hand-rolled newtypes (owner: madness); evaluate
+   one existing dimensional-analysis crate with const-generic
+   dimensions, adopt only if it is already in the cargo cache (downloads
+   are blocked in the agents' environment) and its bounds stay out of
+   the rules. Done already:
    the seating authority, the flow, the comment sweep, the flights on
    their members. Opus for the sim stores and the agents; Sonnet for the
    rest; a line ceiling per brief; `check.sh` gains a duplication check.
@@ -233,6 +256,22 @@ play, then the programme.
     Build is flow and Shortfall, fulfilment, the ring's fills); a selected
     rock owns the focus each tick until a pan releases it (DISPLAY Camera,
     main loop).
+   Matrix at f305453 (before everything visible), five minutes a cell,
+   every cell 3-3 rocks and decided by the army tie-break: raiders beat
+   frigates, mixed and counters, lose to lancers; frigates beat mixed and
+   counters; lancers beat all but themselves, where seat 0 loses to its
+   own composition, which is the seat-zero edge; mixed lose to all but
+   themselves; counters beat mixed only.
+   Matrix after everything visible (uncommitted 1b tree), same cells:
+   raiders beat every other composition; lancers beat frigates, mixed
+   and counters and lose to raiders; frigates, mixed and counters draw
+   among themselves. The change came with a bot rule change the fog
+   removal forced: with no assumed enemy army, bots sized against zero
+   and never built one (a pacifist deadlock, no shot in seven minutes),
+   so a bot now commits when it has an army that beats the visible
+   defence at the target rock, and the attack ratios fell (turtle 2.5
+   to 1.1, expand 1.2 to 0.7). Balance is now the harness's question
+   with no fog guess in it.
 11. From the harness: seat 0's edge isolated and removed; territory that
     varies with composition; combat before the last third of a match;
     the tick-rate-doubling check; timeouts instead of iteration caps in
@@ -357,8 +396,12 @@ step/mod.rs and history/session.rs move.
   no rule holds an entity across a tick or indexes the entity store by
   anything but an id, so the columns land without touching a rule.
 - Brief rules in force (owner, 2026-09-05): no comments of any kind; a
-  confused agent is a naming defect; a net-line budget per unit with
-  lines added against deleted reported; Edit and Write only.
+  confused agent is a naming defect; Edit and Write only; three line
+  budgets reported separately, code, tests and docs, the code budget
+  below zero and the test budget below zero unless a new guarantee has
+  no old test to replace; tests share one fixture module per crate;
+  ARCHITECTURE.md sections are the type block plus the facts the block
+  cannot say, never a paragraph restating a signature.
 
 ## Engine friction
 

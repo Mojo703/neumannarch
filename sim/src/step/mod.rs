@@ -24,12 +24,13 @@ impl State {
             .filter_map(|issued| applied.apply(issued).err().map(|why| (issued, why)))
             .collect();
         let snap = &applied;
-        let thrusts = Maneuver::of(snap).run();
+        let sweep = snap.sweep();
+        let thrusts = Maneuver::of(snap, &sweep).run();
         let moved = Propagation::of(snap, &thrusts).run();
         let filled = Fulfilment::of(snap).run();
         let income = Extraction::of(snap).run();
         let work = Construction::of(snap).run();
-        let shots = Fire::of(snap).run();
+        let shots = Fire::of(snap, &sweep).run();
         let next = State::next(snap, &moved, &filled, &income, &work, &shots);
         (next, Outcome { rejected, shots })
     }
@@ -231,114 +232,36 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::belt::Belt;
+    use crate::fixture::World;
     use crate::ids::TeamId;
     use crate::materials::Material;
     use crate::real::Real;
     use crate::roster::Roster;
-    use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, SCOUT, SHIPYARD, STORAGE};
-    use crate::setup::Setup;
-    use crate::state::view::View;
-    use crate::state::{Command, Entity, MAX_WANT, Schedule, Seat, Send};
-    use crate::step::fire::Hit;
+    use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
+    use crate::state::{Entity, MAX_WANT, Schedule, Seat, Send};
     use crate::time::Tick;
     use crate::{Materials, TICKS_PER_SECOND};
-
-    const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
-
-    fn start(teams: &[TeamId]) -> State {
-        let setup = Setup::new(teams.to_vec(), 0, CLOCK).expect("a match of these teams");
-        State::start(&setup)
-    }
 
     fn rock(at: u32) -> RockId {
         RockId(at)
     }
 
-    fn post(seat: u8, rock: RockId) -> Post {
-        Post {
-            rock,
-            seat: SeatId(seat),
-        }
-    }
-
-    fn want(seat: u8, rock: RockId, row: RowId, count: u32) -> Issued {
-        numbered(seat, 0, rock, row, count)
-    }
-
-    fn numbered(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
-        Issued {
-            seat: SeatId(seat),
-            seq,
-            command: Command::Want { rock, row, count },
-        }
-    }
-
-    fn batch(issued: &[Issued]) -> Batch {
-        let mut batch = Batch::new();
-        for issued in issued {
-            assert_eq!(batch.insert(*issued), Ok(()));
-        }
-        batch
-    }
-
-    fn tick(state: State, issued: &[Issued]) -> State {
-        let (next, outcome) = state.step(&batch(issued));
-        assert_eq!(outcome.rejected, Vec::new(), "the commands were rejected");
-        next
-    }
-
-    fn refusal(state: &State, issued: Issued) -> Option<Rejected> {
-        let (_, outcome) = state.step(&batch(&[issued]));
-        outcome.rejected.first().map(|(_, why)| *why)
-    }
-
-    fn run(mut state: State, ticks: u64) -> State {
-        for _ in 0..ticks {
-            state = tick(state, &[]);
-        }
-        state
-    }
-
-    fn holding(roster: Roster, reserve: BTreeMap<RowId, u32>) -> State {
-        State::new(
-            CLOCK,
-            0,
-            Belt::GRAVITY,
+    fn holding(roster: Roster, reserve: BTreeMap<RowId, u32>) -> World {
+        World::crewed(
             roster,
-            Belt::fixed(Belt::GRAVITY),
             vec![Seat::new(TeamId(0), Materials::new(1e4, 1e4, 1e4), reserve)],
         )
     }
 
-    fn count(state: &State, seat: u8, at: RockId, row: RowId) -> u32 {
-        state.count(post(seat, at), row)
-    }
-
-    fn shot_at(state: &State, target: EntityId, ticks: u64) -> Option<Hit> {
-        let mut state = state.clone();
-        for _ in 0..ticks {
-            let hit = Fire::of(&state)
-                .run()
-                .hits
-                .into_iter()
-                .find(|hit| hit.target == target);
-            if hit.is_some() {
-                return hit;
-            }
-            state = tick(state, &[]);
-        }
-        None
-    }
-
     #[test]
     fn a_first_want_places_the_reserve_shipyard_at_once() {
-        let state = start(&[TeamId(0)]);
+        let mut world = World::started(&[TeamId(0)]);
         let seconds = TICKS_PER_SECOND as u64;
 
-        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
+        world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
 
-        assert_eq!(count(&state, 0, rock(0), SHIPYARD), 1);
+        assert_eq!(world.count(0, rock(0), SHIPYARD), 1);
+        let state = &world.state;
         assert_eq!(state[SeatId(0)].reserved(SHIPYARD), 0);
         assert_eq!(state[SeatId(0)].reserved(CONSTRUCTOR), 1);
         assert_eq!(state.frames().len(), 0, "the reserve needs no frame");
@@ -346,31 +269,23 @@ mod tests {
         assert_eq!(shipyard.motion(), Motion::Fixed);
         assert_eq!(state.body_of(shipyard), state.rock_body(RockId(0)));
 
-        let state = run(state, seconds);
+        world.run(seconds);
+        let seat = &world.state[SeatId(0)];
         assert_eq!(
-            state[SeatId(0)].stockpile().capacity(),
-            state[SeatId(0)].base_capacity() + state[SHIPYARD].capacity
+            seat.stockpile().capacity(),
+            seat.base_capacity() + world.state[SHIPYARD].capacity
         );
     }
 
     #[test]
     fn a_frame_that_spends_nothing_for_a_second_names_the_material_it_wants() {
-        let stocked = |stock| {
-            State::new(
-                CLOCK,
-                0,
-                Belt::GRAVITY,
-                Roster::shipped(),
-                Belt::fixed(Belt::GRAVITY),
-                vec![Seat::new(TeamId(0), stock, BTreeMap::from([(SHIPYARD, 1)]))],
-            )
-        };
-
         let a_second_in = |stock| {
-            let state = tick(stocked(stock), &[want(0, rock(0), SHIPYARD, 1)]);
-            let state = tick(state, &[want(0, rock(0), LANCER, 1)]);
-            let state = run(state, TICKS_PER_SECOND as u64 + 1);
-            View::of(&state, SeatId(0), &Shots::default())
+            let mut world = World::stocked(stock, BTreeMap::from([(SHIPYARD, 1)]));
+            world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
+            world.tick(&[Issued::want(0, rock(0), LANCER, 1)]);
+            world.run(TICKS_PER_SECOND as u64 + 1);
+            world
+                .view(0)
                 .compositions
                 .iter()
                 .flat_map(|composition| &composition.rows)
@@ -390,26 +305,23 @@ mod tests {
 
     #[test]
     fn a_shortfall_with_a_builder_opens_a_frame_and_completes_it() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
-        let stock = state[SeatId(0)].stockpile().stock();
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
+        let stock = world.state[SeatId(0)].stockpile().stock();
 
-        let state = tick(state, &[want(0, rock(0), STORAGE, 1)]);
-        assert_eq!(state.frames().len(), 1);
-        let state = run(state, 10);
-        assert_eq!(state.frames().len(), 1);
-        assert!(state.frames()[0].progress() > 0.0);
+        world.tick(&[Issued::want(0, rock(0), STORAGE, 1)]);
+        assert_eq!(world.state.frames().len(), 1);
+        world.run(10);
+        assert_eq!(world.state.frames().len(), 1);
+        assert!(world.state.frames()[0].progress() > 0.0);
 
-        let cost = state[STORAGE].cost;
+        let cost = world.state[STORAGE].cost;
         let seconds = cost.total() / 15.0;
-        let state = run(
-            state,
-            (seconds * f64::from(TICKS_PER_SECOND)).ceil() as u64 + 2,
-        );
+        world.run((seconds * f64::from(TICKS_PER_SECOND)).ceil() as u64 + 2);
 
-        assert_eq!(count(&state, 0, rock(0), STORAGE), 1);
-        assert_eq!(state.frames().len(), 0);
-        let spent = stock - state[SeatId(0)].stockpile().stock();
+        assert_eq!(world.count(0, rock(0), STORAGE), 1);
+        assert_eq!(world.state.frames().len(), 0);
+        let spent = stock - world.state[SeatId(0)].stockpile().stock();
         assert!(
             (spent.total() - cost.total()).abs() < 1e-6,
             "spent {spent:?} on a {cost:?} extractor"
@@ -418,27 +330,21 @@ mod tests {
 
     #[test]
     fn a_builder_reaches_the_frames_at_its_own_rock_and_no_others() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), STORAGE, 1),
-                numbered(0, 1, rock(5), STORAGE, 1),
-            ],
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), STORAGE, 1),
+            Issued::numbered(0, 1, rock(5), STORAGE, 1),
+        ]);
+        world.run(u64::from(TICKS_PER_SECOND));
+
+        assert!(
+            world.progress(0, rock(0)) > 0.0,
+            "the builder built nothing"
         );
-        let state = run(state, u64::from(TICKS_PER_SECOND));
-
-        let progress = |state: &State, at| {
-            state
-                .frames_at(post(0, at))
-                .map(|frame| frame.progress())
-                .sum::<f64>()
-        };
-        assert!(progress(&state, rock(0)) > 0.0, "the builder built nothing");
         assert_eq!(
-            progress(&state, rock(5)),
+            world.progress(0, rock(5)),
             0.0,
             "a builder reached a frame a rock away"
         );
@@ -446,35 +352,30 @@ mod tests {
 
     #[test]
     fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
-        let state = holding(
+        let mut world = holding(
             Roster::shipped(),
-            BTreeMap::from([(CONSTRUCTOR, 1), (SCOUT, 1)]),
+            BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
         );
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
-                numbered(0, 1, rock(0), SCOUT, 1),
-            ],
-        );
-        assert_eq!(count(&state, 0, rock(0), CONSTRUCTOR), 1);
-        assert_eq!(count(&state, 0, rock(0), SCOUT), 1);
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+            Issued::numbered(0, 1, rock(0), RAIDER, 1),
+        ]);
+        assert_eq!(world.count(0, rock(0), CONSTRUCTOR), 1);
+        assert_eq!(world.count(0, rock(0), RAIDER), 1);
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(0), SCOUT, 0),
-                numbered(0, 2, rock(1), CONSTRUCTOR, 1),
-                numbered(0, 3, rock(1), SCOUT, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(0), RAIDER, 0),
+            Issued::numbered(0, 2, rock(1), CONSTRUCTOR, 1),
+            Issued::numbered(0, 3, rock(1), RAIDER, 1),
+        ]);
 
-        assert_eq!(count(&state, 0, rock(1), CONSTRUCTOR), 1, "it counts home");
-        assert_eq!(count(&state, 0, rock(1), SCOUT), 1, "it counts home");
-        assert_eq!(count(&state, 0, rock(0), CONSTRUCTOR), 0);
-        assert_eq!(state.frames().len(), 0, "a send fills the shortfall");
-        let flights: Vec<Flight> = state
+        assert_eq!(world.count(0, rock(1), CONSTRUCTOR), 1, "it counts home");
+        assert_eq!(world.count(0, rock(1), RAIDER), 1, "it counts home");
+        assert_eq!(world.count(0, rock(0), CONSTRUCTOR), 0);
+        assert_eq!(world.state.frames().len(), 0, "a send fills the shortfall");
+        let flights: Vec<Flight> = world
+            .state
             .entities()
             .map(|entity| entity.flight().expect("a flight"))
             .collect();
@@ -483,53 +384,40 @@ mod tests {
 
     #[test]
     fn a_send_lands_on_its_destination_rocks_orbit() {
-        let state = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
-        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
-        let unit = state.entities().next().expect("the constructor").id();
+        let mut world = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
+        let unit = world.state.entities().next().expect("the constructor").id();
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
 
-        let flight = state[unit].flight().expect("a flight");
-        let crossing = flight.arrive().0 - state.tick().0;
-        let state = run(state, crossing);
+        let flight = world.state[unit].flight().expect("a flight");
+        world.run(flight.arrive().0 - world.state.tick().0);
         assert!(
-            !state[unit].is_flying(state.tick()),
+            !world.state[unit].is_flying(world.state.tick()),
             "it is still flying at its arrival tick"
         );
-        let landed = state
-            .body_of(&state[unit])
-            .pos
-            .distance(state.rock_body(rock(1)).pos);
+        let landed = world.off_rock(unit, rock(1));
         assert!(landed < 1.0, "it arrived {landed} meters off its rock");
 
-        let state = run(state, 60 * u64::from(TICKS_PER_SECOND));
+        world.run(60 * u64::from(TICKS_PER_SECOND));
 
-        let held = state
-            .body_of(&state[unit])
-            .pos
-            .distance(state.rock_body(rock(1)).pos);
+        let held = world.off_rock(unit, rock(1));
         assert!(held < 1.0, "it holds {held} meters off its rock");
     }
 
     #[test]
     fn units_re_homed_within_the_window_fly_one_send() {
-        let state = holding(
+        let mut world = holding(
             Roster::shipped(),
-            BTreeMap::from([(CONSTRUCTOR, 1), (SCOUT, 1)]),
+            BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
         );
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
-                numbered(0, 1, rock(0), SCOUT, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+            Issued::numbered(0, 1, rock(0), RAIDER, 1),
+        ]);
         let flight_of = |state: &State, row| {
             state
                 .entities()
@@ -537,63 +425,54 @@ mod tests {
                 .and_then(Entity::flight)
         };
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
-        let first = flight_of(&state, CONSTRUCTOR).expect("the first send formed");
-        let state = run(state, Send::FORMING_TICKS - 1);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 2, rock(0), SCOUT, 0),
-                numbered(0, 3, rock(1), SCOUT, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
+        let first = flight_of(&world.state, CONSTRUCTOR).expect("the first send formed");
+        world.run(Send::FORMING_TICKS - 1);
+        world.tick(&[
+            Issued::numbered(0, 2, rock(0), RAIDER, 0),
+            Issued::numbered(0, 3, rock(1), RAIDER, 1),
+        ]);
 
         assert_eq!(
-            flight_of(&state, SCOUT),
+            flight_of(&world.state, RAIDER),
             Some(first),
             "a unit re-homed inside the window opened a send of its own"
         );
-        assert_eq!(state.tick(), first.departs());
+        assert_eq!(world.state.tick(), first.departs());
         assert!(
-            state
+            world
+                .state
                 .entities()
-                .all(|entity| entity.is_flying(state.tick())),
+                .all(|entity| entity.is_flying(world.state.tick())),
             "the window closed and the send did not depart"
         );
     }
 
     #[test]
     fn a_unit_re_homed_after_the_window_flies_its_own_send() {
-        let state = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
-        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 2)]);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 1),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
-        let first = state
+        let mut world = holding(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 2)]);
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
+        let first = world
+            .state
             .entities()
             .find_map(Entity::flight)
             .expect("the first send formed");
 
-        let state = run(state, Send::FORMING_TICKS + 1);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 2),
-            ],
-        );
+        world.run(Send::FORMING_TICKS + 1);
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 2),
+        ]);
 
-        let second = state
+        let second = world
+            .state
             .entities()
             .filter_map(Entity::flight)
             .find(|flight| *flight != first)
@@ -606,87 +485,88 @@ mod tests {
 
     #[test]
     fn a_unit_whose_send_is_forming_stands_at_the_rock_it_leaves() {
-        let mut state = start(&[TeamId(0), TeamId(1)]);
-        let prey = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), SHIPYARD, 1),
-                numbered(0, 1, rock(0), FRIGATE, 1),
-            ],
-        );
-        let building = state[FRIGATE].cost.total() / 15.0;
-        let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        let shooter = state
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let prey = world.fix(1, STORAGE, rock(0));
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
+            Issued::numbered(0, 1, rock(0), FRIGATE, 1),
+        ]);
+        let building = world.state[FRIGATE].cost.total() / 15.0;
+        world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
+        let shooter = world
+            .state
             .entities()
             .find(|entity| entity.row() == FRIGATE)
             .expect("the frigate")
             .id();
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 2, rock(0), FRIGATE, 0),
-                numbered(0, 3, rock(1), FRIGATE, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 2, rock(0), FRIGATE, 0),
+            Issued::numbered(0, 3, rock(1), FRIGATE, 1),
+        ]);
 
-        assert!(state[shooter].flight().is_some(), "its send is forming");
-        assert!(!state[shooter].is_flying(state.tick()));
-        assert_eq!(state[shooter].standing(state.tick()), Some(rock(0)));
-        assert_eq!(count(&state, 0, rock(1), FRIGATE), 1, "it counts toward it");
+        let now = world.state.tick();
         assert!(
-            shot_at(&state, prey, u64::from(TICKS_PER_SECOND) / 2 + 1).is_some(),
+            world.state[shooter].flight().is_some(),
+            "its send is forming"
+        );
+        assert!(!world.state[shooter].is_flying(now));
+        assert_eq!(world.state[shooter].standing(now), Some(rock(0)));
+        assert_eq!(world.count(0, rock(1), FRIGATE), 1, "it counts toward it");
+        assert!(
+            world
+                .shot_at(prey, u64::from(TICKS_PER_SECOND) / 2 + 1)
+                .is_some(),
             "a forming unit stopped shooting"
         );
     }
 
     #[test]
     fn a_send_the_movement_limit_cannot_fly_leaves_its_units_home_and_opens_frames() {
-        let state = holding(
+        let mut world = holding(
             Roster::shipped().moving_at(Real(1e-6)),
             BTreeMap::from([(CONSTRUCTOR, 1)]),
         );
-        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
-        let unit = state.entities().next().expect("the constructor").id();
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
+        let unit = world.state.entities().next().expect("the constructor").id();
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
 
         assert!(
-            state[unit].flight().is_none(),
+            world.state[unit].flight().is_none(),
             "a unit that cannot fly was sent"
         );
-        assert_eq!(state[unit].home(), rock(0), "it left home");
-        assert_eq!(count(&state, 0, rock(1), CONSTRUCTOR), 0);
-        assert_eq!(state.frames().len(), 1, "the shortfall opened no frame");
+        assert_eq!(world.state[unit].home(), rock(0), "it left home");
+        assert_eq!(world.count(0, rock(1), CONSTRUCTOR), 0);
+        assert_eq!(
+            world.state.frames().len(),
+            1,
+            "the shortfall opened no frame"
+        );
     }
 
     #[test]
     fn a_surplus_unit_with_no_shortfall_is_never_scrapped() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), SHIPYARD, 1),
-                numbered(0, 1, rock(0), CONSTRUCTOR, 1),
-            ],
-        );
-        let stock = state[SeatId(0)].stockpile().stock();
-        let unit = state
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
+            Issued::numbered(0, 1, rock(0), CONSTRUCTOR, 1),
+        ]);
+        let stock = world.state[SeatId(0)].stockpile().stock();
+        let unit = world
+            .state
             .entities()
             .find(|entity| entity.row() == CONSTRUCTOR)
             .expect("the constructor")
             .id();
 
-        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 0)]);
-        let state = run(state, 8 * u64::from(TICKS_PER_SECOND));
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 0)]);
+        world.run(8 * u64::from(TICKS_PER_SECOND));
 
+        let state = &world.state;
         assert!(state.entity(unit).is_some(), "the surplus was scrapped");
         assert_eq!(state[unit].home(), rock(0), "it left the rock it stands on");
         assert_eq!(state[unit].hp(), state[CONSTRUCTOR].hp.0);
@@ -699,56 +579,45 @@ mod tests {
 
     #[test]
     fn a_post_opens_one_frame_of_a_row_at_a_time_and_rows_build_in_parallel() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, rock(0), SHIPYARD, 1)]);
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), STORAGE, 3),
-                numbered(0, 1, rock(0), EXTRACTOR, 2),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), STORAGE, 3),
+            Issued::numbered(0, 1, rock(0), EXTRACTOR, 2),
+        ]);
 
-        let open = |state: &State, row| {
-            state
-                .frames_at(post(0, rock(0)))
-                .filter(|frame| frame.row() == row)
-                .count()
-        };
-        assert_eq!(open(&state, STORAGE), 1, "a shortfall of three opened more");
-        assert_eq!(open(&state, EXTRACTOR), 1, "rows build in parallel");
+        let open = |world: &World, row| world.frames(0, rock(0), row);
+        assert_eq!(open(&world, STORAGE), 1, "a shortfall of three opened more");
+        assert_eq!(open(&world, EXTRACTOR), 1, "rows build in parallel");
 
-        let mut state = state;
         for _ in 0..30 * u64::from(TICKS_PER_SECOND) {
-            if count(&state, 0, rock(0), STORAGE) == 1 {
+            if world.count(0, rock(0), STORAGE) == 1 {
                 break;
             }
-            state = tick(state, &[]);
+            world.tick(&[]);
         }
-        assert_eq!(count(&state, 0, rock(0), STORAGE), 1, "none completed");
-        assert_eq!(open(&state, STORAGE), 0, "its frame closed on completion");
+        assert_eq!(world.count(0, rock(0), STORAGE), 1, "none completed");
+        assert_eq!(open(&world, STORAGE), 0, "its frame closed on completion");
 
-        let state = tick(state, &[]);
+        world.tick(&[]);
 
-        assert_eq!(open(&state, STORAGE), 1, "the next frame opened");
-        assert_eq!(count(&state, 0, rock(0), STORAGE), 1, "and only the next");
+        assert_eq!(open(&world, STORAGE), 1, "the next frame opened");
+        assert_eq!(world.count(0, rock(0), STORAGE), 1, "and only the next");
     }
 
     #[test]
     fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
-        let state = start(&[TeamId(0)]);
-        let state = tick(state, &[want(0, rock(0), CONSTRUCTOR, 1)]);
-        let depart = Tick(state.tick().0 + Send::FORMING_TICKS).next();
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
+        let depart = Tick(world.state.tick().0 + Send::FORMING_TICKS).next();
 
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), CONSTRUCTOR, 0),
-                numbered(0, 1, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
 
+        let state = &world.state;
         let unit = state.entities().next().expect("the constructor").id();
         let flight = state[unit].flight().expect("a flight");
         let arrive = flight.arrive();
@@ -771,76 +640,91 @@ mod tests {
 
     #[test]
     fn an_armed_unit_kills_an_unarmed_enemy_at_its_rock() {
-        let mut state = start(&[TeamId(0), TeamId(1)]);
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
 
-        let prey = state.spawn(SeatId(1), STORAGE, rock(0), Motion::Fixed);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), SHIPYARD, 1),
-                numbered(0, 1, rock(0), FRIGATE, 1),
-            ],
-        );
+        let prey = world.fix(1, STORAGE, rock(0));
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
+            Issued::numbered(0, 1, rock(0), FRIGATE, 1),
+        ]);
 
-        let building = state[FRIGATE].cost.total() / 15.0;
-        let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        assert_eq!(count(&state, 0, rock(0), FRIGATE), 1);
+        let building = world.state[FRIGATE].cost.total() / 15.0;
+        world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
+        assert_eq!(world.count(0, rock(0), FRIGATE), 1);
 
         let interval = u64::from(TICKS_PER_SECOND) / 2;
-        let hit = shot_at(&state, prey, interval + 1).expect("the frigate fired");
+        let hit = world
+            .shot_at(prey, interval + 1)
+            .expect("the frigate fired");
         assert_eq!(hit.damage, 6.0, "six damage through no plating");
 
-        let shots = (state[prey].hp() / hit.damage).ceil();
-        let early = run(
-            state,
-            (shots / 2.0 * f64::from(TICKS_PER_SECOND)) as u64 - interval,
-        );
-        assert!(early.entity(prey).is_some(), "it died too soon");
-        let late = run(early, 2 * interval);
-        assert_eq!(late.entity(prey), None, "it outlived its hit points");
+        let shots = (world.state[prey].hp() / hit.damage).ceil();
+        world.run((shots / 2.0 * f64::from(TICKS_PER_SECOND)) as u64 - interval);
+        assert!(world.state.entity(prey).is_some(), "it died too soon");
+
+        world.run(2 * interval);
+
+        assert_eq!(world.state.entity(prey), None, "it outlived its hit points");
         assert!(
-            !late.ready().iter().any(|ready| ready.entity() == prey),
+            !world
+                .state
+                .ready()
+                .iter()
+                .any(|ready| ready.entity() == prey),
             "a dead entity kept its weapons"
         );
     }
 
     #[test]
-    fn fire_never_targets_a_flying_unit() {
-        let state = start(&[TeamId(0), TeamId(1)]);
-        let state = tick(
-            state,
-            &[
-                numbered(0, 0, rock(0), SHIPYARD, 1),
-                numbered(0, 1, rock(0), FRIGATE, 1),
-                want(1, rock(0), CONSTRUCTOR, 1),
-            ],
+    fn a_weapon_fires_at_every_enemy_in_range_at_its_rock() {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let reach = world.state[LANCER].max_damage_range();
+        let shooter = world.hold(0, LANCER, rock(0), 0.0);
+        let near = world.hold(1, STORAGE, rock(0), reach - 1.0);
+        let far = world.hold(1, STORAGE, rock(0), reach + 1.0);
+
+        let hits = world.shots().hits;
+
+        assert_eq!(hits.len(), 1, "one weapon fires once a tick");
+        assert_eq!(hits[0].shooter, shooter);
+        assert_eq!(hits[0].target, near);
+        assert!(
+            world.shot_at(far, u64::from(TICKS_PER_SECOND)).is_none(),
+            "an enemy beyond the weapon's range was fired on"
         );
-        let building = state[FRIGATE].cost.total() / 15.0;
-        let state = run(state, (building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        let prey = state
+    }
+
+    #[test]
+    fn fire_never_targets_a_flying_unit() {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
+            Issued::numbered(0, 1, rock(0), FRIGATE, 1),
+            Issued::want(1, rock(0), CONSTRUCTOR, 1),
+        ]);
+        let building = world.state[FRIGATE].cost.total() / 15.0;
+        world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
+        let prey = world
+            .state
             .entities()
             .find(|entity| entity.seat() == SeatId(1))
             .expect("the enemy constructor")
             .id();
         let interval = u64::from(TICKS_PER_SECOND) / 2;
         assert!(
-            shot_at(&state, prey, interval + 1).is_some(),
+            world.shot_at(prey, interval + 1).is_some(),
             "the enemy was not a target while holding"
         );
 
-        let state = tick(
-            state,
-            &[
-                numbered(1, 1, rock(0), CONSTRUCTOR, 0),
-                numbered(1, 2, rock(1), CONSTRUCTOR, 1),
-            ],
-        );
+        world.tick(&[
+            Issued::numbered(1, 1, rock(0), CONSTRUCTOR, 0),
+            Issued::numbered(1, 2, rock(1), CONSTRUCTOR, 1),
+        ]);
+        world.run(Send::FORMING_TICKS + 1);
 
-        let state = run(state, Send::FORMING_TICKS + 1);
-
-        assert!(state[prey].is_flying(state.tick()));
+        assert!(world.state[prey].is_flying(world.state.tick()));
         assert_eq!(
-            shot_at(&state, prey, interval + 1),
+            world.shot_at(prey, interval + 1),
             None,
             "a flying unit was fired on"
         );
@@ -848,63 +732,70 @@ mod tests {
 
     #[test]
     fn a_seat_with_no_entity_and_an_empty_reserve_is_eliminated() {
-        let rocks = Belt::fixed(Belt::GRAVITY);
-        let seats = vec![
+        let mut world = World::seated(vec![
             Seat::new(TeamId(0), Materials::ZERO, BTreeMap::new()),
             Seat::new(TeamId(1), Materials::ZERO, BTreeMap::from([(SHIPYARD, 1)])),
-        ];
-        let state = State::new(CLOCK, 0, Belt::GRAVITY, Roster::shipped(), rocks, seats);
+        ]);
 
-        let state = tick(state, &[]);
+        world.tick(&[]);
 
-        assert!(!state[SeatId(0)].alive());
-        assert!(state[SeatId(1)].alive());
+        assert!(!world.state[SeatId(0)].alive());
+        assert!(world.state[SeatId(1)].alive());
         assert_eq!(
-            refusal(&state, want(0, rock(0), SHIPYARD, 1)),
+            world.refusal(Issued::want(0, rock(0), SHIPYARD, 1)),
             Some(Rejected::DeadSeat)
         );
     }
 
     #[test]
     fn a_want_the_state_cannot_take_is_rejected_by_name_and_changes_nothing() {
-        let state = start(&[TeamId(0)]);
+        let world = World::started(&[TeamId(0)]);
 
         let refusals = [
-            (want(9, rock(0), SHIPYARD, 1), Rejected::NoSuchSeat),
-            (want(0, rock(99), SHIPYARD, 1), Rejected::NoSuchRock),
-            (want(0, rock(0), RowId(u16::MAX), 1), Rejected::NoSuchRow),
-            (want(0, rock(0), FRIGATE, MAX_WANT + 1), Rejected::TooMany),
+            (Issued::want(9, rock(0), SHIPYARD, 1), Rejected::NoSuchSeat),
+            (Issued::want(0, rock(99), SHIPYARD, 1), Rejected::NoSuchRock),
+            (
+                Issued::want(0, rock(0), RowId(u16::MAX), 1),
+                Rejected::NoSuchRow,
+            ),
+            (
+                Issued::want(0, rock(0), FRIGATE, MAX_WANT + 1),
+                Rejected::TooMany,
+            ),
         ];
 
         for (issued, why) in refusals {
-            assert_eq!(refusal(&state, issued), Some(why), "{issued:?}");
-            let (next, _) = state.step(&batch(&[issued]));
+            assert_eq!(world.refusal(issued), Some(why), "{issued:?}");
+            let (next, _) = world.state.step(&Batch::of(&[issued]));
             assert_eq!(next.posts().count(), 0, "{issued:?} left a want behind");
         }
-        assert_eq!(refusal(&state, want(0, rock(0), FRIGATE, MAX_WANT)), None);
+        assert_eq!(
+            world.refusal(Issued::want(0, rock(0), FRIGATE, MAX_WANT)),
+            None
+        );
     }
 
     #[test]
     fn a_tick_lands_the_same_state_and_hash_however_its_commands_arrived() {
-        let state = start(&[TeamId(0), TeamId(1)]);
+        let world = World::started(&[TeamId(0), TeamId(1)]);
 
         let issued = [
-            numbered(0, 0, rock(0), FRIGATE, 3),
-            numbered(0, 1, rock(0), FRIGATE, 7),
-            numbered(1, 0, rock(2), CONSTRUCTOR, 1),
-            numbered(0, 2, rock(1), SHIPYARD, 1),
+            Issued::numbered(0, 0, rock(0), FRIGATE, 3),
+            Issued::numbered(0, 1, rock(0), FRIGATE, 7),
+            Issued::numbered(1, 0, rock(2), CONSTRUCTOR, 1),
+            Issued::numbered(0, 2, rock(1), SHIPYARD, 1),
         ];
 
-        let (ordered, _) = state.step(&batch(&issued));
+        let (ordered, _) = world.state.step(&Batch::of(&issued));
         let mut scrambled = issued;
         scrambled.reverse();
-        let (arrived, _) = state.step(&batch(&scrambled));
+        let (arrived, _) = world.state.step(&Batch::of(&scrambled));
 
         assert_eq!(ordered.hash(), arrived.hash());
         assert_eq!(ordered, arrived);
         assert_eq!(
             ordered
-                .wants(post(0, rock(0)))
+                .wants(Post::of(0, rock(0)))
                 .map(|wants| wants.get(FRIGATE)),
             Some(7),
             "the seat's later command is the one that stands"
@@ -914,16 +805,13 @@ mod tests {
     #[test]
     #[ignore = "cost report: cargo test -p probe-sim --release -- --ignored --nocapture"]
     fn one_tick_of_a_full_belt_fits_the_budget() {
-        let mut state = start(&[TeamId(0), TeamId(1)]);
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
         for at in 0..100u32 {
             let home = rock(at % 21);
-            let seat = SeatId((at / 21 % 2) as u8);
-            let motion = Motion::Free {
-                body: Maneuver::spawn_body(&state, home, state.tick()),
-                flight: None,
-            };
-            state.spawn(seat, FRIGATE, home, motion);
+            let body = Maneuver::spawn_body(&world.state, home, world.state.tick());
+            world.free((at / 21 % 2) as u8, FRIGATE, home, body);
         }
+        let mut state = world.state;
         let entities = state.entities().count();
         let rocks = state.rocks().len();
         let over = 200;

@@ -82,10 +82,8 @@ impl Fight {
 
 fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
     let mut totals: BTreeMap<(RockId, SeatId), f64> = BTreeMap::new();
-    for seen in view.seen.iter().filter(|seen| !seen.flying) {
-        if let Some(rock) = seen.home {
-            *totals.entry((rock, seen.seat)).or_insert(0.0) += seen.hp;
-        }
+    for held in view.present.iter().filter(|held| held.from.is_none()) {
+        *totals.entry((held.home, held.seat)).or_insert(0.0) += held.hp;
     }
     totals
 }
@@ -94,9 +92,10 @@ fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
 mod tests {
     use probe_sim::belt::Belt;
     use probe_sim::orbit::Body;
-    use probe_sim::state::view::Seen;
+    use probe_sim::state::Standings;
+    use probe_sim::state::view::Present;
     use probe_sim::step::fire::Exchange;
-    use probe_sim::{EntityId, Materials, RockId, RowId, Stockpile, Vec3};
+    use probe_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
 
     use super::*;
 
@@ -113,17 +112,16 @@ mod tests {
             stockpile: Stockpile::new(Materials::ZERO, Materials::ZERO),
             reserve: BTreeMap::new(),
             compositions: Vec::new(),
-            seen: vec![Seen {
-                entity: EntityId(0),
-                seat: SEAT,
+            present: vec![Present {
+                id: EntityId(0),
                 row: RowId(0),
+                seat: SEAT,
                 body: Body::new(Vec3::ZERO, Vec3::ZERO),
                 hp,
-                flying: false,
-                home: Some(ROCK),
+                home: ROCK,
                 from: None,
             }],
-            blips: Vec::new(),
+            teams: Box::new([TeamId(0)]),
             exchanges: match shooting {
                 true => vec![Exchange {
                     rock: ROCK,
@@ -135,7 +133,7 @@ mod tests {
             },
             terrain: Vec::new(),
             zone: Belt::ZONE_RADIUS_METERS,
-            standings: None,
+            standings: Standings::new(Vec::new(), false),
         }
     }
 
@@ -196,7 +194,7 @@ mod tests {
         fights.observe(&view(0, 100.0, true));
 
         let mut gone = view(1, 0.0, true);
-        gone.seen.clear();
+        gone.present.clear();
         fights.observe(&gone);
 
         assert_eq!(arc(&fights).expect("the loss is readable").fraction, 0.0);

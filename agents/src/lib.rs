@@ -53,8 +53,8 @@ impl Seated {
     }
 }
 
+mod commitments;
 mod dice;
-mod memory;
 mod personality;
 mod plan;
 mod roles;
@@ -64,7 +64,7 @@ mod survey;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::roster::SCOUT;
+    use probe_sim::roster::RAIDER;
     use probe_sim::{Retention, RockId, Setup, TeamId};
 
     fn session() -> Session {
@@ -80,7 +80,7 @@ mod tests {
             self.0 += 1;
             vec![Command::Want {
                 rock: RockId(0),
-                row: SCOUT,
+                row: RAIDER,
                 count: 1,
             }]
         }
@@ -124,7 +124,7 @@ mod tests {
                 (0..64)
                     .map(|at| Command::Want {
                         rock: RockId(at),
-                        row: SCOUT,
+                        row: RAIDER,
                         count: 1,
                     })
                     .collect()

@@ -1,7 +1,7 @@
 use core::ops::Index;
 
-pub use row::{Kind, MassClass, Row, Weapon};
-pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SCOUT, SHIPYARD, STORAGE};
+pub use row::{Kind, Row, Weapon};
+pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
 
 use crate::ids::RowId;
 use crate::real::Real;
@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(roster[id], variant);
         assert_eq!(roster.get(id), Some(&variant));
         assert_eq!(roster.iter().last(), Some((id, &variant)));
-        assert_eq!(roster.len(), 9);
+        assert_eq!(roster.len(), Roster::shipped().len() + 1);
     }
 
     #[test]
@@ -96,7 +96,8 @@ mod tests {
     fn iter_walks_ids_in_order_from_zero() {
         let roster = Roster::shipped();
         let ids: Vec<_> = roster.iter().map(|(id, _)| id).collect();
-        assert_eq!(ids, (0..8).map(RowId).collect::<Vec<_>>());
+        let all = (0..roster.len() as u16).map(RowId);
+        assert_eq!(ids, all.collect::<Vec<_>>());
         for (id, row) in roster.iter() {
             assert_eq!(&roster[id], row);
         }

@@ -7,13 +7,11 @@ pub use command::{
 };
 pub use entity::{Entity, Motion};
 pub use frame::Frame;
-pub use radar::Radar;
 pub use ready::Ready;
 pub use rock::Rock;
 pub use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use send::Send;
-pub use sight::Sight;
 pub use standings::Standings;
 pub use view::View;
 pub use wants::Wants;
@@ -320,13 +318,11 @@ mod command;
 mod entity;
 mod frame;
 pub mod hash;
-mod radar;
 mod ready;
 mod rock;
 mod schedule;
 mod seat;
 mod send;
-mod sight;
 pub mod standings;
 pub mod sweep;
 pub mod view;
@@ -335,40 +331,17 @@ mod wants;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::materials::Materials;
-    use crate::orbit::elements::Orbit;
     use crate::roster::Kind;
     use crate::vec3::Vec3;
 
-    const SEAT: SeatId = SeatId(0);
     const ROCK: RockId = RockId(0);
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
-    fn rock() -> Rock {
-        let body = Body::new(Vec3::new(1.0e7, 0.0, 0.0), Vec3::new(0.0, 0.0, -2.0e3));
-        let orbit = Orbit::from_body(body, Tick::ZERO, GRAVITY).expect("a circular orbit");
-        Rock::new(orbit, Materials::new(1.0, 1.0, 1.0), 100.0)
-    }
-
-    fn seat() -> Seat {
-        Seat::new(
-            TeamId(0),
-            Materials::new(1.0e3, 1.0e3, 1.0e3),
-            BTreeMap::new(),
-        )
-    }
-
-    fn state() -> State {
-        State::new(
-            Tick(1000),
-            0,
-            GRAVITY,
-            Roster::shipped(),
-            vec![rock()],
-            vec![seat(), seat()],
-        )
+    fn world() -> World {
+        World::ring(GRAVITY, 1, &[TeamId(0), TeamId(0)])
     }
 
     fn row_of(state: &State, kind: Kind) -> RowId {
@@ -382,44 +355,40 @@ mod tests {
 
     #[test]
     fn count_is_the_seat_entities_of_the_row_at_the_rock() {
-        let mut state = state();
-        let structure = row_of(&state, Kind::Structure);
-        let unit = row_of(&state, Kind::Unit);
-        let post = Post {
-            rock: ROCK,
-            seat: SEAT,
-        };
-        let first = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
-        let second = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
-        state.spawn(SeatId(1), structure, ROCK, Motion::Fixed);
+        let mut world = world();
+        let structure = row_of(&world.state, Kind::Structure);
+        let unit = row_of(&world.state, Kind::Unit);
+        let first = world.fix(0, structure, ROCK);
+        let second = world.fix(0, structure, ROCK);
+        world.fix(1, structure, ROCK);
         assert_ne!(first, second);
-        assert_eq!(state.count(post, structure), 2);
-        assert_eq!(state.count(post, unit), 0);
-        assert_eq!(state.entities_at(ROCK).count(), 3);
-        assert_eq!(state[first].hp(), state[structure].hp.0);
-        state.remove_entity(first);
-        assert_eq!(state.count(post, structure), 1);
-        assert_eq!(state.entity(first), None);
-        assert_eq!(state[second].id(), second);
+        assert_eq!(world.count(0, ROCK, structure), 2);
+        assert_eq!(world.count(0, ROCK, unit), 0);
+        assert_eq!(world.state.entities_at(ROCK).count(), 3);
+        assert_eq!(world.state[first].hp(), world.state[structure].hp.0);
+        world.state.remove_entity(first);
+        assert_eq!(world.count(0, ROCK, structure), 1);
+        assert_eq!(world.state.entity(first), None);
+        assert_eq!(world.state[second].id(), second);
     }
 
     #[test]
     fn a_fixed_entity_has_its_rocks_body_and_a_free_one_its_own() {
-        let mut state = state();
-        let structure = row_of(&state, Kind::Structure);
-        let unit = row_of(&state, Kind::Unit);
+        let mut world = world();
+        let structure = row_of(&world.state, Kind::Structure);
+        let unit = row_of(&world.state, Kind::Unit);
         let body = Body::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
-        let fixed = state.spawn(SEAT, structure, ROCK, Motion::Fixed);
-        let free = state.spawn(SEAT, unit, ROCK, Motion::Free { body, flight: None });
-        assert_eq!(state.body_of(&state[fixed]), state.rock_body(ROCK));
-        assert_eq!(state.body_of(&state[free]), body);
+        let fixed = world.fix(0, structure, ROCK);
+        let free = world.free(0, unit, ROCK, body);
+        assert_eq!(world.body(fixed), world.state.rock_body(ROCK));
+        assert_eq!(world.body(free), body);
     }
 
     #[test]
     fn a_rock_at_its_epoch_tick_is_at_the_body_it_came_from() {
-        let state = state();
-        assert_eq!(state.tick(), Tick::ZERO);
-        let body = state.rock_body(ROCK);
+        let world = world();
+        assert_eq!(world.state.tick(), Tick::ZERO);
+        let body = world.state.rock_body(ROCK);
         assert!(
             body.pos.distance(Vec3::new(1.0e7, 0.0, 0.0)) < 1.0,
             "{body:?}"

@@ -349,13 +349,13 @@ mod tests {
         session.step();
 
         let view = play(session).view();
+        let mine = play(session).seat();
         let shipyard = view
-            .seen
+            .present
             .iter()
-            .find(|seen| seen.row == SHIPYARD)
+            .find(|present| present.row == SHIPYARD && present.seat == mine)
             .expect("the reserve placed the shipyard");
-        assert_eq!(shipyard.seat, play(session).seat());
-        assert_eq!(shipyard.home, Some(selected));
+        assert_eq!(shipyard.home, selected);
         assert!(
             has_a_solid_glyph(session, selected),
             "the shipyard's glyph is on the ring"

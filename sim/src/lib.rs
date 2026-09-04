@@ -17,6 +17,8 @@ pub const TICK: Duration = Duration::from_secs(1)
     .unwrap();
 
 pub mod belt;
+#[cfg(test)]
+mod fixture;
 pub mod history;
 mod ids;
 mod materials;

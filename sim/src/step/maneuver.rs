@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
-use crate::ids::{EntityId, RockId, SeatId};
+use crate::ids::{EntityId, RockId};
 use crate::orbit::body::Body;
 use crate::state::sweep::Sweep;
-use crate::state::{Attractor, Entity, Motion, Sight, State};
+use crate::state::{Attractor, Entity, Motion, State};
 use crate::time::Tick;
 use crate::vec3::Vec3;
 
@@ -21,8 +19,7 @@ const ATTRACTION_SHARE: f64 = 0.05;
 
 pub struct Maneuver<'a> {
     state: &'a State,
-    sweep: Sweep,
-    sights: BTreeMap<SeatId, Sight>,
+    sweep: &'a Sweep,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,17 +32,8 @@ pub struct Thrust {
 pub struct Thrusts(Vec<Thrust>);
 
 impl<'a> Maneuver<'a> {
-    pub fn of(state: &'a State) -> Maneuver<'a> {
-        let sweep = state.sweep();
-        let sights = (0..state.seats().len())
-            .map(|seat| SeatId(seat as u8))
-            .map(|seat| (seat, Sight::of(state, seat, &sweep)))
-            .collect();
-        Maneuver {
-            state,
-            sweep,
-            sights,
-        }
+    pub fn of(state: &'a State, sweep: &'a Sweep) -> Maneuver<'a> {
+        Maneuver { state, sweep }
     }
 
     pub fn spawn_body(state: &State, rock: RockId, tick: Tick) -> Body {
@@ -72,13 +60,10 @@ impl<'a> Maneuver<'a> {
             return None;
         };
         let row = &self.state[entity.row()];
-        let sight = self.sights.get(&entity.seat())?;
-        let pull = Attractor::pulling(self.state, entity, sight, &self.sweep).map_or(
-            Vec3::ZERO,
-            |attractor| {
+        let pull =
+            Attractor::pulling(self.state, entity, self.sweep).map_or(Vec3::ZERO, |attractor| {
                 (attractor.pos - body.pos) * STIFFNESS + (attractor.vel - body.vel) * DAMPING
-            },
-        );
+            });
         let accel = pull + self.pairs(entity, body);
         Some(Thrust {
             entity: entity.id(),
@@ -134,67 +119,44 @@ fn within(accel: Vec3, limit: f64) -> Vec3 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
+    use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::materials::Materials;
     use crate::orbit::body::Gravity;
-    use crate::orbit::elements::Orbit;
-    use crate::roster::{FRIGATE, Roster};
-    use crate::state::{Rock, Seat};
-
-    const MU: Gravity = Gravity::new(4.0e13);
+    use crate::roster::FRIGATE;
 
     const ROCK: RockId = RockId(0);
 
-    fn state() -> State {
-        let radius = 1.0e7;
-        let speed = (MU.mu() / radius).sqrt();
-        let body = Body::new(Vec3::new(radius, 0.0, 0.0), Vec3::new(0.0, 0.0, -speed));
-        let orbit = Orbit::from_body(body, Tick::ZERO, MU).expect("a circular orbit");
-        State::new(
-            Tick(120_000),
-            0,
-            MU,
-            Roster::shipped(),
-            vec![Rock::new(orbit, Materials::ZERO, 100.0)],
-            vec![Seat::new(TeamId(0), Materials::ZERO, BTreeMap::new())],
-        )
+    const GRAVITY: Gravity = Gravity::new(4.0e13);
+
+    fn world() -> World {
+        World::ring(GRAVITY, 1, &[TeamId(0)])
     }
 
     #[test]
     fn each_unit_spawns_one_spacing_further_out_than_the_last() {
-        let mut state = state();
-        let home = state.rock_body(ROCK);
+        let mut world = world();
+        let home = world.state.rock_body(ROCK);
         let radial = home.pos.normalized().expect("a radius");
         for already in 0..3 {
-            let spawn = Maneuver::spawn_body(&state, ROCK, state.tick());
+            let spawn = Maneuver::spawn_body(&world.state, ROCK, world.state.tick());
             let expected = home.pos + radial * (SPACING * f64::from(already));
             assert!(
                 spawn.pos.distance(expected) < 1e-9,
                 "unit {already} spawns at {spawn:?}"
             );
             assert_eq!(spawn.vel, home.vel);
-            state.spawn(
-                SeatId(0),
-                FRIGATE,
-                ROCK,
-                Motion::Free {
-                    body: spawn,
-                    flight: None,
-                },
-            );
+            world.free(0, FRIGATE, ROCK, spawn);
         }
     }
 
     #[test]
     fn a_structure_at_the_rock_does_not_move_a_spawn() {
-        let mut state = state();
-        state.spawn(SeatId(0), FRIGATE, ROCK, Motion::Fixed);
+        let mut world = world();
+        world.fix(0, FRIGATE, ROCK);
         assert_eq!(
-            Maneuver::spawn_body(&state, ROCK, state.tick()).pos,
-            state.rock_body(ROCK).pos
+            Maneuver::spawn_body(&world.state, ROCK, world.state.tick()).pos,
+            world.state.rock_body(ROCK).pos
         );
     }
 

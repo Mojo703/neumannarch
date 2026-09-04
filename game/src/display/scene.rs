@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use probe_sim::orbit::{Body, Gravity};
-use probe_sim::roster::MassClass;
 use probe_sim::roster::Roster;
 use probe_sim::state::Rock;
 use probe_sim::state::view::View;
@@ -41,13 +40,6 @@ pub struct Arc {
     pub seat: SeatId,
     pub fraction: f32,
     pub trailing: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Blip {
-    pub pos: Vec3,
-    pub drift: Vec3,
-    pub mass: MassClass,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,7 +107,6 @@ pub struct Scene {
     pub entities: Vec<EntityView>,
     pub rings: Vec<RingView>,
     pub flights: Vec<FlightLine>,
-    pub blips: Vec<Blip>,
     pub selection: Option<RockId>,
     pub hover: Option<Hover>,
 }
@@ -145,7 +136,6 @@ impl Scene {
                 })
                 .collect(),
             flights: Vec::new(),
-            blips: Vec::new(),
             selection: None,
             hover: None,
         }
@@ -186,35 +176,22 @@ impl Scene {
                 })
                 .collect(),
             entities: view
-                .seen
+                .present
                 .iter()
-                .map(|seen| EntityView {
-                    seat: seen.seat,
-                    glyph: Glyph::of(&roster[seen.row]),
-                    pos: seen.body.pos,
+                .map(|present| EntityView {
+                    seat: present.seat,
+                    glyph: Glyph::of(&roster[present.row]),
+                    pos: present.body.pos,
                 })
                 .collect(),
             rings: runs.rings(roster, client.fights, &caps, drawn),
             flights: view
-                .seen
+                .present
                 .iter()
-                .filter(|seen| seen.seat == view.seat && seen.flying)
-                .filter_map(|seen| {
-                    Some(FlightLine {
-                        from: seen.body.pos,
-                        to: seen.home?,
-                    })
-                })
-                .collect(),
-            blips: view
-                .blips
-                .iter()
-                .filter_map(|blip| {
-                    Some(Blip {
-                        pos: blip.body.pos,
-                        drift: blip.body.vel - nearest_body(&bodies, blip.body.pos)?.vel,
-                        mass: blip.mass,
-                    })
+                .filter(|present| present.from.is_some())
+                .map(|present| FlightLine {
+                    from: present.body.pos,
+                    to: present.home,
                 })
                 .collect(),
             selection: client.selection,
@@ -256,48 +233,45 @@ impl Runs {
                 .or_default()
                 .push(mark);
         };
-        for seen in view.seen.iter().filter(|seen| !seen.flying) {
-            let Some(rock) = seen.home else {
-                continue;
-            };
-            let reason = Reason::Here(seen.row);
+        for held in view.present.iter().filter(|held| held.from.is_none()) {
+            let reason = Reason::Here(held.row);
             push(
-                rock,
-                seen.seat,
-                seen.row,
-                mark(roster, seen.row, Fill::Solid, reason),
+                held.home,
+                held.seat,
+                held.row,
+                mark(roster, held.row, Fill::Solid, reason),
             );
         }
 
-        for seen in view
-            .seen
-            .iter()
-            .filter(|seen| seen.flying && seen.seat == view.seat)
-        {
-            if let Some(to) = seen.home
-                && let Some(from) = seen.from
-            {
-                push(
-                    from,
-                    seen.seat,
-                    seen.row,
-                    Mark {
-                        dim: true,
-                        ..mark(roster, seen.row, Fill::Solid, Reason::Leaving(seen.row, to))
-                    },
-                );
-                push(
-                    to,
-                    seen.seat,
-                    seen.row,
-                    mark(
+        for flier in view.present.iter() {
+            let (to, Some(from)) = (flier.home, flier.from) else {
+                continue;
+            };
+            push(
+                from,
+                flier.seat,
+                flier.row,
+                Mark {
+                    dim: true,
+                    ..mark(
                         roster,
-                        seen.row,
-                        Fill::Hollow,
-                        Reason::Arriving(seen.row, from),
-                    ),
-                );
-            }
+                        flier.row,
+                        Fill::Solid,
+                        Reason::Leaving(flier.row, to),
+                    )
+                },
+            );
+            push(
+                to,
+                flier.seat,
+                flier.row,
+                mark(
+                    roster,
+                    flier.row,
+                    Fill::Hollow,
+                    Reason::Arriving(flier.row, from),
+                ),
+            );
         }
         let builders = builders(view, roster);
         for composition in &view.compositions {
@@ -465,11 +439,11 @@ fn short_of(material: Material) -> &'static str {
 
 fn builders(view: &View, roster: &Roster) -> Vec<RockId> {
     let mut rocks: Vec<RockId> = view
-        .seen
+        .present
         .iter()
-        .filter(|seen| seen.seat == view.seat && !seen.flying)
-        .filter(|seen| roster[seen.row].builds().next().is_some())
-        .filter_map(|seen| seen.home)
+        .filter(|held| held.seat == view.seat && held.from.is_none())
+        .filter(|held| roster[held.row].builds().next().is_some())
+        .map(|held| held.home)
         .collect();
     rocks.sort_unstable();
     rocks.dedup();
@@ -483,13 +457,6 @@ fn mark(roster: &Roster, row: RowId, fill: Fill, reason: Reason) -> Mark {
         dim: false,
         reason,
     }
-}
-
-fn nearest_body(bodies: &[(RockId, Body)], pos: Vec3) -> Option<Body> {
-    bodies
-        .iter()
-        .min_by(|(_, a), (_, b)| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)))
-        .map(|(_, body)| *body)
 }
 
 #[cfg(test)]

@@ -162,13 +162,6 @@ fn primitive_covers(primitive: &Primitive, x: f32, y: f32) -> bool {
             let (ax, ay) = glyph::unit(*at);
             ((x - ax).hypot(y - ay) - glyph::unit_length(*radius)).abs() <= half_stroke
         }
-        Primitive::Arc { at, radius } => {
-            let (ax, ay) = glyph::unit(*at);
-            let (dx, dy) = (x - ax, y - ay);
-            let on_ring = (dx.hypot(dy) - glyph::unit_length(*radius)).abs() <= half_stroke;
-
-            on_ring && dx.atan2(-dy).abs() <= core::f32::consts::FRAC_PI_2
-        }
     }
 }
 
@@ -239,16 +232,6 @@ mod tests {
                 primitives.extend(plus((30.0, 30.0), 6.5));
                 primitives
             }
-            "scout" => vec![
-                Primitive::Arc {
-                    at: (30.0, 42.0),
-                    radius: 11.0,
-                },
-                Primitive::Dot {
-                    at: (30.0, 43.0),
-                    radius: 3.5,
-                },
-            ],
             "raider" => vec![Primitive::Dot {
                 at: (30.0, 34.0),
                 radius: 8.0,

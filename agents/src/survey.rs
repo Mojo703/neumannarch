@@ -1,17 +1,10 @@
 use std::collections::BTreeMap;
 
-use probe_sim::roster::{Kind, Roster};
-use probe_sim::state::view::View;
+use probe_sim::roster::{Kind, Roster, Row};
+use probe_sim::state::view::{Present, View};
 use probe_sim::{Materials, RockId, RowId};
 
-use crate::memory::Memory;
 use crate::roles::Roles;
-
-const ASSUMED_ENEMY_START: f64 = 100.0;
-
-const ASSUMED_ENEMY_GROWTH: f64 = 1.0;
-
-const THREAT_MEMORY: f64 = 60.0;
 
 pub struct Survey<'a> {
     pub view: &'a View,
@@ -27,11 +20,13 @@ pub struct Survey<'a> {
     pub army: f64,
     pub enemy: f64,
     pub enemy_rocks: Vec<RockId>,
+    pub enemy_plating: f64,
+    pub enemy_range: f64,
     pub threats: BTreeMap<RockId, f64>,
 }
 
 impl<'a> Survey<'a> {
-    pub fn of(view: &'a View, roster: &'a Roster, roles: &'a Roles, memory: &Memory) -> Survey<'a> {
+    pub fn of(view: &'a View, roster: &'a Roster, roles: &'a Roles) -> Survey<'a> {
         let mine = holdings(view);
         let of = |kind: fn(&Roster, RowId) -> bool| -> Vec<RockId> {
             let mut rocks: Vec<RockId> = mine
@@ -49,6 +44,7 @@ impl<'a> Survey<'a> {
         developed.extend(building.iter().copied());
         developed.sort_unstable();
         developed.dedup();
+        let threats = threats(view, roster);
         Survey {
             view,
             roster,
@@ -56,9 +52,11 @@ impl<'a> Survey<'a> {
             home: home(&mine, roster, &building),
             income: income(view, roster, &mine),
             army: army(view, roster),
-            enemy: enemy(view, memory),
-            enemy_rocks: memory.enemy_rocks(),
-            threats: threats(view, memory),
+            enemy: threats.values().sum(),
+            enemy_rocks: enemy_rocks(view, roster),
+            enemy_plating: worst(view, roster, |row| row.plating.0),
+            enemy_range: worst(view, roster, Row::max_damage_range),
+            threats,
             mine,
             held,
             occupied,
@@ -89,14 +87,12 @@ impl<'a> Survey<'a> {
 
 fn holdings(view: &View) -> BTreeMap<RockId, BTreeMap<RowId, u32>> {
     let mut counted: BTreeMap<RockId, BTreeMap<RowId, u32>> = BTreeMap::new();
-    for seen in view.seen.iter().filter(|seen| seen.seat == view.seat) {
-        if let Some(home) = seen.home {
-            *counted
-                .entry(home)
-                .or_default()
-                .entry(seen.row)
-                .or_default() += 1;
-        }
+    for mine in view.present.iter().filter(|it| it.seat == view.seat) {
+        *counted
+            .entry(mine.home)
+            .or_default()
+            .entry(mine.row)
+            .or_default() += 1;
     }
     counted
 }
@@ -113,15 +109,15 @@ fn is_anything(_roster: &Roster, _row: RowId) -> bool {
 
 fn building(view: &View, roster: &Roster) -> Vec<RockId> {
     let mut rocks: Vec<RockId> = view
-        .seen
+        .present
         .iter()
-        .filter(|seen| seen.seat == view.seat && !seen.flying)
-        .filter(|seen| {
+        .filter(|mine| mine.seat == view.seat && mine.from.is_none())
+        .filter(|mine| {
             roster
-                .get(seen.row)
+                .get(mine.row)
                 .is_some_and(|row| row.builds().sum::<f64>() > 0.0)
         })
-        .filter_map(|seen| seen.home)
+        .map(|mine| mine.home)
         .collect();
     rocks.sort_unstable();
     rocks.dedup();
@@ -167,26 +163,45 @@ fn income(
 }
 
 fn army(view: &View, roster: &Roster) -> f64 {
-    view.seen
+    view.present
         .iter()
-        .filter(|seen| seen.seat == view.seat)
-        .filter_map(|seen| roster.get(seen.row))
+        .filter(|present| present.seat == view.seat)
+        .filter_map(|present| roster.get(present.row))
         .filter(|row| row.is_armed())
         .map(|row| row.cost.total())
         .sum()
 }
 
-fn enemy(view: &View, memory: &Memory) -> f64 {
-    let assumed = ASSUMED_ENEMY_START + ASSUMED_ENEMY_GROWTH * view.tick.seconds();
-    memory.enemy_army().max(assumed)
+fn enemies<'a>(
+    view: &'a View,
+    roster: &'a Roster,
+) -> impl Iterator<Item = (&'a Present, &'a Row)> + 'a {
+    view.present
+        .iter()
+        .filter(move |present| view.is_enemy(present.seat))
+        .filter_map(|present| roster.get(present.row).map(|row| (present, row)))
 }
 
-fn threats(view: &View, memory: &Memory) -> BTreeMap<RockId, f64> {
-    view.terrain
-        .iter()
-        .map(|terrain| (terrain.rock, memory.watched(terrain.rock)))
-        .filter(|(_, watched)| view.tick.seconds() - watched.at.seconds() <= THREAT_MEMORY)
-        .filter(|(_, watched)| watched.enemy_army > 0.0)
-        .map(|(rock, watched)| (rock, watched.enemy_army))
-        .collect()
+fn enemy_rocks(view: &View, roster: &Roster) -> Vec<RockId> {
+    let mut rocks: Vec<RockId> = enemies(view, roster)
+        .filter(|(_, row)| row.kind() == Kind::Structure)
+        .map(|(present, _)| present.home)
+        .collect();
+    rocks.sort_unstable();
+    rocks.dedup();
+    rocks
+}
+
+fn threats(view: &View, roster: &Roster) -> BTreeMap<RockId, f64> {
+    let mut threats: BTreeMap<RockId, f64> = BTreeMap::new();
+    for (present, row) in enemies(view, roster).filter(|(_, row)| row.is_armed()) {
+        *threats.entry(present.home).or_default() += row.cost.total();
+    }
+    threats
+}
+
+fn worst(view: &View, roster: &Roster, of: impl Fn(&Row) -> f64) -> f64 {
+    enemies(view, roster)
+        .map(|(_, row)| of(row))
+        .fold(0.0, f64::max)
 }

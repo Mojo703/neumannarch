@@ -11,8 +11,6 @@ const GAP_LENGTH: f32 = 2.0;
 
 const DIM_ALPHA: f32 = 0.5;
 
-const ARC_SEGMENTS: usize = 8;
-
 const STARVED_HALF_WIDTH: f32 = 13.0;
 
 pub struct Stencil<'a> {
@@ -114,19 +112,6 @@ impl Stencil<'_> {
             }
             Primitive::Ring { at, radius } => {
                 painter.circle_stroke(self.at(*at), self.length(*radius), stroke);
-            }
-            Primitive::Arc { at, radius } => {
-                let centre = self.at(*at);
-                let radius = self.length(*radius);
-                let points: Vec<Pos2> = (0..=ARC_SEGMENTS)
-                    .map(|step| {
-                        let angle = -core::f32::consts::FRAC_PI_2
-                            + core::f32::consts::PI * step as f32 / ARC_SEGMENTS as f32;
-                        let (sin, cos) = angle.sin_cos();
-                        egui::pos2(centre.x + radius * sin, centre.y - radius * cos)
-                    })
-                    .collect();
-                painter.add(Shape::line(points, stroke));
             }
         }
     }

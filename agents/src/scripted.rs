@@ -2,7 +2,7 @@ use probe_sim::roster::Roster;
 use probe_sim::state::Command;
 use probe_sim::state::view::View;
 
-use crate::memory::Memory;
+use crate::commitments::Commitments;
 use crate::personality::Personality;
 use crate::plan::Plan;
 use crate::roles::Roles;
@@ -13,7 +13,7 @@ pub struct Scripted {
     personality: Personality,
     roster: Roster,
     roles: Roles,
-    memory: Memory,
+    commitments: Commitments,
     dice: Dice,
 }
 
@@ -24,7 +24,7 @@ impl Scripted {
             dice: Dice::new(personality.seed),
             personality,
             roster,
-            memory: Memory::default(),
+            commitments: Commitments::default(),
         }
     }
 
@@ -35,9 +35,14 @@ impl Scripted {
 
 impl Agent for Scripted {
     fn decide(&mut self, view: &View) -> Vec<Command> {
-        self.memory.observe(view, &self.roster);
-        let survey = Survey::of(view, &self.roster, &self.roles, &self.memory);
-        let plan = Plan::of(&survey, &self.personality, &mut self.memory, &mut self.dice);
+        self.commitments.settle(view, &self.roster);
+        let survey = Survey::of(view, &self.roster, &self.roles);
+        let plan = Plan::of(
+            &survey,
+            &self.personality,
+            &mut self.commitments,
+            &mut self.dice,
+        );
         plan.commands(view)
     }
 }

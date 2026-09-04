@@ -1,21 +1,10 @@
 use crate::materials::Materials;
 use crate::real::Real;
 
-const LIGHT_MASS: f64 = 30.0;
-
-const HEAVY_MASS: f64 = 100.0;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
     Structure,
     Unit,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MassClass {
-    Light,
-    Medium,
-    Heavy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -26,8 +15,6 @@ pub struct Row {
     pub manoeuvring: Real,
     pub hp: Real,
     pub plating: Real,
-    pub sight: Real,
-    pub radar: Real,
     pub capacity: Materials,
     pub weapons: Vec<Weapon>,
 }
@@ -54,16 +41,6 @@ impl Row {
             Kind::Structure
         } else {
             Kind::Unit
-        }
-    }
-
-    pub fn mass_class(&self) -> MassClass {
-        if self.mass.0 < LIGHT_MASS {
-            MassClass::Light
-        } else if self.mass.0 < HEAVY_MASS {
-            MassClass::Medium
-        } else {
-            MassClass::Heavy
         }
     }
 
@@ -144,8 +121,6 @@ mod tests {
             manoeuvring: Real(manoeuvring),
             hp: Real(1.0),
             plating: Real(0.0),
-            sight: Real(1.0),
-            radar: Real(2.0),
             capacity: Materials::ZERO,
             weapons,
         }

@@ -7,7 +7,6 @@ pub struct Roles {
     pub masons: Vec<RowId>,
     pub extractors: Vec<RowId>,
     pub stores: Vec<RowId>,
-    pub scouts: Vec<RowId>,
     pub army: Vec<RowId>,
 }
 
@@ -24,13 +23,6 @@ impl Roles {
             stores: ranked(roster, |row| {
                 (!row.is_armed() && builds(row) == 0.0 && row.capacity.total() > 0.0)
                     .then(|| row.capacity.total() / row.cost.total())
-            }),
-            scouts: ranked(roster, |row| {
-                (row.kind() == Kind::Unit
-                    && !row.is_armed()
-                    && builds(row) == 0.0
-                    && extracts(row) == 0.0)
-                    .then_some(row.sight.0)
             }),
             army: ranked(roster, |row| {
                 (row.kind() == Kind::Unit && row.is_armed())
@@ -60,9 +52,7 @@ fn ranked(roster: &Roster, score: impl Fn(&Row) -> Option<f64>) -> Vec<RowId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_sim::roster::{
-        CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SCOUT, SHIPYARD, STORAGE,
-    };
+    use probe_sim::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
 
     #[test]
     fn the_shipped_roster_fills_every_role() {
@@ -71,7 +61,6 @@ mod tests {
         assert_eq!(roles.masons, vec![CONSTRUCTOR]);
         assert_eq!(roles.extractors, vec![EXTRACTOR]);
         assert_eq!(roles.stores, vec![STORAGE]);
-        assert_eq!(roles.scouts, vec![SCOUT]);
         assert_eq!(roles.army.len(), 3);
         for row in [RAIDER, FRIGATE, LANCER] {
             assert!(roles.army.contains(&row));
