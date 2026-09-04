@@ -650,12 +650,6 @@ mod tests {
         let mut local = Local::start(2);
         local.want(&[(inner(0), CONSTRUCTOR, 1)]);
         local.want(&[(inner(0), CONSTRUCTOR, 0), (inner(1), CONSTRUCTOR, 1)]);
-        assert_eq!(
-            local.session().state().flights().count(),
-            1,
-            "the send is one flight"
-        );
-
         let scene = scene(&local, &Fights::default());
 
         assert_eq!(scene.flights.len(), 1);

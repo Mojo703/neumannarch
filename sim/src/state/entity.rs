@@ -1,4 +1,5 @@
-use crate::ids::{EntityId, FlightId, RowId, SeatId};
+use super::schedule::Flight;
+use crate::ids::{EntityId, RowId, SeatId};
 use crate::orbit::body::Body;
 use crate::place::Place;
 use crate::real::Real;
@@ -17,10 +18,7 @@ pub struct Entity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Motion {
     Fixed,
-    Free {
-        body: Body,
-        flight: Option<FlightId>,
-    },
+    Free { body: Body, flight: Option<Flight> },
 }
 
 impl Entity {
@@ -105,12 +103,13 @@ impl Entity {
         self.motion = motion;
     }
 
-    pub fn flight(&self) -> Option<FlightId> {
+    pub fn flight(&self) -> Option<Flight> {
         match self.motion {
             Motion::Fixed | Motion::Free { flight: None, .. } => None,
             Motion::Free {
-                flight: Some(id), ..
-            } => Some(id),
+                flight: Some(flight),
+                ..
+            } => Some(flight),
         }
     }
 

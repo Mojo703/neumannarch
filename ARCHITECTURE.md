@@ -10,7 +10,7 @@ document.
 ## Principles
 
 1. **Invalid states are unrepresentable.** A structure has no velocity, a
-   burn cannot exceed its row's limit, a composition with nothing in it
+   burn cannot exceed its row's limit or last no ticks, a composition with nothing in it
    does not exist, a command names a place and a row and nothing else. Where the
    type system cannot say it, one runtime check says it, with a comment
    naming the shape change that would delete the check.
@@ -24,8 +24,9 @@ document.
    thrusting body one tick, for ships. One test ties the kernels together:
    `kepler_agrees_with_the_universal_propagator` asserts
    `Orbit::at(t + dt)` equals `propagate(orbit.at(t), dt)` over a spread of
-   orbits and spans. Every send is one solved transfer between anchors;
-   the only code that steers a ship is the manoeuvring rule.
+   orbits and spans. Every send is one solved transfer between anchors,
+   flown from a schedule the solver integrated to the tolerance the step
+   flies it to; beyond it the only code steering a ship is manoeuvring.
 4. **Determinism by construction.** `f64` only, transcendentals through
    `libm`, ordered containers, id-ordered iteration, no clocks, no
    randomness. The state hash is derived from every field, never listed.
@@ -109,8 +110,6 @@ pub struct State {
     rocks: Vec<Rock>,               // orbit, caps, radius; indexed by RockId
     entities: BTreeMap<EntityId, Entity>,   // dead ones removed
     next_entity: EntityId,          // the id the next spawn takes
-    flights: BTreeMap<FlightId, Flight>,    // one per send in progress
-    next_flight: FlightId,          // the id the next flight takes
     wants: BTreeMap<Post, Wants>,   // sparse: only posts with something
     frames: Vec<Frame>,
     ready: Vec<Ready>,              // damage weapons' next ready moments
@@ -126,19 +125,17 @@ pub struct Entity {
 }
 pub enum Motion {
     Fixed,                          // a structure: its body is its rock's
-    Free { body: Body, flight: Option<FlightId> },
+    Free { body: Body, flight: Option<Flight> },
 }
 pub struct Body { pub pos: Vec3, pub vel: Vec3 }            // inertial frame
 
-pub struct Flight {
-    from: Body, impulses: [Vec3; 2], depart: Tick, arrive: Tick,
-    destination: Place, burns: BTreeMap<RowId, [Burn; 2]>,
-}
-pub struct Burn { from: Tick, to: Tick, accel: Vec3 }       // constant thrust
+pub struct Flight { source: Place, schedule: Schedule }
+pub struct Schedule { burns: [Burn; 2], arrive: Tick }
+struct Burn { from: Tick, ticks: NonZeroU32, accel: Vec3 }  // held whole ticks
 ```
 
 - Ids are newtypes over the index into their store: `RockId(u32)`,
-  `EntityId(u32)`, `RowId(u16)`, `SeatId(u8)`, `FlightId(u32)`. `State` implements `Index`
+  `EntityId(u32)`, `RowId(u16)`, `SeatId(u8)`. `State` implements `Index`
   for each, so a rule reads `state[id]`. Dead entities are removed at the
   end of the step and ids are never reused within a match, so an id held
   across a tick is validated by lookup, never by trust.
@@ -291,7 +288,7 @@ on `State` is a missing type.
 ```rust
 let snap = &applied;                                   // commands applied
 let thrusts = Maneuver::of(snap).run();                // Thrusts: one per free unit
-let moved   = Propagation::of(snap, &thrusts).run();   // Moved: bodies and flights one tick on
+let moved   = Propagation::of(snap, &thrusts).run();   // Moved: bodies one tick on, flights ended
 let filled  = Fulfilment::of(snap).run();              // Assigned: reserve, surplus, frames opened
 let income  = Extraction::of(snap).run();              // Income: per seat
 let work    = Construction::of(snap).run();            // Progress: spend, completions
@@ -308,8 +305,9 @@ order; anything sorted is sorted by a total key ending in an id.
 
 - **Propagation.** `orbit::universal::propagate(body, gravity, dt) -> Body`
   is the two-body solution in universal variables with Stumpff functions,
-  exact for every conic. Every ship advances by it once per tick, after the
-  tick's thrust. Rocks are not stored as bodies; `State::rock_body(rock)`
+  exact for every conic. `Body::after_tick(thrust, gravity) -> Body` adds the
+  thrust's delta-v over one tick and propagates one tick; every ship advances
+  by it once per tick. Rocks are not stored as bodies; `State::rock_body(rock)`
   reads the rock's orbit at the current tick, which costs one Kepler solve
   however old the tick is. `State::body_of(&Entity) -> Body` is the one
   query for where an entity is: its rock's body when `Fixed`, its stored
@@ -320,30 +318,49 @@ order; anything sorted is sorted by a total key ending in an id.
   body at a tick is `Orbit::at`. `Band::amplitude()` holds the two
   constants. An anchor is an orbit, and `Orbit::at` is its body at a
   tick; it is never an entity and never a body in state.
-- **Flights.** One `Flight` is one send. `Flight::plan(state, from, to,
-  rows) -> Option<Flight>` solves `orbit::lambert::solve` from the source
-  anchor's body now to the destination anchor's body at a candidate arrival
-  tick, prograde and single revolution, then spreads each impulse into one
-  `Burn` per row at that row's `accel`, centred on the impulse's tick. It
-  walks candidate arrival ticks upward from the current tick and takes the
-  first at which no row's burns overlap and both lie inside the flight;
-  past its bound it returns `None`. `Burn::spread` takes the impulse and the
-  row's limit and holds the thrust over whole ticks, so a burn's magnitude
-  cannot exceed the limit.
-  `Flight::anchor(tick, gravity)` is `from` under the first impulse,
-  propagated to `tick`; every ship of the send follows it. A unit is flying
-  from the tick it joins a flight until it is within the arrival distance of
-  its destination anchor. A flight with no
-  member left is removed at the end of the step.
-- **The attractor.** `Attractor::of(state, &Entity, &Sight, &Sweep)` reads
-  the snapshot and
-  applies DESIGN.md's order: the flight's anchor, the home anchor after the
-  arrival tick, the half-range point off the nearest seen enemy inside the
-  leash, else the home anchor. `state::sight::Sight` answers which entities
-  a seat sees, over the `Sweep` (Sight, below), and is the only such query.
+- **Schedules.** A `Schedule` is one row's thrust for one send: two `Burn`s
+  and the arrival tick, a burn being an acceleration held over whole ticks.
+  A burn is built only from a delta-v and the row's movement limit, so its
+  tick count is the ceiling of the delta-v over the limit and its
+  acceleration is at or below the limit by construction. `Schedule::coasting`
+  builds both burns and answers `Some` only when they leave a coast between
+  them: the first starts at the departure tick, the second ends at the
+  arrival tick, they do not overlap, and their ticks together are at most
+  `BURN_SHARE_OF_SPAN` of the span. That margin is the existence predicate,
+  and it is free, so a candidate arrival tick failing it is never integrated.
+  `Schedule::between(source, target, depart, arrive, limit, gravity)` solves
+  one row at one candidate arrival tick: `orbit::lambert::solve` from the
+  source anchor's body at `depart` to an aim point, prograde and single
+  revolution, gives the impulses; `coasting` builds the schedule; the
+  schedule is integrated; the aim moves by the miss at `arrive` and the
+  solve repeats, at most `CORRECTIONS` times. It answers `Some` on the first
+  pass landing inside `Schedule::ARRIVAL_POSITION_METERS` and
+  `ARRIVAL_SPEED_METERS_PER_SECOND` of the destination anchor, so a schedule
+  that exists has been flown before it is stored. That integration is in
+  three parts: each burn tick by tick through `Body::after_tick`, the coast
+  between them as one `universal::propagate`. The step flies the same
+  schedule tick by tick throughout. They differ by what the Kepler test
+  bounds, far inside the tolerance the solver accepted against, and every
+  machine runs this code, so the contract between solver and step is the
+  tolerance, not the arithmetic.
+  `Send::solved(state, source, destination, members)` walks candidate arrival
+  ticks upward one second at a time from the tick after the current one,
+  which is the tick a member first thrusts, and takes the first at which
+  every row in the send has a schedule; past its bound it answers `None`.
+  A flight is a `Schedule` and the place it left, carried by the unit
+  itself, so an arrived unit drops it and no store is reaped.
+- **The attractor.** `Attractor::pulling(state, &Entity, &Sight, &Sweep) ->
+  Option<Attractor>` reads the snapshot and applies DESIGN.md's order:
+  nothing while the unit flies a schedule, the half-range point off the
+  nearest seen enemy inside the leash, else the home anchor.
+  `state::sight::Sight` answers which entities a seat sees, over the `Sweep`
+  (Sight, below), and is the only such query.
 - **Manoeuvring.** `Maneuver::of(&State).run() -> Thrusts` is one thrust
   per free unit in id order, each the pull to its attractor plus one pair
-  term per ship within the cutoff, clamped to the row's `maneuver`. Its
+  term per ship within the cutoff, clamped to the row's `maneuver`. A unit
+  with no attractor has no pull, so in flight the rule serves separation
+  alone. Propagation adds the schedule's thrust for the tick on top, which
+  is within the row's movement limit by construction. The manoeuvring
   constants are the stiffness, the damping, the spacing, the cutoff and the
   pair strength; the module stores nothing in state and reads only the
   snapshot, so it can be replaced whole.
@@ -357,11 +374,14 @@ order; anything sorted is sorted by a total key ending in an id.
   the frames to the count still missing is the whole opening and
   cancelling rule: a unit assigned or placed leaves one fewer missing, so
   one frame closes and refunds what it consumed. Units re-homed from one
-  place to one place in one tick become one `Flight`; a plan that fails
-  comes back as an `Unplanned` and those units stay home this tick.
-  Surplus with nowhere to go is marked, and a structure is marked where it
-  stands. `Assigned` carries the placements, the sends, the unplanned, the
-  openings, the cancellations, and the whole set of marks.
+  place to one place in one tick become one `Send`, solved before they are
+  counted as filling anything; a send with no schedule leaves its units
+  home this tick and its share of the shortfall opens frames like any
+  other. Surplus with nowhere to go is marked, and a structure is marked
+  where it stands. A unit held back by a failed send is neither sent nor
+  marked, so nothing scraps it while a shortfall still wants it.
+  `Assigned` carries the placements, the sends, the openings, the
+  cancellations, and the whole set of marks.
 - **Extraction** groups extract weapons by rock; per material, each takes
   its rate, the cap is split equally among them when the sum exceeds it,
   and unused shares redistribute until none is left or the cap is met.
@@ -393,8 +413,8 @@ order; anything sorted is sorted by a total key ending in an id.
   step, with range queries by window. Fire and fog use it; nothing scans
   every entity against every sensor.
 - **Deaths, reaping, elimination** live in `State::next`: entities at or
-  below zero HP are removed, their `Ready` entries with them; a send with
-  no member left is removed; a seat with no entities and an empty reserve
+  below zero HP are removed, their `Ready` entries with them; a seat with
+  no entities and an empty reserve
   is dead, its posts and frames removed. A composition exists only while
   `wants` holds it, and `Wants` drops a row set to zero, so the existence
   rule needs no reaping of its own.
@@ -894,7 +914,8 @@ sim/src/
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; rock.rs;
-                    entity.rs Entity, Motion; flight.rs Flight, Burn;
+                    entity.rs Entity, Motion; schedule.rs Flight,
+                    Schedule, Burn, the solve;
                     attractor.rs; sight.rs Sight; radar.rs Radar;
                     wants.rs Wants; frame.rs Frame, its fraction and what
                     it went short of; ready.rs; command.rs Command,
@@ -1010,9 +1031,12 @@ it; a new one is added here in the unit that introduces it:
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.
-- `Burn` holds thrust over at least one whole tick, so an impulse shorter
-  than a tick is spread over one. A thrust type that is already per tick
-  would delete the floor.
+- `Schedule::between` gives up after `CORRECTIONS` passes. The margin is
+  the predicate and the cap is only its guard: at the shipped
+  `BURN_SHARE_OF_SPAN` no candidate inside the margin has ever needed a
+  fourth pass, and a candidate the cap rejected would be one the sim could
+  not have flown within the tolerance. A proof that the aim correction
+  converges for every schedule inside the margin would delete the cap.
 - A frame carrying a machine's request arrives at a machine's own
   connection only from a room that has broken the protocol, and is dropped
   as bytes that are not a message are. A wire typed by direction would

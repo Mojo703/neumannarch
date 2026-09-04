@@ -12,19 +12,21 @@ pub struct Attractor {
 }
 
 impl Attractor {
-    pub fn of(state: &State, entity: &Entity, sight: &Sight, sweep: &Sweep) -> Attractor {
+    pub fn pulling(
+        state: &State,
+        entity: &Entity,
+        sight: &Sight,
+        sweep: &Sweep,
+    ) -> Option<Attractor> {
+        if entity.is_flying() {
+            return None;
+        }
         let home = Attractor::at(
             state
                 .anchor(entity.home())
                 .at(state.tick(), state.gravity()),
         );
-        match entity.flight().and_then(|id| state.flight(id)) {
-            Some(flight) if state.tick() < flight.arrive() => {
-                Attractor::at(flight.anchor(state.tick(), state.gravity()))
-            }
-            Some(_) => home,
-            None => Attractor::chase(state, entity, sight, sweep, home).unwrap_or(home),
-        }
+        Some(Attractor::chase(state, entity, sight, sweep, home).unwrap_or(home))
     }
 
     fn at(body: Body) -> Attractor {

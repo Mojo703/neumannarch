@@ -1,7 +1,7 @@
-use crate::ids::{EntityId, FlightId, SeatId};
+use crate::ids::{EntityId, SeatId};
 use crate::materials::Materials;
 use crate::roster::Kind;
-use crate::state::{Batch, Frame, Issued, Motion, Rejected, State};
+use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::{Extraction, Income};
 use crate::step::fire::{Fire, Shots};
@@ -78,10 +78,11 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
         }
     }
     for send in &filled.sends {
-        let destination = send.flight.destination();
-        let flight = next.add_flight(send.flight.clone());
-        for member in &send.members {
-            join(next, *member, flight, destination);
+        for (row, schedule) in &send.schedules {
+            let flight = Flight::new(send.source, *schedule);
+            for member in send.members.iter().filter(|id| snap[**id].row() == *row) {
+                join(next, *member, send.destination, flight);
+            }
         }
     }
     let ids: Vec<EntityId> = next.entities().map(|entity| entity.id()).collect();
@@ -174,14 +175,6 @@ fn reap(next: &mut State) {
     for id in dead {
         next.remove_entity(id);
     }
-    let flown: Vec<FlightId> = next
-        .flights()
-        .map(|(id, _)| id)
-        .filter(|id| !next.entities().any(|entity| entity.flight() == Some(*id)))
-        .collect();
-    for id in flown {
-        next.remove_flight(id);
-    }
     let lost: Vec<SeatId> = next
         .seats()
         .iter()
@@ -222,7 +215,7 @@ fn spawn(next: &mut State, post: crate::place::Post, row: crate::ids::RowId) {
     next.spawn(post.seat, row, post.place, motion);
 }
 
-fn join(next: &mut State, entity: EntityId, flight: FlightId, destination: crate::place::Place) {
+fn join(next: &mut State, entity: EntityId, destination: crate::place::Place, flight: Flight) {
     let Some(target) = next.entity_mut(entity) else {
         return;
     };
@@ -267,11 +260,12 @@ mod tests {
     use crate::ids::{RockId, RowId, TeamId};
     use crate::materials::Material;
     use crate::place::{Band, Place, Post};
-    use crate::roster::Roster;
+    use crate::real::Real;
     use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, SHIPYARD, STORAGE};
+    use crate::roster::{Roster, Row};
     use crate::setup::Setup;
     use crate::state::view::View;
-    use crate::state::{Command, Flight, MAX_WANT, Seat};
+    use crate::state::{Command, MAX_WANT, Schedule, Seat};
     use crate::step::fire::Hit;
     use crate::time::Tick;
     use crate::{Materials, TICKS_PER_SECOND};
@@ -441,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn a_surplus_flies_to_the_nearest_shortfall_and_arrives() {
+    fn a_surplus_flies_to_the_nearest_shortfall_and_arrives_on_its_anchors_orbit() {
         let state = start(&[TeamId(0)]);
         let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
         assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 1);
@@ -454,20 +448,108 @@ mod tests {
             ],
         );
 
-        assert_eq!(state.flights().count(), 1, "the send is one flight");
         assert_eq!(count(&state, 0, inner(1), CONSTRUCTOR), 1, "it counts home");
         assert_eq!(count(&state, 0, inner(0), CONSTRUCTOR), 0);
         assert_eq!(state.frames().len(), 0, "a send fills the shortfall");
         let unit = state.entities().next().expect("the constructor").id();
-        assert!(state[unit].is_flying());
+        let arrive = state[unit].flight().expect("a flight").arrive();
+        let flying = arrive.0 - state.tick().0;
 
-        let state = run(state, 600 * u64::from(TICKS_PER_SECOND));
+        let state = run(state, flying);
 
-        assert!(!state[unit].is_flying(), "it never arrived");
-        assert_eq!(state.flights().count(), 0, "an empty send is closed");
+        assert!(
+            !state[unit].is_flying(),
+            "it is still flying at its arrival"
+        );
         let anchor = state.anchor(inner(1)).at(state.tick(), state.gravity());
-        let off = state.body_of(&state[unit]).pos.distance(anchor.pos);
-        assert!(off <= Flight::ARRIVAL_DISTANCE, "it holds {off} meters off");
+        let body = state.body_of(&state[unit]);
+        let off = body.pos.distance(anchor.pos);
+        let drift = body.vel.distance(anchor.vel);
+        assert!(
+            off <= Schedule::ARRIVAL_POSITION_METERS,
+            "it arrived {off} meters off"
+        );
+        assert!(
+            drift <= Schedule::ARRIVAL_SPEED_METERS_PER_SECOND,
+            "it arrived {drift} meters per second across"
+        );
+    }
+
+    #[test]
+    fn a_send_no_row_can_fly_leaves_its_units_home_and_opens_frames() {
+        let mut roster = Roster::shipped();
+        let crawler = roster.add(Row {
+            name: "crawler",
+            accel: Real(1e-6),
+            maneuver: Real(2.5e-7),
+            ..roster[CONSTRUCTOR].clone()
+        });
+        let state = State::new(
+            CLOCK,
+            0,
+            Belt::GRAVITY,
+            roster,
+            Belt::fixed(Belt::GRAVITY),
+            vec![Seat::new(
+                TeamId(0),
+                Materials::new(1e4, 1e4, 1e4),
+                BTreeMap::from([(crawler, 1)]),
+            )],
+        );
+        let state = tick(state, &[want(0, inner(0), crawler, 1)]);
+        let unit = state.entities().next().expect("the crawler").id();
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, inner(0), crawler, 0),
+                numbered(0, 1, inner(1), crawler, 1),
+            ],
+        );
+
+        assert!(
+            !state[unit].is_flying(),
+            "a crawler that cannot fly was sent"
+        );
+        assert_eq!(state[unit].home(), inner(0), "it left home");
+        assert_eq!(count(&state, 0, inner(1), crawler), 0);
+        assert_eq!(state.frames().len(), 1, "the shortfall opened no frame");
+        assert!(
+            !state[unit].is_surplus(),
+            "it was scrapped while a shortfall wants it"
+        );
+    }
+
+    #[test]
+    fn a_send_arrives_at_the_earliest_tick_every_rows_schedule_exists() {
+        let state = start(&[TeamId(0)]);
+        let state = tick(state, &[want(0, inner(0), CONSTRUCTOR, 1)]);
+        let depart = state.tick().next();
+
+        let state = tick(
+            state,
+            &[
+                numbered(0, 0, inner(0), CONSTRUCTOR, 0),
+                numbered(0, 1, inner(1), CONSTRUCTOR, 1),
+            ],
+        );
+
+        let unit = state.entities().next().expect("the constructor").id();
+        let arrive = state[unit].flight().expect("a flight").arrive();
+        let gravity = state.gravity();
+        let source = state.anchor(inner(0)).at(depart, gravity);
+        let limit = state[CONSTRUCTOR].accel.0;
+        let second = u64::from(TICKS_PER_SECOND);
+        assert!(arrive.0 - depart.0 > second, "the first candidate answered");
+        for step in (second..arrive.0 - depart.0).step_by(second as usize) {
+            let earlier = Tick(depart.0 + step);
+            let target = state.anchor(inner(1)).at(earlier, gravity);
+            assert_eq!(
+                Schedule::between(source, target, depart, earlier, limit, gravity),
+                None,
+                "arriving at {earlier:?} would have fitted"
+            );
+        }
     }
 
     #[test]

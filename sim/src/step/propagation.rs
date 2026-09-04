@@ -1,16 +1,14 @@
-use crate::ids::{EntityId, FlightId};
+use crate::ids::EntityId;
 use crate::orbit::body::Body;
-use crate::orbit::universal::propagate;
-use crate::state::{Entity, Motion, State};
+use crate::state::{Entity, Flight, Motion, State};
 use crate::step::maneuver::Thrusts;
-use crate::time::Tick;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Move {
     pub entity: EntityId,
     pub body: Body,
-    pub flight: Option<FlightId>,
+    pub flight: Option<Flight>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,29 +37,14 @@ impl<'a> Propagation<'a> {
         let Motion::Free { body, flight } = entity.motion() else {
             return None;
         };
-        let span = Tick(1).seconds();
         let tick = self.state.tick();
-        let burn = self.burn(entity, flight, tick);
-        let thrust = burn + self.thrusts.of(entity.id());
-        let thrust = Body::new(body.pos, body.vel + thrust * span);
-        let moved = propagate(thrust, self.state.gravity(), span);
+        let scheduled = flight.map_or(Vec3::ZERO, |flight| flight.thrust(tick));
+        let thrust = scheduled + self.thrusts.of(entity.id());
         Some(Move {
             entity: entity.id(),
-            body: moved,
-            flight: flight.filter(|id| !self.arrived(*id, moved, tick.next())),
+            body: body.after_tick(thrust, self.state.gravity()),
+            flight: flight.filter(|flight| tick.next() < flight.arrive()),
         })
-    }
-
-    fn burn(&self, entity: &Entity, flight: Option<FlightId>, tick: Tick) -> Vec3 {
-        flight
-            .and_then(|id| self.state.flight(id))
-            .map_or(Vec3::ZERO, |flight| flight.thrust(entity.row(), tick))
-    }
-
-    fn arrived(&self, flight: FlightId, body: Body, tick: Tick) -> bool {
-        self.state
-            .flight(flight)
-            .is_none_or(|flight| flight.arrived(self.state, body, tick))
     }
 }
 
@@ -82,14 +65,19 @@ mod tests {
     use crate::orbit::elements::Orbit;
     use crate::place::{Band, Place};
     use crate::roster::{FRIGATE, Roster, SCOUT, SHIPYARD};
-    use crate::state::{Flight, Rock, Seat};
+    use crate::state::{Rock, Seat};
+    use crate::step::fulfilment::Send;
     use crate::step::maneuver::Maneuver;
+    use crate::time::Tick;
+    use crate::vec3::Vec3;
 
     const MU: Gravity = Gravity::new(4.4e17);
 
     const SLOW: Gravity = Gravity::new(4.0e13);
 
     const RADIUS: f64 = 1.0e7;
+
+    const CLEAR: f64 = 3.0;
 
     struct World {
         state: State,
@@ -126,9 +114,11 @@ mod tests {
             self.state.spawn(seat, row, place, motion)
         }
 
-        fn send(&mut self, entity: EntityId, flight: FlightId, from: Place) {
+        fn send(&mut self, entity: EntityId, from: Place, offset: f64, flight: Flight) {
+            let anchor = self.anchor(from);
+            let radial = anchor.pos.normalized().expect("a radius");
             let motion = Motion::Free {
-                body: self.anchor(from),
+                body: Body::new(anchor.pos + radial * offset, anchor.vel),
                 flight: Some(flight),
             };
             self.state.set_motion(entity, motion);
@@ -250,33 +240,40 @@ mod tests {
     }
 
     #[test]
-    fn a_send_of_two_rows_arrives_together_at_its_destination_anchor() {
+    fn a_send_of_two_rows_stops_flying_together_and_holds_at_its_destination_anchor() {
         let mut world = World::with(SLOW);
         let (from, to) = (inner(0), inner(1));
         let rows = [FRIGATE, SCOUT];
-        let flight = Flight::plan(&world.state, from, to, rows.into_iter()).expect("a plan");
-        let arrive = flight.arrive();
-        let id = world.state.add_flight(flight);
         let units: Vec<EntityId> = rows
             .into_iter()
-            .map(|row| {
-                let unit = world.spawn(SeatId(0), row, to, 0.0);
-                world.send(unit, id, from);
-                unit
-            })
+            .map(|row| world.spawn(SeatId(0), row, to, 0.0))
             .collect();
+        let send =
+            Send::solved(&world.state, from, to, &units).expect("a send of a frigate and a scout");
+        for (at, (unit, row)) in units.iter().zip(rows).enumerate() {
+            world.send(
+                *unit,
+                from,
+                at as f64 * CLEAR,
+                Flight::new(from, send.schedules[&row]),
+            );
+        }
+        let arrive = send.schedules[&FRIGATE].arrive();
 
-        let slack = 300 * u64::from(crate::TICKS_PER_SECOND);
-        world.run(arrive.0 - world.state.tick().0 + slack);
+        world.run(arrive.0 - world.state.tick().0);
+
+        for &unit in &units {
+            assert!(!world.state[unit].is_flying(), "{unit:?} is still flying");
+        }
+
+        world.run(60 * u64::from(crate::TICKS_PER_SECOND));
 
         for &unit in &units {
             let off = world.off_anchor(unit, to);
-            assert!(
-                off <= Flight::ARRIVAL_DISTANCE,
-                "{unit:?} is {off} meters from its destination anchor"
-            );
-            assert!(!world.state[unit].is_flying(), "{unit:?} is still flying");
+            assert!(off < 1.0, "{unit:?} holds {off} meters off its destination");
         }
+        let apart = world.body(units[0]).pos.distance(world.body(units[1]).pos);
+        assert!(apart > 0.25, "the pair holds {apart} meters apart");
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::State;
-use super::flight::Flight;
 use super::radar::Radar;
+use super::schedule::Flight;
 use super::sight::Sight;
 use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
@@ -162,11 +162,7 @@ fn seen(state: &State, sight: &Sight, team: Option<TeamId>) -> Vec<Seen> {
                 hp: entity.hp(),
                 flying: entity.is_flying(),
                 home: (!entity.is_flying() || own).then(|| entity.home()),
-                from: entity
-                    .flight()
-                    .filter(|_| own)
-                    .and_then(|id| state.flight(id))
-                    .map(Flight::source),
+                from: entity.flight().filter(|_| own).map(Flight::source),
             }
         })
         .collect()

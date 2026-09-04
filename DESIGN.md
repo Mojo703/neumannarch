@@ -64,7 +64,8 @@ roster in `sim`, never here.
   movement limit, spent only on a transfer between rocks, and the
   manoeuvring limit, far below it, spent holding position and fighting.
   Movement and combat states how each is used.
-- No collisions. Entity size is visual. Arrival is being within a distance.
+- No collisions. Entity size is visual. Arrival is the end of a schedule
+  (Movement and combat), never a distance.
 
 ## Materials
 
@@ -183,13 +184,19 @@ composition per player. The verb sets one count.
   send begins: a sequence of thrusts, one per tick, each within the row's
   movement limit, whose integration by the sim's own propagation carries
   a ship from the source anchor's orbit to the destination anchor's orbit
-  at the arrival tick, to within a stated tolerance. The arrival tick is
+  at the arrival tick, to within a stated tolerance. A row's schedule
+  exists at an arrival tick when its burns fit the span with a stated
+  margin and its integration meets the tolerance. The arrival tick is
   the earliest at which every row's schedule exists, so a send arrives
-  together and the slowest row sets the tick. Every ship of the send
-  departs at once; ships of one row fly one schedule, so their offsets
-  from each other at departure are carried to arrival. A unit is flying
-  from the tick it joins a send until its schedule ends, when it is on
-  its destination anchor's orbit and holds there.
+  together and the slowest row sets the tick. A schedule departs on the
+  tick after the send is issued, the first tick its ships thrust on.
+  Every ship of the send departs at once; ships of one row fly one
+  schedule, so their offsets from each other at departure are carried to
+  arrival. A unit is flying from the tick it joins a send until its
+  schedule ends, when it is on its destination anchor's orbit and holds
+  there. The tolerance is the schedule's: a ship flying in company ends
+  off its schedule by what the separation term added in flight, and
+  holds onto the anchor afterwards as any unit does.
 - **The attractor.** Each tick every unit has one attractor, a position and
   a velocity, the first of these that applies: nothing, while it flies a
   schedule, when manoeuvring serves separation alone; the point at half

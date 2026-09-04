@@ -6,18 +6,18 @@ pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
 pub use entity::{Entity, Motion};
-pub use flight::{Burn, Flight};
 pub use frame::Frame;
 pub use radar::Radar;
 pub use ready::Ready;
 pub use rock::Rock;
+pub use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use sight::Sight;
 pub use standings::Standings;
 pub use view::View;
 pub use wants::Wants;
 
-use crate::ids::{EntityId, FlightId, RockId, RowId, SeatId};
+use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
@@ -43,8 +43,6 @@ pub struct State {
     rocks: Vec<Rock>,
     entities: BTreeMap<EntityId, Entity>,
     next_entity: EntityId,
-    flights: BTreeMap<FlightId, Flight>,
-    next_flight: FlightId,
     wants: BTreeMap<Post, Wants>,
     frames: Vec<Frame>,
     ready: Vec<Ready>,
@@ -69,8 +67,6 @@ impl State {
             rocks,
             entities: BTreeMap::new(),
             next_entity: EntityId(0),
-            flights: BTreeMap::new(),
-            next_flight: FlightId(0),
             wants: BTreeMap::new(),
             frames: Vec::new(),
             ready: Vec::new(),
@@ -182,14 +178,6 @@ impl State {
         }
     }
 
-    pub fn flight(&self, id: FlightId) -> Option<&Flight> {
-        self.flights.get(&id)
-    }
-
-    pub fn flights(&self) -> impl Iterator<Item = (FlightId, &Flight)> {
-        self.flights.iter().map(|(id, flight)| (*id, flight))
-    }
-
     pub fn sweep(&self) -> Sweep {
         Sweep::build(
             self.entities()
@@ -220,13 +208,6 @@ impl State {
                 .into_iter()
                 .map(|weapon| Ready::new(id, weapon, now)),
         );
-        id
-    }
-
-    pub(crate) fn add_flight(&mut self, flight: Flight) -> FlightId {
-        let id = self.next_flight;
-        self.next_flight = FlightId(id.0 + 1);
-        self.flights.insert(id, flight);
         id
     }
 
@@ -275,10 +256,6 @@ impl State {
 
     pub(crate) fn close_seat_frames(&mut self, seat: SeatId) {
         self.frames.retain(|frame| frame.post().seat != seat);
-    }
-
-    pub(crate) fn remove_flight(&mut self, id: FlightId) {
-        self.flights.remove(&id);
     }
 
     pub(crate) fn close_post(&mut self, post: Post) {
@@ -345,12 +322,12 @@ impl Index<SeatId> for State {
 mod attractor;
 mod command;
 mod entity;
-mod flight;
 mod frame;
 pub mod hash;
 mod radar;
 mod ready;
 mod rock;
+mod schedule;
 mod seat;
 mod sight;
 pub mod standings;
@@ -447,8 +424,6 @@ mod tests {
         let free = state.spawn(SEAT, unit, inner(), Motion::Free { body, flight: None });
         assert_eq!(state.body_of(&state[fixed]), state.rock_body(ROCK));
         assert_eq!(state.body_of(&state[free]), body);
-        assert!(!state[free].is_flying());
-        assert_eq!(state[free].flight(), None);
     }
 
     #[test]

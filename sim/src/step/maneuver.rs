@@ -74,8 +74,12 @@ impl<'a> Maneuver<'a> {
         };
         let row = &self.state[entity.row()];
         let sight = self.sights.get(&entity.seat())?;
-        let attractor = Attractor::of(self.state, entity, sight, &self.sweep);
-        let pull = (attractor.pos - body.pos) * STIFFNESS + (attractor.vel - body.vel) * DAMPING;
+        let pull = Attractor::pulling(self.state, entity, sight, &self.sweep).map_or(
+            Vec3::ZERO,
+            |attractor| {
+                (attractor.pos - body.pos) * STIFFNESS + (attractor.vel - body.vel) * DAMPING
+            },
+        );
         let accel = pull + self.pairs(entity, body);
         Some(Thrust {
             entity: entity.id(),

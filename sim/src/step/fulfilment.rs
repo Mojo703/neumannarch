@@ -1,9 +1,15 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use crate::TICKS_PER_SECOND;
 use crate::ids::{EntityId, RowId, SeatId};
 use crate::place::{Place, Post};
 use crate::roster::Kind;
-use crate::state::{Entity, Flight, State};
+use crate::state::{Entity, Schedule, State};
+use crate::time::Tick;
+
+const SEARCH_STEP: u64 = TICKS_PER_SECOND as u64;
+
+const SEARCH_BOUND: u64 = 600 * TICKS_PER_SECOND as u64;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
@@ -13,15 +19,10 @@ pub struct Placement {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Send {
-    pub flight: Flight,
+    pub source: Place,
+    pub destination: Place,
+    pub schedules: BTreeMap<RowId, Schedule>,
     pub members: Vec<EntityId>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Unplanned {
-    pub from: Place,
-    pub to: Place,
-    pub seat: SeatId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,10 +44,46 @@ pub struct Cancellation {
 pub struct Assigned {
     pub placements: Vec<Placement>,
     pub sends: Vec<Send>,
-    pub unplanned: Vec<Unplanned>,
     pub openings: Vec<Opening>,
     pub cancellations: Vec<Cancellation>,
     pub marked: Vec<EntityId>,
+}
+
+impl Send {
+    pub(crate) fn solved(
+        state: &State,
+        source: Place,
+        destination: Place,
+        members: &[EntityId],
+    ) -> Option<Send> {
+        let gravity = state.gravity();
+        let depart = state.tick().next();
+        let from = state.anchor(source).at(depart, gravity);
+        let rows: BTreeSet<RowId> = members
+            .iter()
+            .filter_map(|id| state.entity(*id))
+            .map(Entity::row)
+            .collect();
+        (SEARCH_STEP..=SEARCH_BOUND)
+            .step_by(SEARCH_STEP as usize)
+            .find_map(|step| {
+                let arrive = Tick(depart.0 + step);
+                let to = state.anchor(destination).at(arrive, gravity);
+                let schedules: BTreeMap<RowId, Schedule> = rows
+                    .iter()
+                    .filter_map(|row| {
+                        Schedule::between(from, to, depart, arrive, state[*row].accel.0, gravity)
+                            .map(|schedule| (*row, schedule))
+                    })
+                    .collect();
+                (schedules.len() == rows.len()).then(|| Send {
+                    source,
+                    destination,
+                    schedules,
+                    members: members.to_vec(),
+                })
+            })
+    }
 }
 
 pub struct Fulfilment<'a> {
@@ -89,23 +126,27 @@ impl<'a> Fulfilment<'a> {
         let mut assigned = Assigned::default();
         let mut reserved: BTreeMap<(SeatId, RowId), u32> = BTreeMap::new();
         let mut moving: BTreeMap<(Place, Place, SeatId), Vec<EntityId>> = BTreeMap::new();
+        let mut missing: Vec<(Post, RowId, u32)> = Vec::new();
         for (post, row, shortfall) in shortfalls(self.state) {
             let from_reserve = self.take_reserved(post, row, shortfall, &mut reserved);
-            let mut filled = from_reserve;
-            for entity in self.nearest_spare(post, row, shortfall - filled) {
-                let place = entity.place;
-                moving
-                    .entry((place, post.place, post.seat))
-                    .or_default()
-                    .push(entity.entity);
-                filled += 1;
-            }
             for _ in 0..from_reserve {
                 assigned.placements.push(Placement { post, row });
             }
-            self.reconcile(&mut assigned, post, row, shortfall - filled);
+            let mut taking = 0;
+            for spare in self.nearest_spare(post, row, shortfall - from_reserve) {
+                moving
+                    .entry((spare.place, post.place, post.seat))
+                    .or_default()
+                    .push(spare.entity);
+                taking += 1;
+            }
+            missing.push((post, row, shortfall - from_reserve - taking));
         }
-        self.plan(&mut assigned, moving);
+        let held_back = self.solve(&mut assigned, moving);
+        for (post, row, still) in missing {
+            let back = held_back.get(&(post, row)).copied().unwrap_or_default();
+            self.reconcile(&mut assigned, post, row, still + back);
+        }
         self.mark(&mut assigned);
         for (post, row, over) in unwanted_frames(self.state) {
             self.cancel(&mut assigned, post, row, over);
@@ -198,23 +239,26 @@ impl<'a> Fulfilment<'a> {
             .collect()
     }
 
-    fn plan(
+    fn solve(
         &self,
         assigned: &mut Assigned,
         moving: BTreeMap<(Place, Place, SeatId), Vec<EntityId>>,
-    ) {
+    ) -> BTreeMap<(Post, RowId), u32> {
+        let mut held_back: BTreeMap<(Post, RowId), u32> = BTreeMap::new();
         for ((from, to, seat), mut members) in moving {
             members.sort_unstable();
-            let rows: Vec<RowId> = members
-                .iter()
-                .filter_map(|id| self.state.entity(*id))
-                .map(Entity::row)
-                .collect();
-            match Flight::plan(self.state, from, to, rows.into_iter()) {
-                Some(flight) => assigned.sends.push(Send { flight, members }),
-                None => assigned.unplanned.push(Unplanned { from, to, seat }),
+            match Send::solved(self.state, from, to, &members) {
+                Some(send) => assigned.sends.push(send),
+                None => {
+                    for row in members.iter().filter_map(|id| self.state.entity(*id)) {
+                        *held_back
+                            .entry((Post { place: to, seat }, row.row()))
+                            .or_default() += 1;
+                    }
+                }
             }
         }
+        held_back
     }
 
     fn mark(&self, assigned: &mut Assigned) {
