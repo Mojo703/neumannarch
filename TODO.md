@@ -12,7 +12,26 @@ is the record. Agents see this file only through their briefs.
 Nothing is in flight. One unit at a time on plain subagents; teammate
 mode is off from the next session.
 
-Next, before the belt: the send-destroys-frame defect (a sim unit)
+Ruled 2026-09-06: the word is asteroid, everywhere. A Sonnet sweep
+after the drag-rule unit, its own commit: DESIGN, DISPLAY,
+ARCHITECTURE, every type and name (`Rock`, `RockId`, `rock_body`,
+`Terrain.rock`, ...), the screen phrases ("Asteroid 1"), the harness's
+output, this file. The send-destroys-frame defect was a misdiagnosis
+(fulfilment's surplus pool is bounded by what exceeds the want, proved
+and probed 2026-09-06); what play showed is DESIGN's own rule covering
+a lowered want with the complete unit and cancelling the frame; ruled
+2026-09-06 into DESIGN Surplus: where a shortfall elsewhere wants the
+row, complete units are surplus before frames are unwanted.
+
+Owner notes 2026-09-06, placed: ship trajectory lines follow the
+schedule's predicted path (DISPLAY Flights, written) and the small
+state of the resource bars is bars alone, tight to the asteroid, the
+icons only on the full state (DISPLAY Resources, written); both into
+the extractor-coming display unit below. Ships should move faster: the
+movement limit is a belt number and is set in the belt unit with the
+spacing and the schedule bound.
+
+Next, before the belt: the asteroid sweep above, then
 and the hover preview asked of the sim (a sim and display unit), which
 also draws the preview's cost on the stockpile bars (DISPLAY The
 stockpile, ruled 2026-09-06: segments only, never a numeral). Then a
@@ -157,6 +176,11 @@ against the code at every session start.
   hover preview unit.
 - DISPLAY Resources: an extractor wanted or building at a rock shows
   its coming yield on the rock's bar; not drawn. The extractor-coming
+  unit.
+- DISPLAY Flights: the line ahead of a ship follows its schedule's
+  path; the code draws a straight line. The extractor-coming unit.
+- DISPLAY Resources: the small state is bars alone, tight to the
+  asteroid; the code draws icons at both states. The extractor-coming
   unit.
 - DISPLAY Lobby: no Seat column; the lobby still draws one with the
   seat's number in a square of its colour (screens/lobby.rs). Plan 6.

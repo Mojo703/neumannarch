@@ -572,6 +572,13 @@ fn chase(Body, &Row, target: Body) -> Vec3;
   next opens the tick after the last completes; rows are separate keys,
   so they open beside each other. A row wanting nothing more cancels its
   open frames, least-progressed first, and each refunds what it consumed.
+  A post's open frames of a row cover its want before its units do, so a
+  unit at a post whose frames already cover the want is surplus; and the
+  cancelling runs after the tick's sends and counts every unit leaving as
+  gone, so a frame is cancelled only where the units that stay cover the
+  want. Lowering a want a shortfall elsewhere wants sends the unit and
+  keeps the frame building; lowering a want nothing else wants cancels
+  the frame and keeps the unit.
   Units re-homed from one rock to one rock join the send forming between
   that pair for that seat, or open one, solved before they are counted as
   filling anything; a send with no schedule leaves its units home this

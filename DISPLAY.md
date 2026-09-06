@@ -218,9 +218,11 @@ frame's progress; a want with no frame yet as a hollow outline of the
 same segment; so a player schedules construction against what the
 rock will give. The bars are drawn at every rock always and
 take the wheel's two states with it: full where the wheel is full,
-small elsewhere, easing between them as the wheel does, one drawing at
-two scales and two alphas, drawn at the wheel's pixel scale at every
-zoom, so a crowded belt overlaps them. Hovering a bar shows "Metals 12
+small elsewhere, easing between them as the wheel does, drawn at the
+wheel's pixel scale at every zoom, so a crowded belt overlaps them.
+The small state is the bars alone, no icons, standing tight against
+the rock as the small wheel stands tight on its other side; the full
+state adds the icons and the room they need. Hovering a bar shows "Metals 12
 of 20".
 
 ## Fights
@@ -239,10 +241,12 @@ is the force.
 
 ## Flights
 
-A ship between rocks carries its glyph as a billboard, with a line ahead
-to its destination rock. The line is faint at the ship and full at the
-destination, and its dashes roll toward the destination, so its direction
-reads from a still frame and from motion alike. Arrival moves the glyph
+A ship between rocks carries its glyph as a billboard, with a line
+ahead along the path its schedule will fly, the sim's own prediction
+integrated from the ship's body to its arrival, never a straight
+line. The line is faint at the ship and full at the destination, and
+its dashes roll toward the destination, so its direction reads from a
+still frame and from motion alike. Arrival moves the glyph
 from the ship into the wheel's present count.
 
 ## Editing: the wheel's bands

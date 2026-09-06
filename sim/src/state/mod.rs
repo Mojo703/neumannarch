@@ -170,6 +170,13 @@ impl State {
         self.frames.iter().filter(move |frame| frame.post() == post)
     }
 
+    pub fn frames_of(&self, post: Post, row: RowId) -> impl Iterator<Item = (usize, &Frame)> {
+        self.frames
+            .iter()
+            .enumerate()
+            .filter(move |(_, frame)| frame.post() == post && frame.row() == row)
+    }
+
     pub fn count(&self, post: Post, row: RowId) -> u32 {
         let counted = self
             .entities_at(post.rock)

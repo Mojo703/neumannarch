@@ -587,6 +587,46 @@ mod tests {
         );
     }
 
+    fn a_unit_and_a_frame_of_one_row_at_one_rock() -> (World, EntityId) {
+        let mut world = stocked(Roster::shipped(), BTreeMap::new());
+        world.fix(0, SHIPYARD, rock(0));
+        let unit = world.hold(0, CONSTRUCTOR, rock(0), 5.0);
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 2)]);
+        world.run(20);
+        assert_eq!(world.frames(0, rock(0), CONSTRUCTOR), 1);
+        (world, unit)
+    }
+
+    #[test]
+    fn lowering_a_want_a_shortfall_elsewhere_wants_sends_the_unit_and_keeps_the_frame() {
+        let (mut world, unit) = a_unit_and_a_frame_of_one_row_at_one_rock();
+        let progress = world.progress(0, rock(0));
+
+        world.tick(&[
+            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
+            Issued::numbered(0, 1, rock(1), CONSTRUCTOR, 1),
+        ]);
+
+        assert_eq!(world.state[unit].home(), rock(1), "the unit stayed home");
+        let kept = world.frames(0, rock(0), CONSTRUCTOR);
+        assert_eq!(kept, 1, "the send cancelled a frame the want covers");
+        let building = world.progress(0, rock(0)) > progress;
+        assert!(building, "the frame stopped building");
+        let opened = world.frames(0, rock(1), CONSTRUCTOR);
+        assert_eq!(opened, 0, "the send opened a frame it fills itself");
+    }
+
+    #[test]
+    fn lowering_a_want_nothing_else_wants_cancels_the_frame_and_keeps_the_unit() {
+        let (mut world, unit) = a_unit_and_a_frame_of_one_row_at_one_rock();
+
+        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
+
+        assert_eq!(world.state[unit].home(), rock(0), "the unit left");
+        let left = world.frames(0, rock(0), CONSTRUCTOR);
+        assert_eq!(left, 0, "a frame nothing wants kept building");
+    }
+
     #[test]
     fn a_post_opens_one_frame_of_a_row_at_a_time_and_rows_build_in_parallel() {
         let mut world = World::started(&[TeamId(0)]);

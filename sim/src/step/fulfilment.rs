@@ -86,7 +86,8 @@ impl<'a> Fulfilment<'a> {
             let back = held_back.get(&(post, row)).copied().unwrap_or_default();
             self.reconcile(&mut assigned, post, row, still + back);
         }
-        for (post, row, over) in unwanted_frames(self.state) {
+        let leaving = self.leaving(&assigned.sends);
+        for (post, row, over) in unwanted_frames(self.state, &leaving) {
             self.cancel(&mut assigned, post, row, over);
         }
         assigned
@@ -137,30 +138,43 @@ impl<'a> Fulfilment<'a> {
     }
 
     fn reconcile(&self, assigned: &mut Assigned, post: Post, row: RowId, wanted: u32) {
-        let open = self.frames_of(post, row);
+        let open = self.state.frames_of(post, row).count();
         match wanted {
-            0 => self.cancel(assigned, post, row, open.len() as u32),
-            _ if open.is_empty() => assigned.openings.push(Opening { post, row }),
+            0 => self.cancel(assigned, post, row, open as u32),
+            _ if open == 0 => assigned.openings.push(Opening { post, row }),
             _ => {}
         }
     }
 
     fn cancel(&self, assigned: &mut Assigned, post: Post, row: RowId, count: u32) {
-        let mut open = self.frames_of(post, row);
-        open.sort_by(|a, b| {
-            self.state.frames()[*a]
-                .progress()
-                .total_cmp(&self.state.frames()[*b].progress())
-                .then(a.cmp(b))
-        });
-        for frame in open.into_iter().take(count as usize) {
+        let mut open: Vec<(usize, f64)> = self
+            .state
+            .frames_of(post, row)
+            .map(|(at, frame)| (at, frame.progress()))
+            .collect();
+        open.sort_by(|(at, first), (next, second)| first.total_cmp(second).then(at.cmp(next)));
+        for (frame, progress) in open.into_iter().take(count as usize) {
             assigned.cancellations.push(Cancellation {
                 frame,
                 row,
                 seat: post.seat,
-                progress: self.state.frames()[frame].progress(),
+                progress,
             });
         }
+    }
+
+    fn leaving(&self, sends: &[Send]) -> BTreeMap<(Post, RowId), u32> {
+        let mut gone: BTreeMap<(Post, RowId), u32> = BTreeMap::new();
+        for send in sends {
+            for entity in send.members.iter().filter_map(|id| self.state.entity(*id)) {
+                let post = Post {
+                    rock: send.source,
+                    seat: entity.seat(),
+                };
+                *gone.entry((post, entity.row())).or_default() += 1;
+            }
+        }
+        gone
     }
 
     fn solve(
@@ -190,16 +204,6 @@ impl<'a> Fulfilment<'a> {
         }
         held_back
     }
-
-    fn frames_of(&self, post: Post, row: RowId) -> Vec<usize> {
-        self.state
-            .frames()
-            .iter()
-            .enumerate()
-            .filter(|(_, frame)| frame.post() == post && frame.row() == row)
-            .map(|(at, _)| at)
-            .collect()
-    }
 }
 
 fn shortfalls(state: &State) -> Vec<(Post, RowId, u32)> {
@@ -218,7 +222,10 @@ fn shortfalls(state: &State) -> Vec<(Post, RowId, u32)> {
 fn surpluses(state: &State) -> Vec<(Post, RowId, Vec<EntityId>)> {
     let mut over: Vec<(Post, RowId, Vec<EntityId>)> = Vec::new();
     for (post, row) in held_rows(state) {
-        let want = state.wants(post).map_or(0, |wants| wants.get(row));
+        let want = state
+            .wants(post)
+            .map_or(0, |wants| wants.get(row))
+            .saturating_sub(state.frames_of(post, row).count() as u32);
         let mut held: Vec<EntityId> = state
             .entities_at(post.rock)
             .filter(|entity| entity.seat() == post.seat && entity.row() == row)
@@ -253,7 +260,10 @@ fn held_rows(state: &State) -> Vec<(Post, RowId)> {
     rows
 }
 
-fn unwanted_frames(state: &State) -> Vec<(Post, RowId, u32)> {
+fn unwanted_frames(
+    state: &State,
+    leaving: &BTreeMap<(Post, RowId), u32>,
+) -> Vec<(Post, RowId, u32)> {
     let mut open: BTreeMap<(Post, RowId), u32> = BTreeMap::new();
     for frame in state.frames() {
         *open.entry((frame.post(), frame.row())).or_default() += 1;
@@ -261,7 +271,8 @@ fn unwanted_frames(state: &State) -> Vec<(Post, RowId, u32)> {
     open.into_iter()
         .filter(|((post, row), _)| {
             let want = state.wants(*post).map_or(0, |wants| wants.get(*row));
-            want <= state.count(*post, *row)
+            let gone = leaving.get(&(*post, *row)).copied().unwrap_or_default();
+            want + gone <= state.count(*post, *row)
         })
         .map(|((post, row), count)| (post, row, count))
         .collect()

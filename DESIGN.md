@@ -192,7 +192,12 @@ sets one count.
 - **Reserve.** A shortfall is filled from the player's reserve before
   anything else: the entity appears at the place, complete, at once.
 - **Surplus.** When a place has more of a row than its want, the
-  highest-indexed units of that row there are surplus. Shortfalls are
+  highest-indexed units of that row there are surplus. Where a
+  shortfall of the row exists elsewhere, a place's complete units are
+  surplus before its frames of that row are unwanted, so lowering a
+  want to send a unit away sends the unit and keeps the frame
+  building; where no shortfall wants them, the frames are cancelled
+  and refunded and the units stay. Shortfalls are
   filled in order of rock then player. Each is filled from the nearest
   surplus, rock to rock as of that tick, ties by lowest rock. A surplus
   unit sent to a shortfall cancels that place's least-progressed frame of
