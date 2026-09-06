@@ -281,6 +281,10 @@ screens, then the programme.
 - The engine is a path dependency at `../../mirage-engine`; its wgpu 29
   and egui 0.35 pin is its own concern. Its verification recipes are in
   `docs/verifying.md` there.
+- The browser: `game/tools/serve-web.sh` builds the game for wasm32,
+  binds it with the wasm-bindgen CLI pinned by the lockfile, serves
+  `dist/` with the engine's page; a WebGPU browser is required. No
+  browser run has been made yet; the first is the owner's.
 - Linear is not set up and is ignored.
 - Crate downloads are blocked in the agents' environment, so a new
   dependency must already be in the cargo cache. In it: resvg and usvg
