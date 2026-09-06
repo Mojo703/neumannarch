@@ -70,9 +70,9 @@ Open from the draft unit:
 - Dead `pub` items rustc cannot see: a `pub` item in a library crate is
   never flagged unused, so the sim's, agents' and protocol's surfaces
   hide dead code from the gate. Found by a name scan 2026-09-06, called
-  only from tests: `is_a_phrase` (display/label.rs), `RIVAL`
-  (display/local.rs), `dim` (display/scene.rs), `moving_at`
-  (roster/mod.rs). The structural fix, into the contraction audit (1e):
+  only from tests: `RIVAL` (display/local.rs) and `dim`
+  (display/scene.rs); `is_a_phrase` and `moving_at` are now test-only.
+  The structural fix, into the contraction audit (1e):
   every `pub` outside ARCHITECTURE.md's stated surface becomes
   `pub(crate)`, after which rustc's own lint finds the rest for good;
   `check.sh` gains the scan until then.
@@ -309,8 +309,6 @@ Reported to the owner as found; the game never works around a gap.
   the focus's depth and lands a few percent off on a long drag; a
   camera-side "pan so this world point lands on that pixel" would be
   exact.
-- `cargo clippy --features look --all-targets` is not in the gate and
-  flags an item-ordering lint in game/src/main.rs.
 
 ## Settled, do not re-raise
 

@@ -23,7 +23,8 @@ impl Roster {
         }
     }
 
-    pub fn moving_at(self, movement_limit: Real) -> Roster {
+    #[cfg(test)]
+    pub(crate) fn moving_at(self, movement_limit: Real) -> Roster {
         Roster {
             movement_limit,
             ..self
@@ -98,15 +99,6 @@ mod tests {
         assert_eq!(roster.get(id), Some(&variant));
         assert_eq!(roster.iter().last(), Some((id, &variant)));
         assert_eq!(roster.len(), Roster::shipped().len() + 1);
-    }
-
-    #[test]
-    fn moving_at_sets_the_movement_limit_and_keeps_the_rows() {
-        let shipped = Roster::shipped();
-        let slow = shipped.clone().moving_at(Real(1e-6));
-        assert_eq!(slow.movement_limit(), Real(1e-6));
-        assert_eq!(slow.len(), shipped.len());
-        assert_eq!(slow[LANCER], shipped[LANCER]);
     }
 
     #[test]

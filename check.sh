@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 
 for crate in neumannarch-sim neumannarch-protocol neumannarch-agents neumannarch-game neumannarch-server; do cargo fmt --check -p "$crate"; done
 cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p neumannarch-game --features look --all-targets -- -D warnings
 cargo build --workspace --all-targets
 # The look feature is off by default; build it so the tool always compiles.
 cargo build -p neumannarch-game --features look --all-targets

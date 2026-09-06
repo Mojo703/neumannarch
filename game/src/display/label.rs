@@ -16,7 +16,8 @@ pub fn titled(word: &str) -> String {
     }
 }
 
-pub fn is_a_phrase(text: &str) -> bool {
+#[cfg(test)]
+pub(crate) fn is_a_phrase(text: &str) -> bool {
     let dashed = text
         .char_indices()
         .filter(|(_, letter)| *letter == '-')
