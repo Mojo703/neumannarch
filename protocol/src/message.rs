@@ -45,7 +45,7 @@ pub enum Message {
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{RockId, RowId, TeamId};
+    use neumannarch_sim::{AsteroidId, RowId, TeamId};
 
     use super::*;
     use crate::lobby::Holder;
@@ -85,7 +85,7 @@ mod tests {
                     seat: SeatId(1),
                     seq: 4,
                     command: Command::Want {
-                        rock: RockId(6),
+                        asteroid: AsteroidId(6),
                         row: RowId(2),
                         count: 3,
                     },

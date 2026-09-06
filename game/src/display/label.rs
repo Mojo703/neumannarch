@@ -35,12 +35,12 @@ mod tests {
     use neumannarch_protocol::{Bot, Holder, Lobby, PlayerId, Refused};
     use neumannarch_sim::roster::{FRIGATE, Roster};
     use neumannarch_sim::state::view::Building;
-    use neumannarch_sim::{Materials, RockId, Stockpile, TeamId, Tick};
+    use neumannarch_sim::{AsteroidId, Materials, Stockpile, TeamId, Tick};
 
     use super::*;
-    use crate::display::scene::{Entry, StripView, WheelBand, rock_name};
+    use crate::display::scene::{Entry, StripView, WheelBand, asteroid_name};
     use crate::display::strip::Strip;
-    use crate::display::wheels::{NOT_YET, ROCK_TAKEN, Spoken};
+    use crate::display::wheels::{ASTEROID_TAKEN, NOT_YET, Spoken};
     use crate::net::listener::NoListener;
     use crate::screens::control::HOST_ONLY;
     use crate::screens::lobby::{
@@ -91,7 +91,7 @@ mod tests {
             Entry::Surplus(1),
             Entry::Leaving {
                 count: 1,
-                to: RockId(4),
+                to: AsteroidId(4),
             },
             Entry::Building(Building {
                 progress: 0.5,
@@ -111,7 +111,7 @@ mod tests {
             }),
             Entry::Arriving {
                 count: 3,
-                from: RockId(2),
+                from: AsteroidId(2),
             },
             Entry::Wanted {
                 count: 1,
@@ -158,7 +158,7 @@ mod tests {
             pull: 12.0,
             cap: 20.0,
         });
-        let refused_bands = [NOT_YET, ROCK_TAKEN].map(|why| Spoken::Refused {
+        let refused_bands = [NOT_YET, ASTEROID_TAKEN].map(|why| Spoken::Refused {
             why: why.to_string(),
         });
         let seated = Lobby::skirmish(PlayerId::HOST)
@@ -214,7 +214,7 @@ mod tests {
             .chain(refused_bands.iter().map(|band| band.phrase(&roster)))
             .chain((0..8u64).flat_map(|seed| seat_names(seated.seating(), PlayerId::HOST, seed)))
             .chain(["Draft".to_string(), "Clock".to_string()])
-            .chain([rock_name(RockId(11))])
+            .chain([asteroid_name(AsteroidId(11))])
             .collect()
     }
 
@@ -268,7 +268,7 @@ mod tests {
         assert!(is_a_phrase("-5"));
         assert!(is_a_phrase("+12 in -9 out"));
         assert!(!is_a_phrase("Team 2 - Team 3"));
-        assert!(!is_a_phrase("Rock 5-"));
+        assert!(!is_a_phrase("Asteroid 5-"));
     }
 
     #[test]

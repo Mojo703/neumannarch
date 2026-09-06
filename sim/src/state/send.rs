@@ -1,5 +1,5 @@
 use crate::TICKS_PER_SECOND;
-use crate::ids::{EntityId, RockId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::state::{Schedule, State};
 use crate::time::Time;
 
@@ -9,8 +9,8 @@ const SEARCH_BOUND: u64 = 600 * TICKS_PER_SECOND as u64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Send {
-    pub source: RockId,
-    pub destination: RockId,
+    pub source: AsteroidId,
+    pub destination: AsteroidId,
     pub schedule: Schedule,
     pub members: Vec<EntityId>,
 }
@@ -20,8 +20,8 @@ impl Send {
 
     pub(crate) fn joining(
         state: &State,
-        source: RockId,
-        destination: RockId,
+        source: AsteroidId,
+        destination: AsteroidId,
         seat: SeatId,
         members: &[EntityId],
     ) -> Option<Send> {
@@ -37,8 +37,8 @@ impl Send {
 
     fn forming(
         state: &State,
-        source: RockId,
-        destination: RockId,
+        source: AsteroidId,
+        destination: AsteroidId,
         seat: SeatId,
     ) -> Option<Schedule> {
         state
@@ -49,7 +49,7 @@ impl Send {
             .map(|flight| flight.schedule())
     }
 
-    fn solved(state: &State, source: RockId, destination: RockId) -> Option<Schedule> {
+    fn solved(state: &State, source: AsteroidId, destination: AsteroidId) -> Option<Schedule> {
         let gravity = state.gravity();
         let depart = Time(state.time().0 + Send::FORMING_TICKS).next();
         let from = state[source].orbit().at(depart, gravity);

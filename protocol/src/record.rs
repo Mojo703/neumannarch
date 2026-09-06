@@ -109,7 +109,7 @@ fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
 mod tests {
     use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{Retention, RockId, RowId, SeatId, TeamId};
+    use neumannarch_sim::{AsteroidId, Retention, RowId, SeatId, TeamId};
 
     use super::*;
     use crate::wire::Codec;
@@ -125,7 +125,7 @@ mod tests {
             seat: SeatId(0),
             seq,
             command: Command::Want {
-                rock: RockId(0),
+                asteroid: AsteroidId(0),
                 row,
                 count: 1,
             },

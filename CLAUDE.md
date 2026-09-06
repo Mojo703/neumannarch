@@ -50,7 +50,7 @@ off on without comments.
   to dodge a borrow you could restructure.
 - No new type whose fields are copies of another type's fields (owner,
   2026-09-05). A type is added only where it owns a fact no existing
-  type owns; a bag of values borrowed from an entity, a row or a rock is
+  type owns; a bag of values borrowed from an entity, a row or an asteroid is
   not a type, it is a function over them. Before adding a type an agent
   names the existing type that owns the nearest fact and extends it. A
   replacement system is built from the existing types first: a brief

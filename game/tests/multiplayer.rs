@@ -13,7 +13,7 @@ use neumannarch_protocol::{
 };
 use neumannarch_sim::roster::SHIPYARD;
 use neumannarch_sim::state::{Command, Issued};
-use neumannarch_sim::{RockId, SeatId, Stamped, Tick};
+use neumannarch_sim::{AsteroidId, SeatId, Stamped, Tick};
 
 const TICKS: u64 = 360;
 
@@ -269,7 +269,7 @@ fn sent() -> Stamped {
             seat: SeatId(0),
             seq: 0,
             command: Command::Want {
-                rock: RockId(0),
+                asteroid: AsteroidId(0),
                 row: SHIPYARD,
                 count: 1,
             },

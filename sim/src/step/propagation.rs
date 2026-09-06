@@ -51,7 +51,7 @@ impl<'a> Propagation<'a> {
 
     fn departing(&self, body: Body, flight: Option<Flight>) -> Body {
         match flight.filter(|flight| flight.departs() == self.state.time()) {
-            Some(flight) => Body::new(body.pos, self.state.rock_body(flight.source()).vel),
+            Some(flight) => Body::new(body.pos, self.state.asteroid_body(flight.source()).vel),
             None => body,
         }
     }

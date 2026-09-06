@@ -45,7 +45,7 @@ impl Log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{RockId, RowId, SeatId};
+    use crate::ids::{AsteroidId, RowId, SeatId};
     use crate::state::{Command, Issued};
 
     fn stamped(tick: u64, seat: u8, seq: u32) -> Stamped {
@@ -55,7 +55,7 @@ mod tests {
                 seat: SeatId(seat),
                 seq,
                 command: Command::Want {
-                    rock: RockId(0),
+                    asteroid: AsteroidId(0),
                     row: RowId(0),
                     count: seq,
                 },

@@ -6,16 +6,16 @@ use crate::real::Real;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Rock {
+pub struct Asteroid {
     orbit: Orbit,
     caps: Materials,
     radius: Real,
     pull: PerSecond,
 }
 
-impl Rock {
-    pub fn new(orbit: Orbit, caps: Materials, radius: f64) -> Rock {
-        Rock {
+impl Asteroid {
+    pub fn new(orbit: Orbit, caps: Materials, radius: f64) -> Asteroid {
+        Asteroid {
             orbit,
             caps,
             radius: Real(radius),

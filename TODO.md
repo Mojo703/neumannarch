@@ -12,17 +12,6 @@ is the record. Agents see this file only through their briefs.
 Nothing is in flight. One unit at a time on plain subagents; teammate
 mode is off from the next session.
 
-Ruled 2026-09-06: the word is asteroid, everywhere. A Sonnet sweep
-after the drag-rule unit, its own commit: DESIGN, DISPLAY,
-ARCHITECTURE, every type and name (`Rock`, `RockId`, `rock_body`,
-`Terrain.rock`, ...), the screen phrases ("Asteroid 1"), the harness's
-output, this file. The send-destroys-frame defect was a misdiagnosis
-(fulfilment's surplus pool is bounded by what exceeds the want, proved
-and probed 2026-09-06); what play showed is DESIGN's own rule covering
-a lowered want with the complete unit and cancelling the frame; ruled
-2026-09-06 into DESIGN Surplus: where a shortfall elsewhere wants the
-row, complete units are surplus before frames are unwanted.
-
 Owner notes 2026-09-06, placed: ship trajectory lines follow the
 schedule's predicted path (DISPLAY Flights, written) and the small
 state of the resource bars is bars alone, tight to the asteroid, the
@@ -31,12 +20,12 @@ the extractor-coming display unit below. Ships should move faster: the
 movement limit is a belt number and is set in the belt unit with the
 spacing and the schedule bound.
 
-Next, before the belt: the asteroid sweep above, then
+Next, before the belt:
 and the hover preview asked of the sim (a sim and display unit), which
 also draws the preview's cost on the stockpile bars (DISPLAY The
 stockpile, ruled 2026-09-06: segments only, never a numeral). Then a
-small view and display unit: an extractor wanted or building at a rock
-shows its coming yield on the rock's bar (DISPLAY Resources, ruled
+small view and display unit: an extractor wanted or building at an asteroid
+shows its coming yield on the asteroid's bar (DISPLAY Resources, ruled
 2026-09-06, frames and wants both, to help the player schedule
 construction). Then
 the belt, plan item 3, scope ruled 2026-09-06: generation from the
@@ -53,13 +42,13 @@ draft. The complete shape is every phase taking the step's match-time
 span, zero in the draft, and no early return. Contraction audit.
 
 Open from the draft unit:
-- A bot's second drafted rock holds only its constructor, so the seat
-  holds one rock by the standings and the pick is nearly wasted; the
-  bots' economy should claim a drafted rock so a mason develops it. A
+- A bot's second drafted asteroid holds only its constructor, so the seat
+  holds one asteroid by the standings and the pick is nearly wasted; the
+  bots' economy should claim a drafted asteroid so a mason develops it. A
   few lines in agents/plan.rs, not yet ruled.
 - `harness draft` on the fixed belt: the first picker lost 8 of 8
-  mirrors. Caps are even (both seats' two rocks sum to 17); position
-  is not: the first picker's rocks lie at the belt's ends, the
+  mirrors. Caps are even (both seats' two asteroids sum to 17); position
+  is not: the first picker's asteroids lie at the belt's ends, the
   second's sit adjacent in the middle. The fixed table's geometry; for
   the belt unit and the harness.
 - The owner's arrival scene, the probes flying into the system during
@@ -82,8 +71,8 @@ Open from the draft unit:
 - Ship glyphs stairstep: the quads use an alpha-test cutout MSAA cannot
   soften. Ruled: a coverage-sampled glyph rasteriser, edge coverage in
   the sheet's alpha, no material change. A small display unit.
-- A thousand units at one rock cost 8.3 to 8.5 ms a tick against the
-  8.333 ms budget (release, 21-rock belt); rank the roll once per rock
+- A thousand units at one asteroid cost 8.3 to 8.5 ms a tick against the
+  8.333 ms budget (release, 21-asteroid belt); rank the roll once per asteroid
   and plating. The state is cloned whole every tick and 240 clones are
   kept (`Retention::shipped`, every tick over a two-second window), so
   every field added to the state is copied 120 times a second; the
@@ -133,7 +122,7 @@ Open from the draft unit:
   sim unit after the compaction, on the compaction agent (owner:
   reuse it): the draft rules in the sim, the pick order from the seed,
   the turn span, the refusals by name; the bots' pick by the intended
-  mix against the free rocks, weighed against nearness to taken rocks,
+  mix against the free asteroids, weighed against nearness to taken asteroids,
   deleting the opening by seat index; the harness pins that pick order
   does not decide a mirror beyond the id tie-breaks. Display after the
   visual unit, a design conversation first: whose turn, the order, and
@@ -148,17 +137,17 @@ Open from the draft unit:
 - Ruled 2026-09-06, next after the logic unit commits and before the
   Fable visual unit: one extractor row per material (DESIGN Extract,
   DISPLAY Glyph Extract mark, both written). An Opus unit: the Extract
-  weapon names its material; extraction splits a rock's cap per
+  weapon names its material; extraction splits an asteroid's cap per
   material over that material's extractors; three roster rows; the
   bots' economy decides which extractor to build where by a real rule
-  from demand against income, not a patch on `extractors_per_rock`; the
+  from demand against income, not a patch on `extractors_per_asteroid`; the
   survey's predicted income is deleted for the view's measured income.
   The agent states the bot rule as mechanism and stops for the owner's
   ruling before building it.
-- Fable's wheel proposals, not built, for the owner: rock names in
+- Fable's wheel proposals, not built, for the owner: asteroid names in
   phrases; total HP on the fight bar's hover; a live send line from
   wheel to pointer; the hint phrase advancing.
-- Held for the owner's play: rocks sub-pixel at region zoom; the fight
+- Held for the owner's play: asteroids sub-pixel at region zoom; the fight
   arc refilling on reinforcement; repair at 15 HP/s beating a frigate's
   12 DPS; elimination before the clock; a fresh-eyes judgement after
   every display change; ships too slow and combat slow to start and
@@ -174,8 +163,8 @@ against the code at every session start.
 - DISPLAY The stockpile and the clock: a hovered plus band marks the
   row's cost on each bar and a minus band the refund; not drawn. The
   hover preview unit.
-- DISPLAY Resources: an extractor wanted or building at a rock shows
-  its coming yield on the rock's bar; not drawn. The extractor-coming
+- DISPLAY Resources: an extractor wanted or building at an asteroid shows
+  its coming yield on the asteroid's bar; not drawn. The extractor-coming
   unit.
 - DISPLAY Flights: the line ahead of a ship follows its schedule's
   path; the code draws a straight line. The extractor-coming unit.
@@ -199,7 +188,7 @@ against the code at every session start.
 ## Plan, in order
 
 Priority: the readings the owner needs to judge by play, then the
-contraction, then the belt since its rock and ship counts set every
+contraction, then the belt since its asteroid and ship counts set every
 other number, then measurement before any store rewrite, then the
 screens, then the programme.
 
@@ -216,18 +205,18 @@ screens, then the programme.
    agents/plan.rs and roles.rs.
 2. Vectors, Sonnet: the connection's inboxes and both websockets'
    queues gain a stated cap on frame count, past which the connection
-   closes; the kept records as a deque; the agent memory's rock sets as
+   closes; the kept records as a deque; the agent memory's asteroid sets as
    sorted slices; about 75 never-mutated fields and returns become
    `Box<[T]>` and `Box<str>` at their constructor sites (protocol 6,
    server 9, sim 19, agents 12, game 15). Net lines below zero.
 3. The belt and the star, Opus: map generation from seed with regional
-   caps; one to two hundred rocks in an annulus from the seed with
+   caps; one to two hundred asteroids in an annulus from the seed with
    regional cap triples; neighbour spacing near two kilometres, the
    extent growing with the count; the star as a distant light and a
    disc; the lobby's seed changes the belt and its preview is the seed's
    belt at whole-belt zoom. The zone radius tens of metres, from the
-   largest force a rock holds at the holding rule's spacing. Settles
-   the rock count, the belt's spread against the schedule search bound,
+   largest force an asteroid holds at the holding rule's spacing. Settles
+   the asteroid count, the belt's spread against the schedule search bound,
    and the ship count a match reaches, which items 4 and 5 answer to.
 4. The harness for scale and truth, Sonnet: a scale check playing a full
    bot match at two and five thousand ships on a release build printing
@@ -265,17 +254,17 @@ screens, then the programme.
    small collapses (Attractor is Body; View::want; Room folded into
    Socket; one belt-drawing preamble; the sim test fixture module;
    Materials::bottleneck as binding; Material::ALL); a frame on its
-   post; one rock type from sim to pixel; one mark state replacing Fill
+   post; one asteroid type from sim to pixel; one mark state replacing Fill
    and Reason; Layout yielding placed marks and one Dial; mark geometry
    as primitives painted once and rasterised once; one Log type; the
-   agent's knowledge as one row per rock; the wheel built once on
+   agent's knowledge as one row per asteroid; the wheel built once on
    selection; the Maneuver phase spelt manoeuvring; the units question:
    evaluate one existing dimensional-analysis crate with const-generic
    dimensions, adopt only if already in the cargo cache and its bounds
    stay out of the rules. Opus for the sim stores and the agents; Sonnet
    for the rest; a line ceiling per brief; `check.sh` gains a
    duplication check.
-9. From play: a selected rock owns the focus each tick until a pan
+9. From play: a selected asteroid owns the focus each tick until a pan
    releases it (DISPLAY Camera, main loop).
 10. From the harness: seat 0's edge isolated and removed; territory that
     varies with composition; combat before the last third of a match;
@@ -373,7 +362,7 @@ Reported to the owner as found; the game never works around a gap.
 - No points, no anchors, no objectives, no intrinsic compositions.
 - Fixed-point numerics; per-row speed limits.
 - A commander or any vital row; fixed seat quadrants; a staging place
-  per seat; rock gravity or patched conics.
+  per seat; asteroid gravity or patched conics.
 - Attachment or reference frames of any kind: every body moves under
   one law; an anchor is an orbit, not a frame.
 - Slots or any fixed formation lattice: formation is emergent from the
@@ -383,6 +372,6 @@ Reported to the owner as found; the game never works around a gap.
 - No line or ribbon primitive in the engine: the HUD is painted in
   screen space through egui's painter over `Camera::pixel_of`.
 - Hand-rolled dimensional newtypes (owner: madness).
-- The small wheel and the rock bars at fixed pixels at every zoom,
+- The small wheel and the asteroid bars at fixed pixels at every zoom,
   overlapping when crowded; nothing hidden by zoom.
-- A deselected bare rock's wheel vanishes rather than shrinking.
+- A deselected bare asteroid's wheel vanishes rather than shrinking.

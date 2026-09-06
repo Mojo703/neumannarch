@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use neumannarch_sim::roster::{Kind, Roster, Row};
 use neumannarch_sim::state::view::{Present, View};
-use neumannarch_sim::{RockId, RowId};
+use neumannarch_sim::{AsteroidId, RowId};
 
 use crate::roles::Roles;
 
@@ -10,31 +10,31 @@ pub struct Survey<'a> {
     pub view: &'a View,
     pub roster: &'a Roster,
     pub roles: &'a Roles,
-    pub mine: BTreeMap<RockId, BTreeMap<RowId, u32>>,
-    pub held: Vec<RockId>,
-    pub occupied: Vec<RockId>,
-    pub building: Vec<RockId>,
-    pub developed: Vec<RockId>,
-    pub home: Option<RockId>,
+    pub mine: BTreeMap<AsteroidId, BTreeMap<RowId, u32>>,
+    pub held: Vec<AsteroidId>,
+    pub occupied: Vec<AsteroidId>,
+    pub building: Vec<AsteroidId>,
+    pub developed: Vec<AsteroidId>,
+    pub home: Option<AsteroidId>,
     pub army: f64,
     pub enemy: f64,
-    pub enemy_rocks: Vec<RockId>,
+    pub enemy_asteroids: Vec<AsteroidId>,
     pub enemy_plating: f64,
     pub enemy_range: f64,
-    pub threats: BTreeMap<RockId, f64>,
+    pub threats: BTreeMap<AsteroidId, f64>,
 }
 
 impl<'a> Survey<'a> {
     pub fn of(view: &'a View, roster: &'a Roster, roles: &'a Roles) -> Survey<'a> {
         let mine = holdings(view);
-        let of = |kind: fn(&Roster, RowId) -> bool| -> Vec<RockId> {
-            let mut rocks: Vec<RockId> = mine
+        let of = |kind: fn(&Roster, RowId) -> bool| -> Vec<AsteroidId> {
+            let mut asteroids: Vec<AsteroidId> = mine
                 .iter()
                 .filter(|(_, rows)| rows.keys().any(|row| kind(roster, *row)))
-                .map(|(rock, _)| *rock)
+                .map(|(asteroid, _)| *asteroid)
                 .collect();
-            rocks.dedup();
-            rocks
+            asteroids.dedup();
+            asteroids
         };
         let held = of(is_structure);
         let occupied = of(is_anything);
@@ -51,7 +51,7 @@ impl<'a> Survey<'a> {
             home: home(&mine, roster, &building),
             army: army(view, roster),
             enemy: threats.values().sum(),
-            enemy_rocks: enemy_rocks(view, roster),
+            enemy_asteroids: enemy_asteroids(view, roster),
             enemy_plating: worst(view, roster, |row| row.plating.0),
             enemy_range: worst(view, roster, Row::max_damage_range),
             threats,
@@ -63,9 +63,9 @@ impl<'a> Survey<'a> {
         }
     }
 
-    pub fn count(&self, rock: RockId, row: RowId) -> u32 {
+    pub fn count(&self, asteroid: AsteroidId, row: RowId) -> u32 {
         self.mine
-            .get(&rock)
+            .get(&asteroid)
             .and_then(|rows| rows.get(&row))
             .copied()
             .unwrap_or_default()
@@ -75,16 +75,16 @@ impl<'a> Survey<'a> {
         self.mine.values().filter_map(|rows| rows.get(&row)).sum()
     }
 
-    pub fn between(&self, from: RockId, to: RockId) -> f64 {
-        match (self.view.rock_body(from), self.view.rock_body(to)) {
+    pub fn between(&self, from: AsteroidId, to: AsteroidId) -> f64 {
+        match (self.view.asteroid_body(from), self.view.asteroid_body(to)) {
             (Some(from), Some(to)) => from.pos.distance(to.pos),
             _ => 0.0,
         }
     }
 }
 
-fn holdings(view: &View) -> BTreeMap<RockId, BTreeMap<RowId, u32>> {
-    let mut counted: BTreeMap<RockId, BTreeMap<RowId, u32>> = BTreeMap::new();
+fn holdings(view: &View) -> BTreeMap<AsteroidId, BTreeMap<RowId, u32>> {
+    let mut counted: BTreeMap<AsteroidId, BTreeMap<RowId, u32>> = BTreeMap::new();
     for mine in view.present.iter().filter(|it| it.seat == view.seat) {
         *counted
             .entry(mine.home)
@@ -105,8 +105,8 @@ fn is_anything(_roster: &Roster, _row: RowId) -> bool {
     true
 }
 
-fn building(view: &View, roster: &Roster) -> Vec<RockId> {
-    let mut rocks: Vec<RockId> = view
+fn building(view: &View, roster: &Roster) -> Vec<AsteroidId> {
+    let mut asteroids: Vec<AsteroidId> = view
         .present
         .iter()
         .filter(|mine| mine.seat == view.seat && mine.at.standing().is_some())
@@ -117,19 +117,19 @@ fn building(view: &View, roster: &Roster) -> Vec<RockId> {
         })
         .map(|mine| mine.home)
         .collect();
-    rocks.sort_unstable();
-    rocks.dedup();
-    rocks
+    asteroids.sort_unstable();
+    asteroids.dedup();
+    asteroids
 }
 
 fn home(
-    mine: &BTreeMap<RockId, BTreeMap<RowId, u32>>,
+    mine: &BTreeMap<AsteroidId, BTreeMap<RowId, u32>>,
     roster: &Roster,
-    building: &[RockId],
-) -> Option<RockId> {
-    let rate = |rock: RockId| -> f64 {
+    building: &[AsteroidId],
+) -> Option<AsteroidId> {
+    let rate = |asteroid: AsteroidId| -> f64 {
         mine.iter()
-            .filter(|(at, _)| **at == rock)
+            .filter(|(at, _)| **at == asteroid)
             .flat_map(|(_, rows)| rows)
             .filter_map(|(row, count)| roster.get(*row).map(|row| (row, *count)))
             .map(|(row, count)| row.builds().sum::<f64>() * count as f64)
@@ -161,18 +161,18 @@ fn enemies<'a>(
         .filter_map(|present| roster.get(present.row).map(|row| (present, row)))
 }
 
-fn enemy_rocks(view: &View, roster: &Roster) -> Vec<RockId> {
-    let mut rocks: Vec<RockId> = enemies(view, roster)
+fn enemy_asteroids(view: &View, roster: &Roster) -> Vec<AsteroidId> {
+    let mut asteroids: Vec<AsteroidId> = enemies(view, roster)
         .filter(|(_, row)| row.kind() == Kind::Structure)
         .map(|(present, _)| present.home)
         .collect();
-    rocks.sort_unstable();
-    rocks.dedup();
-    rocks
+    asteroids.sort_unstable();
+    asteroids.dedup();
+    asteroids
 }
 
-fn threats(view: &View, roster: &Roster) -> BTreeMap<RockId, f64> {
-    let mut threats: BTreeMap<RockId, f64> = BTreeMap::new();
+fn threats(view: &View, roster: &Roster) -> BTreeMap<AsteroidId, f64> {
+    let mut threats: BTreeMap<AsteroidId, f64> = BTreeMap::new();
     for (present, row) in enemies(view, roster).filter(|(_, row)| row.is_armed()) {
         *threats.entry(present.home).or_default() += row.cost.total();
     }

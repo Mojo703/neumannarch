@@ -1,6 +1,6 @@
 use core::num::NonZeroU32;
 
-use crate::ids::RockId;
+use crate::ids::AsteroidId;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::lambert;
 use crate::orbit::universal::propagate;
@@ -13,7 +13,7 @@ const BURN_SHARE_OF_SPAN: f64 = 0.08;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Flight {
-    source: RockId,
+    source: AsteroidId,
     schedule: Schedule,
 }
 
@@ -31,11 +31,11 @@ struct Burn {
 }
 
 impl Flight {
-    pub(crate) fn new(source: RockId, schedule: Schedule) -> Flight {
+    pub(crate) fn new(source: AsteroidId, schedule: Schedule) -> Flight {
         Flight { source, schedule }
     }
 
-    pub fn source(self) -> RockId {
+    pub fn source(self) -> AsteroidId {
         self.source
     }
 

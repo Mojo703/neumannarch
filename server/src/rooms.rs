@@ -269,7 +269,7 @@ mod tests {
     use neumannarch_protocol::{Bot, Holder, Lobby};
     use neumannarch_sim::roster::SHIPYARD;
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{RockId, SeatId, Stamped, TeamId, Tick};
+    use neumannarch_sim::{AsteroidId, SeatId, Stamped, TeamId, Tick};
 
     use super::*;
 
@@ -282,7 +282,7 @@ mod tests {
                 seat: SeatId(seat),
                 seq: 0,
                 command: Command::Want {
-                    rock: RockId(0),
+                    asteroid: AsteroidId(0),
                     row: SHIPYARD,
                     count: 1,
                 },

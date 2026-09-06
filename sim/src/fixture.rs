@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
-use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
+use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
@@ -10,7 +10,7 @@ use crate::post::Post;
 use crate::roster::Roster;
 use crate::setup::Setup;
 use crate::state::view::View;
-use crate::state::{Batch, Command, Flight, Issued, Motion, Rejected, Rock, Seat, State, view};
+use crate::state::{Asteroid, Batch, Command, Flight, Issued, Motion, Rejected, Seat, State, view};
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
@@ -23,7 +23,7 @@ const RING_RADIUS_METERS: f64 = 1.0e7;
 
 const RING_SPACING_METERS: f64 = 1_000.0;
 
-const ROCK_RADIUS_METERS: f64 = 1.5;
+const ASTEROID_RADIUS_METERS: f64 = 1.5;
 
 const RING_CAPS: Materials = Materials::new(1.0, 1.0, 1.0);
 
@@ -68,14 +68,14 @@ impl World {
         world
     }
 
-    pub fn draft(&mut self, seat: u8, from: RockId) {
+    pub fn draft(&mut self, seat: u8, from: AsteroidId) {
         let picks: Vec<Issued> = self.state[SeatId(seat)]
             .reserve()
             .keys()
             .enumerate()
             .map(|(at, row)| {
                 let at = at as u32;
-                Issued::numbered(seat, at, RockId(from.0 + at), *row, 1)
+                Issued::numbered(seat, at, AsteroidId(from.0 + at), *row, 1)
             })
             .collect();
         self.tick(&picks);
@@ -91,14 +91,14 @@ impl World {
         World::seated(vec![Seat::new(TeamId(0), stock, reserve)])
     }
 
-    pub fn ring(gravity: Gravity, rocks: usize, teams: &[TeamId]) -> World {
+    pub fn ring(gravity: Gravity, asteroids: usize, teams: &[TeamId]) -> World {
         let mut world = World {
             state: State::new(
                 CLOCK,
                 0,
                 gravity,
                 Roster::shipped(),
-                (0..rocks).map(|at| ringed(at, gravity)).collect(),
+                (0..asteroids).map(|at| ringed(at, gravity)).collect(),
                 teams
                     .iter()
                     .map(|team| Seat::new(*team, Materials::ZERO, BTreeMap::new()))
@@ -109,8 +109,8 @@ impl World {
         world
     }
 
-    pub fn period(&self, rock: RockId) -> u64 {
-        let seconds = self.state[rock].orbit().period(self.state.gravity());
+    pub fn period(&self, asteroid: AsteroidId) -> u64 {
+        let seconds = self.state[asteroid].orbit().period(self.state.gravity());
         (seconds * f64::from(TICKS_PER_SECOND)) as u64
     }
 
@@ -149,32 +149,38 @@ impl World {
         outcome.rejected.first().map(|(_, why)| *why)
     }
 
-    pub fn fix(&mut self, seat: u8, row: RowId, rock: RockId) -> EntityId {
-        self.state.spawn(SeatId(seat), row, rock, Motion::Fixed)
+    pub fn fix(&mut self, seat: u8, row: RowId, asteroid: AsteroidId) -> EntityId {
+        self.state.spawn(SeatId(seat), row, asteroid, Motion::Fixed)
     }
 
-    pub fn hold(&mut self, seat: u8, row: RowId, rock: RockId, out_meters: f64) -> EntityId {
-        let body = self.state.rock_body(rock);
+    pub fn hold(
+        &mut self,
+        seat: u8,
+        row: RowId,
+        asteroid: AsteroidId,
+        out_meters: f64,
+    ) -> EntityId {
+        let body = self.state.asteroid_body(asteroid);
         let radial = body.pos.normalized().expect("a radius");
         self.free(
             seat,
             row,
-            rock,
+            asteroid,
             Body::new(body.pos + radial * out_meters, body.vel),
         )
     }
 
-    pub fn free(&mut self, seat: u8, row: RowId, rock: RockId, body: Body) -> EntityId {
+    pub fn free(&mut self, seat: u8, row: RowId, asteroid: AsteroidId, body: Body) -> EntityId {
         self.state.spawn(
             SeatId(seat),
             row,
-            rock,
+            asteroid,
             Motion::Steered { body, flight: None },
         )
     }
 
-    pub fn launch(&mut self, entity: EntityId, from: RockId, out_meters: f64, flight: Flight) {
-        let body = self.state.rock_body(from);
+    pub fn launch(&mut self, entity: EntityId, from: AsteroidId, out_meters: f64, flight: Flight) {
+        let body = self.state.asteroid_body(from);
         let radial = body.pos.normalized().expect("a radius");
         self.state.set_motion(
             entity,
@@ -185,20 +191,20 @@ impl World {
         );
     }
 
-    pub fn count(&self, seat: u8, rock: RockId, row: RowId) -> u32 {
-        self.state.count(Post::of(seat, rock), row)
+    pub fn count(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> u32 {
+        self.state.count(Post::of(seat, asteroid), row)
     }
 
-    pub fn progress(&self, seat: u8, rock: RockId) -> f64 {
+    pub fn progress(&self, seat: u8, asteroid: AsteroidId) -> f64 {
         self.state
-            .frames_at(Post::of(seat, rock))
+            .frames_at(Post::of(seat, asteroid))
             .map(|frame| frame.progress())
             .sum()
     }
 
-    pub fn frames(&self, seat: u8, rock: RockId, row: RowId) -> usize {
+    pub fn frames(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> usize {
         self.state
-            .frames_at(Post::of(seat, rock))
+            .frames_at(Post::of(seat, asteroid))
             .filter(|frame| frame.row() == row)
             .count()
     }
@@ -207,10 +213,10 @@ impl World {
         self.state.body_of(&self.state[entity])
     }
 
-    pub fn off_rock(&self, entity: EntityId, rock: RockId) -> f64 {
+    pub fn off_asteroid(&self, entity: EntityId, asteroid: AsteroidId) -> f64 {
         self.body(entity)
             .pos
-            .distance(self.state.rock_body(rock).pos)
+            .distance(self.state.asteroid_body(asteroid).pos)
     }
 
     pub fn shots(&self) -> Shots {
@@ -258,32 +264,42 @@ impl Batch {
 }
 
 impl Issued {
-    pub(crate) fn want(seat: u8, rock: RockId, row: RowId, count: u32) -> Issued {
-        Issued::numbered(seat, 0, rock, row, count)
+    pub(crate) fn want(seat: u8, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
+        Issued::numbered(seat, 0, asteroid, row, count)
     }
 
-    pub(crate) fn numbered(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
+    pub(crate) fn numbered(
+        seat: u8,
+        seq: u32,
+        asteroid: AsteroidId,
+        row: RowId,
+        count: u32,
+    ) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
-            command: Command::Want { rock, row, count },
+            command: Command::Want {
+                asteroid,
+                row,
+                count,
+            },
         }
     }
 }
 
 impl Post {
-    pub(crate) fn of(seat: u8, rock: RockId) -> Post {
+    pub(crate) fn of(seat: u8, asteroid: AsteroidId) -> Post {
         Post {
-            rock,
+            asteroid,
             seat: SeatId(seat),
         }
     }
 }
 
-fn ringed(at: usize, gravity: Gravity) -> Rock {
+fn ringed(at: usize, gravity: Gravity) -> Asteroid {
     let radius = RING_RADIUS_METERS + RING_SPACING_METERS * at as f64;
     let speed = (gravity.mu() / radius).sqrt();
     let body = Body::new(Vec3::new(radius, 0.0, 0.0), Vec3::new(0.0, 0.0, -speed));
     let orbit = Orbit::from_body(body, Time::ZERO, gravity).expect("a circular orbit");
-    Rock::new(orbit, RING_CAPS, ROCK_RADIUS_METERS)
+    Asteroid::new(orbit, RING_CAPS, ASTEROID_RADIUS_METERS)
 }

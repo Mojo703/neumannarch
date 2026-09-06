@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use super::State;
 use super::seat::Seat;
 use crate::belt::Belt;
-use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
+use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
@@ -16,8 +16,8 @@ use crate::time::{Tick, Time};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Berth {
-    Standing(RockId),
-    Flying { from: RockId },
+    Standing(AsteroidId),
+    Flying { from: AsteroidId },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,13 +27,13 @@ pub struct Present {
     pub seat: SeatId,
     pub body: Body,
     pub hp: f64,
-    pub home: RockId,
+    pub home: AsteroidId,
     pub at: Berth,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Terrain {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub orbit: Orbit,
     pub caps: Materials,
     pub radius: f64,
@@ -48,7 +48,7 @@ pub struct Building {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composition {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub seat: SeatId,
     pub builder: bool,
     pub rows: BTreeMap<RowId, Held>,
@@ -56,7 +56,7 @@ pub struct Composition {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plan {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub row: RowId,
     pub want: u32,
     pub building: Option<Building>,
@@ -120,19 +120,19 @@ impl View {
         }
     }
 
-    pub fn terrain_of(&self, id: RockId) -> Option<&Terrain> {
+    pub fn terrain_of(&self, id: AsteroidId) -> Option<&Terrain> {
         self.terrain.get(id.0 as usize)
     }
 
-    pub fn rock_body(&self, id: RockId) -> Option<Body> {
+    pub fn asteroid_body(&self, id: AsteroidId) -> Option<Body> {
         self.terrain_of(id)
             .map(|terrain| terrain.orbit.at(self.time, self.gravity))
     }
 
-    pub fn plan_of(&self, rock: RockId, row: RowId) -> Option<&Plan> {
+    pub fn plan_of(&self, asteroid: AsteroidId, row: RowId) -> Option<&Plan> {
         self.plans
             .iter()
-            .find(|plan| plan.rock == rock && plan.row == row)
+            .find(|plan| plan.asteroid == asteroid && plan.row == row)
     }
 }
 
@@ -147,14 +147,14 @@ impl Berth {
         }
     }
 
-    pub fn standing(self) -> Option<RockId> {
+    pub fn standing(self) -> Option<AsteroidId> {
         match self {
-            Berth::Standing(rock) => Some(rock),
+            Berth::Standing(asteroid) => Some(asteroid),
             Berth::Flying { .. } => None,
         }
     }
 
-    pub fn flying_from(self) -> Option<RockId> {
+    pub fn flying_from(self) -> Option<AsteroidId> {
         match self {
             Berth::Standing(_) => None,
             Berth::Flying { from } => Some(from),
@@ -163,35 +163,35 @@ impl Berth {
 }
 
 fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
-    let mut rows: BTreeMap<(RockId, SeatId), BTreeMap<RowId, Held>> = BTreeMap::new();
-    for ((rock, at, row), held) in state.holdings() {
-        rows.entry((rock, at)).or_default().insert(row, held);
+    let mut rows: BTreeMap<(AsteroidId, SeatId), BTreeMap<RowId, Held>> = BTreeMap::new();
+    for ((asteroid, at, row), held) in state.holdings() {
+        rows.entry((asteroid, at)).or_default().insert(row, held);
     }
     for (post, _) in state.posts().filter(|(post, _)| post.seat == seat) {
-        rows.entry((post.rock, post.seat)).or_default();
+        rows.entry((post.asteroid, post.seat)).or_default();
     }
     rows.into_iter()
-        .map(|((rock, at), rows)| Composition {
-            rock,
+        .map(|((asteroid, at), rows)| Composition {
+            asteroid,
             seat: at,
-            builder: builds_at(state, rock, at),
+            builder: builds_at(state, asteroid, at),
             rows,
         })
         .collect()
 }
 
-fn builds_at(state: &State, rock: RockId, seat: SeatId) -> bool {
+fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
     state
-        .standing_at(rock)
+        .standing_at(asteroid)
         .filter(|entity| entity.seat() == seat && entity.flight().is_none())
         .any(|entity| state[entity.row()].builds().next().is_some())
 }
 
 fn plans(state: &State, seat: SeatId) -> Vec<Plan> {
-    let mut plans: BTreeMap<(RockId, RowId), Plan> = BTreeMap::new();
+    let mut plans: BTreeMap<(AsteroidId, RowId), Plan> = BTreeMap::new();
     for (post, wants) in state.posts().filter(|(post, _)| post.seat == seat) {
         for (row, want) in wants.iter() {
-            planned(&mut plans, post.rock, row).want = want;
+            planned(&mut plans, post.asteroid, row).want = want;
         }
     }
     for frame in state
@@ -200,14 +200,18 @@ fn plans(state: &State, seat: SeatId) -> Vec<Plan> {
         .filter(|frame| frame.post().seat == seat)
     {
         let post = frame.post();
-        planned(&mut plans, post.rock, frame.row()).building = Some(building(state, frame));
+        planned(&mut plans, post.asteroid, frame.row()).building = Some(building(state, frame));
     }
     plans.into_values().collect()
 }
 
-fn planned(plans: &mut BTreeMap<(RockId, RowId), Plan>, rock: RockId, row: RowId) -> &mut Plan {
-    plans.entry((rock, row)).or_insert(Plan {
-        rock,
+fn planned(
+    plans: &mut BTreeMap<(AsteroidId, RowId), Plan>,
+    asteroid: AsteroidId,
+    row: RowId,
+) -> &mut Plan {
+    plans.entry((asteroid, row)).or_insert(Plan {
+        asteroid,
         row,
         want: 0,
         building: None,
@@ -238,13 +242,13 @@ fn present(state: &State) -> Vec<Present> {
 
 fn terrain(state: &State) -> Vec<Terrain> {
     state
-        .rocks()
-        .map(|(id, rock)| Terrain {
-            rock: id,
-            orbit: *rock.orbit(),
-            caps: rock.caps(),
-            radius: rock.radius(),
-            pull: rock.pull(),
+        .asteroids()
+        .map(|(id, asteroid)| Terrain {
+            asteroid: id,
+            orbit: *asteroid.orbit(),
+            caps: asteroid.caps(),
+            radius: asteroid.radius(),
+            pull: asteroid.pull(),
         })
         .collect()
 }
@@ -260,9 +264,9 @@ mod tests {
     };
     use crate::state::{Issued, Send};
 
-    const ROCK: RockId = RockId(0);
+    const ASTEROID: AsteroidId = AsteroidId(0);
 
-    const AWAY: RockId = RockId(1);
+    const AWAY: AsteroidId = AsteroidId(1);
 
     const SECOND: u64 = TICKS_PER_SECOND as u64;
 
@@ -275,18 +279,24 @@ mod tests {
     }
 
     fn pulled(world: &World, seat: u8) -> Materials {
-        world.view(seat).terrain_of(ROCK).expect("every view").pull
+        world
+            .view(seat)
+            .terrain_of(ASTEROID)
+            .expect("every view")
+            .pull
     }
 
-    fn holding(view: &View, rock: RockId, seat: u8, row: RowId) -> Held {
+    fn holding(view: &View, asteroid: AsteroidId, seat: u8, row: RowId) -> Held {
         view.compositions
             .iter()
-            .find(|composition| composition.rock == rock && composition.seat == SeatId(seat))
+            .find(|composition| {
+                composition.asteroid == asteroid && composition.seat == SeatId(seat)
+            })
             .and_then(|composition| composition.rows.get(&row).copied())
             .unwrap_or_default()
     }
 
-    fn sent(seat: u8, from: RockId, to: RockId, row: RowId) -> [Issued; 2] {
+    fn sent(seat: u8, from: AsteroidId, to: AsteroidId, row: RowId) -> [Issued; 2] {
         [
             Issued::numbered(seat, 0, from, row, 0),
             Issued::numbered(seat, 1, to, row, 1),
@@ -296,97 +306,99 @@ mod tests {
     #[test]
     fn a_view_carries_every_seats_holdings_and_only_its_own_plans() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ROCK);
+        world.fix(0, SHIPYARD, ASTEROID);
         world.fix(1, STORAGE, AWAY);
         world.tick(&[
-            Issued::want(0, ROCK, FRIGATE, 2),
+            Issued::want(0, ASTEROID, FRIGATE, 2),
             Issued::want(1, AWAY, FRIGATE, 3),
         ]);
 
         let view = world.view(0);
 
-        assert_eq!(holding(&view, ROCK, 0, SHIPYARD).present, 1);
+        assert_eq!(holding(&view, ASTEROID, 0, SHIPYARD).present, 1);
         assert_eq!(
             holding(&view, AWAY, 1, STORAGE).present,
             1,
             "another seat's holdings are visible"
         );
         assert_eq!(
-            view.plan_of(ROCK, FRIGATE).map(|plan| plan.want),
+            view.plan_of(ASTEROID, FRIGATE).map(|plan| plan.want),
             Some(2),
             "the viewer's own want is in the view"
         );
         assert!(
-            view.plans.iter().all(|plan| plan.rock == ROCK),
+            view.plans.iter().all(|plan| plan.asteroid == ASTEROID),
             "another seat's wants are its own to see"
         );
         assert_eq!(view.reserve[&SHIPYARD], 1);
     }
 
     #[test]
-    fn a_composition_says_whether_a_builder_of_its_seat_stands_at_the_rock() {
+    fn a_composition_says_whether_a_builder_of_its_seat_stands_at_the_asteroid() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ROCK);
+        world.fix(0, SHIPYARD, ASTEROID);
         world.fix(0, STORAGE, AWAY);
         world.tick(&[]);
 
         let view = world.view(0);
-        let builder = |rock: RockId| {
+        let builder = |asteroid: AsteroidId| {
             view.compositions
                 .iter()
-                .find(|composition| composition.rock == rock && composition.seat == SeatId(0))
+                .find(|composition| {
+                    composition.asteroid == asteroid && composition.seat == SeatId(0)
+                })
                 .map(|composition| composition.builder)
         };
 
-        assert_eq!(builder(ROCK), Some(true), "a shipyard builds");
+        assert_eq!(builder(ASTEROID), Some(true), "a shipyard builds");
         assert_eq!(builder(AWAY), Some(false), "a storage does not");
     }
 
     #[test]
     fn a_forming_send_is_leaving_its_source_and_arriving_at_its_destination() {
         let mut world = world();
-        world.hold(0, FRIGATE, ROCK, 0.0);
-        world.tick(&sent(0, ROCK, AWAY, FRIGATE));
+        world.hold(0, FRIGATE, ASTEROID, 0.0);
+        world.tick(&sent(0, ASTEROID, AWAY, FRIGATE));
 
         let view = world.view(0);
 
-        let source = holding(&view, ROCK, 0, FRIGATE);
-        assert_eq!(source.leaving, 1, "it stands at the rock it is leaving");
+        let source = holding(&view, ASTEROID, 0, FRIGATE);
+        assert_eq!(source.leaving, 1, "it stands at the asteroid it is leaving");
         assert_eq!(source.present, 0, "and is no longer counted as held there");
         assert_eq!(holding(&view, AWAY, 0, FRIGATE).arriving, 1);
-        assert_eq!(view.present[0].at, Berth::Standing(ROCK));
+        assert_eq!(view.present[0].at, Berth::Standing(ASTEROID));
     }
 
     #[test]
     fn a_flying_send_leaves_its_source_holding_nothing() {
         let mut world = world();
-        world.hold(0, FRIGATE, ROCK, 0.0);
-        world.tick(&sent(0, ROCK, AWAY, FRIGATE));
+        world.hold(0, FRIGATE, ASTEROID, 0.0);
+        world.tick(&sent(0, ASTEROID, AWAY, FRIGATE));
         world.run(Send::FORMING_TICKS + 1);
 
         let view = world.view(0);
 
-        assert_eq!(holding(&view, ROCK, 0, FRIGATE), Held::default());
+        assert_eq!(holding(&view, ASTEROID, 0, FRIGATE), Held::default());
         assert_eq!(holding(&view, AWAY, 0, FRIGATE).arriving, 1);
-        assert_eq!(view.present[0].at, Berth::Flying { from: ROCK });
+        assert_eq!(view.present[0].at, Berth::Flying { from: ASTEROID });
         assert_eq!(view.present[0].home, AWAY);
     }
 
     #[test]
     fn a_plan_carries_the_one_frame_its_row_is_building() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ROCK);
-        world.tick(&[Issued::want(0, ROCK, FRIGATE, 3)]);
+        world.fix(0, SHIPYARD, ASTEROID);
+        world.tick(&[Issued::want(0, ASTEROID, FRIGATE, 3)]);
         world.run(60);
 
         let plan = world
             .view(0)
-            .plan_of(ROCK, FRIGATE)
+            .plan_of(ASTEROID, FRIGATE)
             .copied()
             .expect("the frigate is wanted");
 
         assert_eq!(plan.want, 3);
-        assert_eq!(world.frames(0, ROCK, FRIGATE), 1, "one frame at a time");
+        assert_eq!(world.frames(0, ASTEROID, FRIGATE), 1, "one frame at a time");
         let building = plan.building.expect("the shipyard is building one");
         assert!(building.progress > 0.0 && building.progress < 1.0);
     }
@@ -394,9 +406,9 @@ mod tests {
     #[test]
     fn every_seat_holds_every_entity_of_the_match() {
         let mut world = world();
-        let mine = world.fix(0, SHIPYARD, ROCK);
-        let near = world.fix(1, STORAGE, ROCK);
-        let far = world.fix(1, STORAGE, RockId(9));
+        let mine = world.fix(0, SHIPYARD, ASTEROID);
+        let near = world.fix(1, STORAGE, ASTEROID);
+        let far = world.fix(1, STORAGE, AsteroidId(9));
 
         for seat in [0, 1, 9] {
             let held: Vec<EntityId> = world.view(seat).present.iter().map(|it| it.id).collect();
@@ -405,21 +417,21 @@ mod tests {
         let theirs = world.present(0, far).expect("an enemy a belt away");
         assert_eq!(theirs.seat, SeatId(1));
         assert_eq!(theirs.row, STORAGE);
-        assert_eq!(theirs.home, RockId(9));
+        assert_eq!(theirs.home, AsteroidId(9));
         assert_eq!(theirs.hp, world.state[STORAGE].hp.0);
-        assert_eq!(theirs.body, world.state.rock_body(RockId(9)));
-        assert_eq!(theirs.at, Berth::Standing(RockId(9)));
+        assert_eq!(theirs.body, world.state.asteroid_body(AsteroidId(9)));
+        assert_eq!(theirs.at, Berth::Standing(AsteroidId(9)));
     }
 
     #[test]
-    fn a_flying_unit_names_the_rock_it_left_and_the_one_it_flies_to() {
+    fn a_flying_unit_names_the_asteroid_it_left_and_the_one_it_flies_to() {
         let mut world = world();
-        let mine = world.hold(0, FRIGATE, ROCK, 0.0);
-        let theirs = world.hold(1, FRIGATE, ROCK, 0.0);
+        let mine = world.hold(0, FRIGATE, ASTEROID, 0.0);
+        let theirs = world.hold(1, FRIGATE, ASTEROID, 0.0);
         world.tick(&[
-            Issued::numbered(0, 0, ROCK, FRIGATE, 0),
+            Issued::numbered(0, 0, ASTEROID, FRIGATE, 0),
             Issued::numbered(0, 1, AWAY, FRIGATE, 1),
-            Issued::numbered(1, 0, ROCK, FRIGATE, 0),
+            Issued::numbered(1, 0, ASTEROID, FRIGATE, 0),
             Issued::numbered(1, 1, AWAY, FRIGATE, 1),
         ]);
         world.run(Send::FORMING_TICKS + 1);
@@ -427,23 +439,27 @@ mod tests {
         for unit in [mine, theirs] {
             let flier = world.present(0, unit).expect("both fliers are in the view");
             assert_eq!(flier.home, AWAY, "a send names where to");
-            assert_eq!(flier.at, Berth::Flying { from: ROCK });
+            assert_eq!(flier.at, Berth::Flying { from: ASTEROID });
             assert_eq!(flier.at.standing(), None);
-            assert_eq!(flier.at.flying_from(), Some(ROCK));
+            assert_eq!(flier.at.flying_from(), Some(ASTEROID));
         }
     }
 
     #[test]
     fn the_standings_are_in_every_view_and_say_whether_the_clock_has_run() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ROCK);
+        world.fix(0, SHIPYARD, ASTEROID);
 
         let standings = world.view(1).standings;
 
         assert!(!standings.over());
         assert_eq!(standings.teams().len(), 2);
-        assert_eq!(standings.teams()[0].rocks, 1, "team zero holds one rock");
-        assert_eq!(standings.teams()[1].rocks, 0);
+        assert_eq!(
+            standings.teams()[0].asteroids,
+            1,
+            "team zero holds one asteroid"
+        );
+        assert_eq!(standings.teams()[1].asteroids, 0);
 
         let ended = World::timed(&[TeamId(0), TeamId(1)], Time::ZERO);
 
@@ -453,7 +469,7 @@ mod tests {
     #[test]
     fn a_seat_the_match_lacks_holds_no_composition_of_its_own() {
         let mut world = world();
-        world.fix(0, CONSTRUCTOR, ROCK);
+        world.fix(0, CONSTRUCTOR, ASTEROID);
 
         let view = world.view(9);
 
@@ -475,31 +491,34 @@ mod tests {
         let view = world.view(0);
 
         assert_eq!(view.gravity, world.state.gravity());
-        let rock = view.terrain[3];
+        let asteroid = view.terrain[3];
         assert_eq!(
-            rock.orbit.at(view.time, view.gravity),
-            world.state.rock_body(rock.rock)
+            asteroid.orbit.at(view.time, view.gravity),
+            world.state.asteroid_body(asteroid.asteroid)
         );
     }
 
     #[test]
-    fn a_view_reads_a_rock_by_id() {
+    fn a_view_reads_a_asteroid_by_id() {
         let world = world();
-        let at = RockId(4);
+        let at = AsteroidId(4);
 
         let view = world.view(0);
 
-        assert_eq!(view.terrain_of(at).map(|rock| rock.rock), Some(at));
-        assert_eq!(view.rock_body(at), Some(world.state.rock_body(at)));
-        assert_eq!(view.terrain_of(RockId(99)), None);
-        assert_eq!(view.rock_body(RockId(99)), None);
+        assert_eq!(
+            view.terrain_of(at).map(|asteroid| asteroid.asteroid),
+            Some(at)
+        );
+        assert_eq!(view.asteroid_body(at), Some(world.state.asteroid_body(at)));
+        assert_eq!(view.terrain_of(AsteroidId(99)), None);
+        assert_eq!(view.asteroid_body(AsteroidId(99)), None);
     }
 
     #[test]
     fn a_seats_income_is_what_its_extractors_pulled_whether_the_store_kept_it_or_not() {
         let mut world = world();
-        world.fix(0, METALS_EXTRACTOR, ROCK);
-        world.fix(0, VOLATILES_EXTRACTOR, ROCK);
+        world.fix(0, METALS_EXTRACTOR, ASTEROID);
+        world.fix(0, VOLATILES_EXTRACTOR, ASTEROID);
         let full = world.view(0).stockpile.stock();
         world.run(SECOND);
 
@@ -512,7 +531,7 @@ mod tests {
         );
         assert_eq!(world.view(1).income, Materials::ZERO, "its own extractors");
 
-        world.fix(0, STORAGE, ROCK);
+        world.fix(0, STORAGE, ASTEROID);
         world.run(SECOND);
         let before = world.view(0).stockpile.stock();
         world.run(SECOND);
@@ -532,9 +551,9 @@ mod tests {
     #[test]
     fn a_seats_spend_over_the_last_second_is_what_its_frames_drained() {
         let mut world = world();
-        world.fix(0, CONSTRUCTOR, ROCK);
+        world.fix(0, CONSTRUCTOR, ASTEROID);
         let before = world.view(0).stockpile.stock();
-        world.tick(&[Issued::want(0, ROCK, FRIGATE, 1)]);
+        world.tick(&[Issued::want(0, ASTEROID, FRIGATE, 1)]);
         world.run(SECOND - 1);
 
         let view = world.view(0);
@@ -544,25 +563,29 @@ mod tests {
     }
 
     #[test]
-    fn a_rocks_pull_over_the_last_second_sums_every_seat_and_stays_inside_its_cap() {
+    fn a_asteroids_pull_over_the_last_second_sums_every_seat_and_stays_inside_its_cap() {
         let mut world = world();
         for seat in [0, 1] {
-            world.fix(seat, METALS_EXTRACTOR, ROCK);
-            world.fix(seat, VOLATILES_EXTRACTOR, ROCK);
+            world.fix(seat, METALS_EXTRACTOR, ASTEROID);
+            world.fix(seat, VOLATILES_EXTRACTOR, ASTEROID);
         }
         world.run(SECOND);
 
         let pull = pulled(&world, 1);
 
         assert!(close(pull, Materials::new(4.0, 1.0, 0.0)), "{pull:?}");
-        assert_eq!(pull.min(world.state[ROCK].caps()), pull, "inside the caps");
+        assert_eq!(
+            pull.min(world.state[ASTEROID].caps()),
+            pull,
+            "inside the caps"
+        );
         assert_eq!(pull, pulled(&world, 0), "a pull is visible to every seat");
     }
 
     #[test]
     fn the_view_reports_the_last_completed_second_and_holds_it_until_the_next_closes() {
         let mut world = world();
-        world.fix(0, METALS_EXTRACTOR, ROCK);
+        world.fix(0, METALS_EXTRACTOR, ASTEROID);
 
         assert_eq!(world.view(0).income, Materials::ZERO, "none completed");
         world.run(SECOND - 1);
@@ -574,14 +597,14 @@ mod tests {
 
         assert!(first.total() > 0.0);
         assert_eq!(world.view(0).income, first, "it stands to the next");
-        assert_eq!(pulled(&world, 0), first, "the rock's pull with it");
+        assert_eq!(pulled(&world, 0), first, "the asteroid's pull with it");
     }
 
     #[test]
-    fn an_exchange_names_the_rock_the_shooter_fired_from_and_the_target_was_hit_at() {
+    fn an_exchange_names_the_asteroid_the_shooter_fired_from_and_the_target_was_hit_at() {
         let mut world = world();
-        let shooter = world.hold(0, FRIGATE, ROCK, 0.0);
-        let target = world.fix(1, STORAGE, ROCK);
+        let shooter = world.hold(0, FRIGATE, ASTEROID, 0.0);
+        let target = world.fix(1, STORAGE, ASTEROID);
         let shots = world.shots();
         assert!(
             shots
@@ -597,13 +620,13 @@ mod tests {
             view.exchanges,
             vec![
                 Exchange {
-                    rock: ROCK,
+                    asteroid: ASTEROID,
                     seat: SeatId(0),
                     fired: true,
                     landed: false,
                 },
                 Exchange {
-                    rock: ROCK,
+                    asteroid: ASTEROID,
                     seat: SeatId(1),
                     fired: false,
                     landed: true,

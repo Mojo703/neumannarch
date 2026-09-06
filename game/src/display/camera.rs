@@ -253,10 +253,10 @@ mod tests {
     }
 
     #[test]
-    fn the_widest_zoom_shows_two_rocks_of_the_shipped_belt() {
-        let rocks = neumannarch_sim::belt::Belt::fixed(neumannarch_sim::belt::Belt::GRAVITY);
+    fn the_widest_zoom_shows_two_asteroids_of_the_shipped_belt() {
+        let asteroids = neumannarch_sim::belt::Belt::fixed(neumannarch_sim::belt::Belt::GRAVITY);
         let body = |at: usize| {
-            rocks[at].orbit().at(
+            asteroids[at].orbit().at(
                 neumannarch_sim::Time::ZERO,
                 neumannarch_sim::belt::Belt::GRAVITY,
             )

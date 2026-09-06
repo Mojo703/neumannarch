@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{EntityId, RockId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::post::Post;
 use crate::roster::Kind;
 use crate::state::{Entity, Send, State};
@@ -41,7 +41,7 @@ pub struct Fulfilment<'a> {
 #[derive(Clone, Copy, Debug)]
 struct Surplus {
     entity: EntityId,
-    rock: RockId,
+    asteroid: AsteroidId,
 }
 
 impl<'a> Fulfilment<'a> {
@@ -54,7 +54,7 @@ impl<'a> Fulfilment<'a> {
                     .or_default()
                     .extend(over.into_iter().map(|entity| Surplus {
                         entity,
-                        rock: post.rock,
+                        asteroid: post.asteroid,
                     }));
             }
         }
@@ -64,7 +64,7 @@ impl<'a> Fulfilment<'a> {
     pub fn run(mut self) -> Assigned {
         let mut assigned = Assigned::default();
         let mut reserved: BTreeMap<(SeatId, RowId), u32> = BTreeMap::new();
-        let mut moving: BTreeMap<(RockId, RockId, SeatId), Vec<EntityId>> = BTreeMap::new();
+        let mut moving: BTreeMap<(AsteroidId, AsteroidId, SeatId), Vec<EntityId>> = BTreeMap::new();
         let mut missing: Vec<(Post, RowId, u32)> = Vec::new();
         for (post, row, shortfall) in shortfalls(self.state) {
             let from_reserve = self.take_reserved(post, row, shortfall, &mut reserved);
@@ -74,7 +74,7 @@ impl<'a> Fulfilment<'a> {
             let mut taking = 0;
             for surplus in self.nearest_surplus(post, row, shortfall - from_reserve) {
                 moving
-                    .entry((surplus.rock, post.rock, post.seat))
+                    .entry((surplus.asteroid, post.asteroid, post.seat))
                     .or_default()
                     .push(surplus.entity);
                 taking += 1;
@@ -112,20 +112,20 @@ impl<'a> Fulfilment<'a> {
         let Some(surplus) = self.surplus.get_mut(&(post.seat, row)) else {
             return taking;
         };
-        let here = self.state.rock_body(post.rock).pos;
+        let here = self.state.asteroid_body(post.asteroid).pos;
         while taking.len() < wanted as usize {
             let nearest = surplus
                 .iter()
                 .enumerate()
-                .filter(|(_, surplus)| surplus.rock != post.rock)
+                .filter(|(_, surplus)| surplus.asteroid != post.asteroid)
                 .min_by(|(_, a), (_, b)| {
                     let (first, second) = (
-                        self.state.rock_body(a.rock).pos.distance(here),
-                        self.state.rock_body(b.rock).pos.distance(here),
+                        self.state.asteroid_body(a.asteroid).pos.distance(here),
+                        self.state.asteroid_body(b.asteroid).pos.distance(here),
                     );
                     first
                         .total_cmp(&second)
-                        .then(a.rock.cmp(&b.rock))
+                        .then(a.asteroid.cmp(&b.asteroid))
                         .then(b.entity.cmp(&a.entity))
                 })
                 .map(|(at, _)| at);
@@ -168,7 +168,7 @@ impl<'a> Fulfilment<'a> {
         for send in sends {
             for entity in send.members.iter().filter_map(|id| self.state.entity(*id)) {
                 let post = Post {
-                    rock: send.source,
+                    asteroid: send.source,
                     seat: entity.seat(),
                 };
                 *gone.entry((post, entity.row())).or_default() += 1;
@@ -180,7 +180,7 @@ impl<'a> Fulfilment<'a> {
     fn solve(
         &self,
         assigned: &mut Assigned,
-        moving: BTreeMap<(RockId, RockId, SeatId), Vec<EntityId>>,
+        moving: BTreeMap<(AsteroidId, AsteroidId, SeatId), Vec<EntityId>>,
     ) -> BTreeMap<(Post, RowId), u32> {
         let mut held_back: BTreeMap<(Post, RowId), u32> = BTreeMap::new();
         for ((source, destination, seat), mut members) in moving {
@@ -192,7 +192,7 @@ impl<'a> Fulfilment<'a> {
                         *held_back
                             .entry((
                                 Post {
-                                    rock: destination,
+                                    asteroid: destination,
                                     seat,
                                 },
                                 entity.row(),
@@ -227,7 +227,7 @@ fn surpluses(state: &State) -> Vec<(Post, RowId, Vec<EntityId>)> {
             .map_or(0, |wants| wants.get(row))
             .saturating_sub(state.frames_of(post, row).count() as u32);
         let mut held: Vec<EntityId> = state
-            .entities_at(post.rock)
+            .entities_at(post.asteroid)
             .filter(|entity| entity.seat() == post.seat && entity.row() == row)
             .filter(|entity| entity.flight().is_none())
             .map(Entity::id)
@@ -248,7 +248,7 @@ fn held_rows(state: &State) -> Vec<(Post, RowId)> {
         .map(|entity| {
             (
                 Post {
-                    rock: entity.home(),
+                    asteroid: entity.home(),
                     seat: entity.seat(),
                 },
                 entity.row(),

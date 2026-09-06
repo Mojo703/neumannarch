@@ -11,8 +11,8 @@ use neumannarch_game::display::glyph;
 use neumannarch_game::display::glyph::Glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
-    Arc, Client, EntityView, Entry, FlightLine, Hover, RockView, RowView, Scene, SectorView, Shown,
-    StripView, WheelBand, WheelView,
+    Arc, AsteroidView, Client, EntityView, Entry, FlightLine, Hover, RowView, Scene, SectorView,
+    Shown, StripView, WheelBand, WheelView,
 };
 use neumannarch_game::display::strip::Strip;
 use neumannarch_game::display::viewport::Viewport;
@@ -31,7 +31,8 @@ use neumannarch_sim::state::view::{Building, View};
 use neumannarch_sim::state::{Command, Draft, STAGE_SPAN};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    Material, Materials, Retention, RockId, RowId, SeatId, Sequence, Stockpile, Tick, Time, Vec3,
+    AsteroidId, Material, Materials, Retention, RowId, SeatId, Sequence, Stockpile, Tick, Time,
+    Vec3,
 };
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
@@ -42,9 +43,9 @@ const ZONE: f64 = neumannarch_sim::belt::Belt::ZONE_RADIUS_METERS;
 
 const YOU: SeatId = SeatId(0);
 
-const TAKEN: RockId = RockId(0);
+const TAKEN: AsteroidId = AsteroidId(0);
 
-const BARE: RockId = RockId(1);
+const BARE: AsteroidId = AsteroidId(1);
 
 const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
 
@@ -77,7 +78,7 @@ struct Drafting {
     draft: Draft,
     tick: Tick,
     names: Vec<String>,
-    band: (RockId, RowId),
+    band: (AsteroidId, RowId),
 }
 
 struct Looker {
@@ -128,10 +129,10 @@ impl Game for Looker {
             )
         });
         let note = self.drafting.as_ref().and_then(|drafting| {
-            let (rock, row) = drafting.band;
+            let (asteroid, row) = drafting.band;
             let at = wheels
                 .iter()
-                .find(|wheel| wheel.rock() == rock)?
+                .find(|wheel| wheel.asteroid() == asteroid)?
                 .band(row, WheelBand::Plus(1))?;
             let (beside, spoken) = wheels.spoken_at(at)?;
             Some((
@@ -167,7 +168,7 @@ fn aim<'a>(scene: &Scene, drafting: Option<&'a Drafting>) -> Aim<'a> {
         pointer: None,
         hovered: None,
         step: 1,
-        wants: [((RockId(0), FRIGATE), 1), ((RockId(0), RAIDER), 1)]
+        wants: [((AsteroidId(0), FRIGATE), 1), ((AsteroidId(0), RAIDER), 1)]
             .into_iter()
             .collect(),
         draft: drafting.map(|drafting| &drafting.draft),
@@ -200,9 +201,9 @@ fn save(path: &Path, pixels: &[u8]) {
         .expect("the PNG writes");
 }
 
-fn rock(id: u32, pos: Vec3, radius: f64) -> RockView {
-    RockView {
-        id: RockId(id),
+fn asteroid(id: u32, pos: Vec3, radius: f64) -> AsteroidView {
+    AsteroidView {
+        id: AsteroidId(id),
         pos,
         radius,
         caps: caps_of(id),
@@ -260,9 +261,9 @@ fn sector(seat: u8, rows: Vec<RowView>, arc: Option<Arc>) -> SectorView {
     }
 }
 
-fn wheel(rock: u32, sectors: Vec<SectorView>) -> WheelView {
+fn wheel(asteroid: u32, sectors: Vec<SectorView>) -> WheelView {
     WheelView {
-        rock: RockId(rock),
+        asteroid: AsteroidId(asteroid),
         sectors,
     }
 }
@@ -276,10 +277,10 @@ fn arc(seat: u8, fraction: f32, trailing: f32) -> Option<Arc> {
 }
 
 fn region_scene() -> Scene {
-    let rocks = vec![
-        rock(0, Vec3::new(0.0, 0.0, 0.0), 6.0),
-        rock(1, Vec3::new(320.0, 0.0, -110.0), 5.0),
-        rock(2, Vec3::new(-280.0, 0.0, 220.0), 4.0),
+    let asteroids = vec![
+        asteroid(0, Vec3::new(0.0, 0.0, 0.0), 6.0),
+        asteroid(1, Vec3::new(320.0, 0.0, -110.0), 5.0),
+        asteroid(2, Vec3::new(-280.0, 0.0, 220.0), 4.0),
     ];
 
     let entities = vec![
@@ -346,7 +347,7 @@ fn region_scene() -> Scene {
                     RAIDER,
                     vec![Entry::Arriving {
                         count: 1,
-                        from: RockId(0),
+                        from: AsteroidId(0),
                     }],
                 )],
                 None,
@@ -355,19 +356,19 @@ fn region_scene() -> Scene {
     ];
 
     Scene {
-        rocks,
+        asteroids,
         entities,
         wheels,
         flights: vec![FlightLine {
             from: Vec3::new(-90.0, 0.0, 80.0),
-            to: RockId(2),
+            to: AsteroidId(2),
         }],
         strip: None,
         zone: ZONE,
         seat: SeatId(0),
-        selection: Some(RockId(0)),
+        selection: Some(AsteroidId(0)),
         hover: Some(Hover::Wheel {
-            rock: RockId(0),
+            asteroid: AsteroidId(0),
             row: RAIDER,
             band: WheelBand::Plus(1),
         }),
@@ -379,7 +380,7 @@ fn region_camera() -> BeltCamera {
 }
 
 fn fight_scene() -> Scene {
-    let rocks = vec![rock(0, Vec3::ZERO, 6.0)];
+    let asteroids = vec![asteroid(0, Vec3::ZERO, 6.0)];
 
     let entities = vec![
         ship(0, FRIGATE, Vec3::new(5.0, 0.0, 1.0)),
@@ -403,7 +404,7 @@ fn fight_scene() -> Scene {
                             Entry::Present(1),
                             Entry::Leaving {
                                 count: 2,
-                                to: RockId(1),
+                                to: AsteroidId(1),
                             },
                         ],
                     ),
@@ -422,14 +423,14 @@ fn fight_scene() -> Scene {
     )];
 
     Scene {
-        rocks,
+        asteroids,
         entities,
         wheels,
         flights: Vec::new(),
         strip: None,
         zone: ZONE,
         seat: SeatId(0),
-        selection: Some(RockId(0)),
+        selection: Some(AsteroidId(0)),
         hover: None,
     }
 }
@@ -439,13 +440,13 @@ fn fight_camera() -> BeltCamera {
 }
 
 fn stockpile_scene() -> Scene {
-    let mut mined = rock(0, Vec3::ZERO, 6.0);
+    let mut mined = asteroid(0, Vec3::ZERO, 6.0);
     mined.caps = Materials::new(20.0, 8.0, 12.0);
     mined.pull = Materials::new(12.0, 0.0, 12.0);
-    let mut barren = rock(1, Vec3::new(340.0, 0.0, -120.0), 5.0);
+    let mut barren = asteroid(1, Vec3::new(340.0, 0.0, -120.0), 5.0);
     barren.caps = Materials::new(4.0, 0.0, 16.0);
     barren.pull = Materials::new(0.0, 0.0, 6.0);
-    let rocks = vec![mined, barren];
+    let asteroids = vec![mined, barren];
 
     let entities = vec![
         ship(0, METALS_EXTRACTOR, Vec3::new(-5.0, 0.0, 3.0)),
@@ -483,7 +484,7 @@ fn stockpile_scene() -> Scene {
     )];
 
     Scene {
-        rocks,
+        asteroids,
         entities,
         wheels,
         flights: Vec::new(),
@@ -499,7 +500,7 @@ fn stockpile_scene() -> Scene {
         }),
         zone: ZONE,
         seat: SeatId(0),
-        selection: Some(RockId(0)),
+        selection: Some(AsteroidId(0)),
         hover: None,
     }
 }
@@ -516,10 +517,10 @@ fn belt_scene() -> Scene {
         Vec3::new(600.0, 0.0, -1_500.0),
         Vec3::new(-900.0, 0.0, -1_000.0),
     ];
-    let rocks: Vec<RockView> = positions
+    let asteroids: Vec<AsteroidView> = positions
         .iter()
         .enumerate()
-        .map(|(index, &pos)| rock(index as u32, pos, 6.0))
+        .map(|(index, &pos)| asteroid(index as u32, pos, 6.0))
         .collect();
 
     let seats = [0, 1, 0, 1, 0];
@@ -551,12 +552,12 @@ fn belt_scene() -> Scene {
         .collect();
 
     Scene {
-        rocks,
+        asteroids,
         entities,
         wheels,
         flights: vec![FlightLine {
             from: flight_from,
-            to: RockId(1),
+            to: AsteroidId(1),
         }],
         strip: None,
         zone: ZONE,
@@ -593,7 +594,7 @@ fn draft_scene() -> (Scene, Drafting) {
     let stamped = Sequence::new(YOU).stamp(
         session.state().tick(),
         Command::Want {
-            rock: TAKEN,
+            asteroid: TAKEN,
             row: first.row,
             count: 1,
         },
@@ -629,12 +630,12 @@ fn draft_scene() -> (Scene, Drafting) {
 }
 
 fn draft_camera(scene: &Scene) -> BeltCamera {
-    let at = |id: RockId| {
+    let at = |id: AsteroidId| {
         scene
-            .rocks
+            .asteroids
             .iter()
-            .find(|rock| rock.id == id)
-            .expect("the rock is on the belt")
+            .find(|asteroid| asteroid.id == id)
+            .expect("the asteroid is on the belt")
             .pos
     };
     let (taken, bare) = (at(TAKEN), at(BARE));

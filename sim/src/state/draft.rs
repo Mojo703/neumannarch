@@ -1,5 +1,5 @@
 use crate::TICKS_PER_SECOND;
-use crate::ids::{RockId, RowId, SeatId};
+use crate::ids::{AsteroidId, RowId, SeatId};
 use crate::roster::Roster;
 use crate::state::hash;
 use crate::state::seat::Seat;
@@ -15,7 +15,7 @@ pub const STAGES_PER_SEAT: usize = 2;
 pub struct Stage {
     pub seat: SeatId,
     pub row: RowId,
-    pub placed: Option<RockId>,
+    pub placed: Option<AsteroidId>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -87,17 +87,17 @@ impl Draft {
         self.ended
     }
 
-    pub fn placements(&self, seat: SeatId) -> impl Iterator<Item = (RockId, RowId)> + '_ {
+    pub fn placements(&self, seat: SeatId) -> impl Iterator<Item = (AsteroidId, RowId)> + '_ {
         self.stages
             .iter()
             .filter(move |stage| stage.seat == seat)
             .filter_map(|stage| Some((stage.placed?, stage.row)))
     }
 
-    pub fn took(&self, rock: RockId) -> Option<SeatId> {
+    pub fn took(&self, asteroid: AsteroidId) -> Option<SeatId> {
         self.stages
             .iter()
-            .find(|stage| stage.placed == Some(rock))
+            .find(|stage| stage.placed == Some(asteroid))
             .map(|stage| stage.seat)
     }
 
@@ -116,11 +116,11 @@ impl Draft {
             .position(|stage| stage.seat == seat && stage.row == row && stage.placed.is_none())
     }
 
-    pub(crate) fn place(&mut self, rock: RockId, seat: SeatId, row: RowId, tick: Tick) {
+    pub(crate) fn place(&mut self, asteroid: AsteroidId, seat: SeatId, row: RowId, tick: Tick) {
         let Some(at) = self.waiting(seat, row) else {
             return;
         };
-        self.stages[at].placed = Some(rock);
+        self.stages[at].placed = Some(asteroid);
         if at == self.running {
             self.running += 1;
             self.began = tick;
@@ -159,9 +159,9 @@ mod tests {
         world.state.draft().running().expect("a stage is running")
     }
 
-    fn placing(world: &World, rock: RockId) -> Issued {
+    fn placing(world: &World, asteroid: AsteroidId) -> Issued {
         let stage = running(world);
-        Issued::want(stage.seat.0, rock, stage.row, 1)
+        Issued::want(stage.seat.0, asteroid, stage.row, 1)
     }
 
     #[test]
@@ -219,10 +219,10 @@ mod tests {
         let mut world = drafting(2);
         let first = running(&world);
 
-        world.tick(&[placing(&world, RockId(0))]);
+        world.tick(&[placing(&world, AsteroidId(0))]);
 
         let draft = world.state.draft();
-        assert_eq!(draft.stages()[0].placed, Some(RockId(0)));
+        assert_eq!(draft.stages()[0].placed, Some(AsteroidId(0)));
         assert_eq!(draft.began(), Tick::ZERO, "the next began where it landed");
         let second = draft.running().expect("the second stage runs");
         assert_ne!(second.seat, first.seat, "the next seat is picking");
@@ -250,14 +250,14 @@ mod tests {
         let now = running(&world);
         assert_ne!(now.seat, missed.seat, "another seat is picking");
 
-        world.tick(&[Issued::want(missed.seat.0, RockId(4), missed.row, 1)]);
+        world.tick(&[Issued::want(missed.seat.0, AsteroidId(4), missed.row, 1)]);
 
-        assert_eq!(world.state.draft().stages()[0].placed, Some(RockId(4)));
+        assert_eq!(world.state.draft().stages()[0].placed, Some(AsteroidId(4)));
         assert_eq!(running(&world), now, "the running stage is untouched");
         assert_eq!(
-            world.refusal(Issued::want(now.seat.0, RockId(4), now.row, 1)),
-            Some(Rejected::RockTaken),
-            "the rock it took is spoken for"
+            world.refusal(Issued::want(now.seat.0, AsteroidId(4), now.row, 1)),
+            Some(Rejected::AsteroidTaken),
+            "the asteroid it took is spoken for"
         );
     }
 
@@ -267,22 +267,22 @@ mod tests {
         let waiting = world.state.draft().stages()[1];
 
         assert_eq!(
-            world.refusal(Issued::want(waiting.seat.0, RockId(0), waiting.row, 1)),
+            world.refusal(Issued::want(waiting.seat.0, AsteroidId(0), waiting.row, 1)),
             Some(Rejected::NotYet),
             "its stage has not begun"
         );
-        assert_eq!(world.refusal(placing(&world, RockId(0))), None);
+        assert_eq!(world.refusal(placing(&world, AsteroidId(0))), None);
     }
 
     #[test]
     fn the_clock_starts_on_the_tick_the_last_placement_lands() {
         let mut world = drafting(1);
-        let rocks = [RockId(0), RockId(1)];
-        world.tick(&[placing(&world, rocks[0])]);
+        let asteroids = [AsteroidId(0), AsteroidId(1)];
+        world.tick(&[placing(&world, asteroids[0])]);
         assert!(world.state.drafting(), "a stage is still to run");
 
         let landing = world.state.tick();
-        world.tick(&[placing(&world, rocks[1])]);
+        world.tick(&[placing(&world, asteroids[1])]);
 
         assert_eq!(world.state.draft().ended(), Some(landing));
         assert_eq!(
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn the_belt_and_the_clock_stand_still_through_a_draft_that_ends_at_the_grace() {
         let mut world = drafting(2);
-        let standing = world.state.rock_body(RockId(0));
+        let standing = world.state.asteroid_body(AsteroidId(0));
 
         world.start_the_clock();
 
@@ -314,9 +314,9 @@ mod tests {
             "no tick of it is match time"
         );
         assert_eq!(
-            world.state.rock_body(RockId(0)),
+            world.state.asteroid_body(AsteroidId(0)),
             standing,
-            "nor turns a rock"
+            "nor turns an asteroid"
         );
 
         world.run(1);
@@ -324,7 +324,11 @@ mod tests {
         world.run(STAGE_SPAN.0);
 
         assert_eq!(ended.0, STAGE_SPAN.0 * 4 + GRACE.0);
-        assert_ne!(world.state.rock_body(RockId(0)), standing, "the belt turns");
+        assert_ne!(
+            world.state.asteroid_body(AsteroidId(0)),
+            standing,
+            "the belt turns"
+        );
     }
 
     #[test]
@@ -333,8 +337,8 @@ mod tests {
         let stage = running(&world);
         let seat = stage.seat.0;
         world.tick(&[
-            Issued::numbered(seat, 0, RockId(0), STORAGE, 1),
-            Issued::numbered(seat, 1, RockId(0), stage.row, 1),
+            Issued::numbered(seat, 0, AsteroidId(0), STORAGE, 1),
+            Issued::numbered(seat, 1, AsteroidId(0), stage.row, 1),
         ]);
         let stock = world.state[SeatId(seat)].stockpile().stock();
 
@@ -348,7 +352,13 @@ mod tests {
             "nothing is spent"
         );
 
-        world.tick(&[Issued::numbered(seat, 2, RockId(1), running(&world).row, 1)]);
+        world.tick(&[Issued::numbered(
+            seat,
+            2,
+            AsteroidId(1),
+            running(&world).row,
+            1,
+        )]);
 
         assert_eq!(world.state.entities().count(), 2, "the reserve stands");
         assert_eq!(world.state.frames().len(), 1, "the storage builds");
@@ -357,7 +367,7 @@ mod tests {
     #[test]
     fn every_stage_the_view_carries_is_the_stage_the_state_runs() {
         let mut world = drafting(2);
-        world.tick(&[placing(&world, RockId(0))]);
+        world.tick(&[placing(&world, AsteroidId(0))]);
         world.run(STAGE_SPAN.0);
 
         let view = world.view(0);
@@ -365,7 +375,11 @@ mod tests {
         assert_eq!(view.draft.stages(), world.state.draft().stages());
         assert_eq!(view.draft.running(), world.state.draft().running());
         assert_eq!(view.draft.began(), world.state.draft().began());
-        assert_eq!(view.draft.stages()[0].placed, Some(RockId(0)), "one placed");
+        assert_eq!(
+            view.draft.stages()[0].placed,
+            Some(AsteroidId(0)),
+            "one placed"
+        );
         assert_eq!(view.draft.stages()[1].placed, None, "one ran out");
         assert_eq!(view.draft.running(), Some(view.draft.stages()[2]));
     }

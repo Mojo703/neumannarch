@@ -11,9 +11,9 @@ const FAST: Gravity = Gravity::new(4.4e17);
 
 const SLOW: Gravity = Gravity::new(4.0e13);
 
-const HOME: RockId = RockId(0);
+const HOME: AsteroidId = AsteroidId(0);
 
-const AWAY: RockId = RockId(1);
+const AWAY: AsteroidId = AsteroidId(1);
 
 fn seconds(count: u64) -> u64 {
     count * u64::from(TICKS_PER_SECOND)
@@ -39,20 +39,20 @@ fn centre(world: &World, force: &[EntityId]) -> Vec3 {
 }
 
 #[test]
-fn a_lone_unit_stays_inside_the_zone_for_a_whole_rock_period() {
+fn a_lone_unit_stays_inside_the_zone_for_a_whole_asteroid_period() {
     let mut world = world();
     let unit = world.hold(0, FRIGATE, HOME, 2.0);
     let period = world.period(HOME);
 
     for _ in 0..100 {
         world.steers(period / 100);
-        let off = world.off_rock(unit, HOME);
+        let off = world.off_asteroid(unit, HOME);
         assert!(off < Belt::ZONE_RADIUS_METERS, "drifted {off} meters off");
     }
 }
 
 #[test]
-fn a_force_held_for_a_rock_period_never_has_a_ship_inside_the_rock() {
+fn a_force_held_for_a_asteroid_period_never_has_a_ship_inside_the_asteroid() {
     let mut world = world();
     let force: Vec<EntityId> = (0..12)
         .map(|_| {
@@ -66,10 +66,10 @@ fn a_force_held_for_a_rock_period_never_has_a_ship_inside_the_rock() {
     for _ in 0..200 {
         world.steers(period / 200);
         for one in &force {
-            let off = world.off_rock(*one, HOME);
+            let off = world.off_asteroid(*one, HOME);
             assert!(
                 off > radius,
-                "{one:?} is {off} meters from a rock of {radius}"
+                "{one:?} is {off} meters from an asteroid of {radius}"
             );
         }
     }
@@ -100,7 +100,7 @@ fn a_force_released_together_settles_inside_the_zone_at_the_spacing() {
 
     let mut closest = f64::MAX;
     for (at, one) in force.iter().enumerate() {
-        let off = world.off_rock(*one, HOME);
+        let off = world.off_asteroid(*one, HOME);
         assert!(off < Belt::ZONE_RADIUS_METERS, "{one:?} settled {off} off");
         for other in &force[at + 1..] {
             closest = closest.min(world.body(*one).pos.distance(world.body(*other).pos));
@@ -251,7 +251,7 @@ fn an_arrived_send_holds_inside_its_destinations_zone() {
     world.steers(seconds(60));
 
     for one in &force {
-        let off = world.off_rock(*one, AWAY);
+        let off = world.off_asteroid(*one, AWAY);
         assert!(off < Belt::ZONE_RADIUS_METERS, "{one:?} holds {off} off");
     }
 }

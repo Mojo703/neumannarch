@@ -7,7 +7,7 @@ prefer the reading that adds no new type, field, or rule. Numbers live in the
 roster in `sim`, never here. Distances are metres, times seconds and
 rates per second throughout. The roster is the table of rows a match is
 played with; a row is one kind of entity, a ship or a structure, with its
-stats; a want is a count of a row a player asks for at a rock.
+stats; a want is a count of a row a player asks for at an asteroid.
 
 ## Fantasy
 
@@ -15,7 +15,7 @@ Each player is a von Neumann probe that has entered an uninhabited
 system, arriving alongside probes sent by other countries, and fights
 them for supremacy in the system. The probe's payload is its reserve, a
 shipyard and a constructor; every builder is the probe replicating
-itself from the system's rocks; a faction is the country that sent the
+itself from the system's asteroids; a faction is the country that sent the
 probe; the win is holding the system when the clock runs out.
 
 ## Pillars
@@ -23,7 +23,7 @@ probe; the win is holding the system when the clock runs out.
 1. **Decisions are the player's; execution is the sim's.** The player states
    what they want and where. The sim fills it by fixed rules that contain no
    judgement. The player never references a unit.
-2. **One verb.** Set the count of a row at a rock. Everything else the player
+2. **One verb.** Set the count of a row at an asteroid. Everything else the player
    does is a client gesture that issues that verb.
 3. **Emergent, deterministic outcomes.** Counters and roles come from stats
    and geometry, never from tables of types. No randomness.
@@ -33,31 +33,31 @@ probe; the win is holding the system when the clock runs out.
 
 ## Session
 
-- Win: at the clock, the side holding the most rocks. A rock counts for a
+- Win: at the clock, the side holding the most asteroids. An asteroid counts for a
   player with a structure there; ties break by total army value. A side
   with no entities and an empty reserve is out before the clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
   count per row, of one shipyard and one constructor. A match opens in
   the placement draft, with time stopped: no body moves, nothing is
   extracted and nothing builds until the clock starts, and the belt is
-  whole and visible, its rocks and their caps read by everyone. The
+  whole and visible, its asteroids and their caps read by everyone. The
   draft is a sequence of stages, one per reserve structure per seat:
   the first round's stages in an order drawn from the seed, the second
   round's in the reverse order, so the seat that went first goes last
-  for its second rock. One stage runs at a time. A stage ends the
+  for its second asteroid. One stage runs at a time. A stage ends the
   moment its seat places, or after a stated span if it has not, and
   the next begins at once. A seat whose stage ran out keeps the right
   to place and may do so at any later tick, alongside the running
-  stage, first come first served. A placement lands at a rock no draft
-  placement has taken, and a rock a draft placement stands on is
+  stage, first come first served. A placement lands at an asteroid no draft
+  placement has taken, and an asteroid a draft placement stands on is
   taken. A reserve want before the seat's first stage has begun is
-  refused by name; a want at a taken rock is refused by name. Any
+  refused by name; a want at a taken asteroid is refused by name. Any
   other want is accepted during the draft and stands as a want, the
   way a build order is queued before a round starts; it is filled once
   the clock runs. The draft ends, and the clock starts, on the tick
   every seat has placed both structures, or a stated span after the
   last stage ended, whichever is first; a seat still holding reserve
-  then places from the rocks left free, at any time. A bot places on
+  then places from the asteroids left free, at any time. A bot places on
   the first tick of its stage.
 - Teammates share nothing but a side. A player edits only their own
   compositions.
@@ -84,17 +84,17 @@ probe; the win is holding the system when the clock runs out.
 
 ## World
 
-- True 3D. A thin, near-planar belt of rocks around one central mass.
-- One law of motion for every body, rock or ship: the central mass's
+- True 3D. A thin, near-planar belt of asteroids around one central mass.
+- One law of motion for every body, asteroid or ship: the central mass's
   gravity, time-compressed, and nothing else. Between thrust impulses a
   body's motion is exact two-body motion, so an unpowered body keeps its
-  orbit for the whole match. Rocks and structures never thrust; their paths
+  orbit for the whole match. Asteroids and structures never thrust; their paths
   are fixed from the start and every future position is known. Nothing is
   attached to anything: bodies on similar orbits stay near each other
   because the same gravity moves them.
 - Units thrust with infinite fuel, under two constant limits: the
   movement limit, one value for every unit, spent only on a transfer
-  between rocks, and a manoeuvring limit per row, far below it, spent
+  between asteroids, and a manoeuvring limit per row, far below it, spent
   holding position, keeping apart and fighting, in flight as at home. Every send crosses the same distance in
   the same time whatever is in it; rows differ in how they hold, chase
   and give way. Movement and combat states how each is used.
@@ -104,10 +104,10 @@ probe; the win is holding the system when the clock runs out.
 ## Materials
 
 - Three: metals, volatiles, energy. Stockpiled per player, each with a
-  capacity; excess is lost. All three are extracted from rocks. A player's
+  capacity; excess is lost. All three are extracted from asteroids. A player's
   capacity starts at what it starts holding, so nothing it begins with is
   lost, and the rows that carry capacity add to that. A hypothesis.
-- Materials differ only by where they are. Map generation gives rocks
+- Materials differ only by where they are. Map generation gives asteroids
   regionally distinct cap triples.
 - Cost vectors split roles: nimble rows are volatile-heavy, armoured rows
   metal-heavy, long-range and fast-building rows energy-heavy.
@@ -116,24 +116,24 @@ probe; the win is holding the system when the clock runs out.
 ## Entity
 
 One row schema. Every entity is a copy of its row plus position, velocity,
-HP, and its home rock.
+HP, and its home asteroid.
 
 | field | notes |
 |---|---|
-| manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and rocks |
+| manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and asteroids |
 | holding weights | one weight per term of the holding rule |
 | HP | |
 | plating | flat damage reduction per hit |
 | weapons | see Weapons |
 | cost | a material triple |
 | capacity | stockpile capacity contributed, per material |
-| orbit, caps | rocks only |
+| orbit, caps | asteroids only |
 
-- **Rocks** are entities: huge mass, no manoeuvring, indestructible, a
+- **Asteroids** are entities: huge mass, no manoeuvring, indestructible, a
   per-material extraction cap.
-- **Structures** have no manoeuvring. A structure is built at its rock's
+- **Structures** have no manoeuvring. A structure is built at its asteroid's
   position and velocity, and since neither ever thrusts, it stays with the
-  rock.
+  asteroid.
 - **Units** have manoeuvring above zero and move at the movement limit.
 - All builders build everything. A shipyard is a fast builder.
 - Roles emerge from ratios. There is no role field.
@@ -144,28 +144,27 @@ Every weapon has a kind, and each kind carries its own fields.
 
 - **Damage.** Hitscan, with a range, a rate, a damage, and a falloff that
   reduces damage with distance. Plating is subtracted per hit.
-- **Build.** Spends stockpile at `rate` toward frames at its home rock and
-  repairs damaged friendlies there. Its reach is the rock's zone: a
+- **Build.** Spends stockpile at `rate` toward frames at its home asteroid and
+  repairs damaged friendlies there. Its reach is the asteroid's zone: a
   builder reaches everything inside it and nothing elsewhere.
 - **Extract.** Pulls up to `rate` of one material, the weapon's, from
-  its home rock. The rock's cap for that material is the ceiling: at the
+  its home asteroid. The asteroid's cap for that material is the ceiling: at the
   cap, it is split equally among the extractors of that material there,
   and any share an extractor cannot use is split among the rest. The
-  roster ships one extractor row per material, so what a rock yields is
-  a per-rock decision against its caps.
+  roster ships one extractor row per material, so what an asteroid yields is
+  a per-asteroid decision against its caps.
 
 **Build is flow.** Every shortfall is a frame draining the stockpile
 continuously at the builders' combined rate. Effort combines across builders
-and splits evenly across the frames at their rock. Nothing is reserved. A
+and splits evenly across the frames at their asteroid. Nothing is reserved. A
 frame is slowed only by the materials it needs, in proportion to what the
-stockpile covers, and resumes as income arrives. Spend never exceeds the
-work a frame has left. Lowering a count cancels frames and refunds what they
-consumed. Build targets: shortfalls, then repair. A completed
-frame becomes an entity at the rock: a structure at the rock's state, a
-unit at its rock's position, offset along the rock's radial direction by
-one spacing per unit already there, so no two spawn
-coincident. The
-spacing is one constant of the zone.
+stockpile covers, and resumes as income arrives. Spend never exceeds the work a
+frame has left. Lowering a count cancels frames and refunds what they consumed.
+Build targets: shortfalls, then repair. A completed frame becomes an entity at
+the asteroid: a structure at the asteroid's state, a unit at its asteroid's
+position, offset along the asteroid's radial direction by one spacing per unit
+already there, so no two spawn coincident. The spacing is one constant of the
+zone.
 
 **Target selection is by threat.** A weapon fires at the enemy in range
 with the highest damage per second through the shooter's plating per
@@ -183,7 +182,7 @@ acts this tick.
 
 ## Compositions
 
-A place is a rock. A composition is a player's want at a place: a count
+A place is an asteroid. A composition is a player's want at a place: a count
 per row. Each place holds at most one composition per player. The verb
 sets one count.
 
@@ -198,8 +197,8 @@ sets one count.
   want to send a unit away sends the unit and keeps the frame
   building; where no shortfall wants them, the frames are cancelled
   and refunded and the units stay. Shortfalls are
-  filled in order of rock then player. Each is filled from the nearest
-  surplus, rock to rock as of that tick, ties by lowest rock. A surplus
+  filled in order of asteroid then player. Each is filled from the nearest
+  surplus, asteroid to asteroid as of that tick, ties by lowest asteroid. A surplus
   unit sent to a shortfall cancels that place's least-progressed frame of
   the same row and refunds it. Surplus with no shortfall anywhere stays
   where it is, complete, until a shortfall wants it. Nothing complete is
@@ -207,34 +206,34 @@ sets one count.
 - **Shortfall.** When a place wants more of a row than it has, counting
   units there and in transit and never frames, and neither the reserve nor
   a surplus of that row anywhere can fill it, frames open at that place for
-  builders at that rock to fill, one frame of a row at a time; rows build
+  builders at that asteroid to fill, one frame of a row at a time; rows build
   in parallel.
 - A unit's home changes only by the surplus rule.
 - A composition with no want, no units, and no frames does not exist.
 
 ## Movement and combat
 
-- **The zone.** Every rock has a zone: the region within one radius of
-  it, the same radius for every rock, one constant of the belt. A unit at
-  a rock holds inside the zone, a builder reaches
+- **The zone.** Every asteroid has a zone: the region within one radius of
+  it, the same radius for every asteroid, one constant of the belt. A unit at
+  an asteroid holds inside the zone, a builder reaches
   everything inside it, a unit chases any enemy inside it, and the
-  display draws it. Zones are small against the spacing of rocks, so no
+  display draws it. Zones are small against the spacing of asteroids, so no
   two overlap.
 - **Sends.** Units re-homed in one tick from one place to another make one
   send; units re-homed within a stated window of ticks join the send that
   is forming. A send is one schedule of thrust, solved when the send
   begins: a sequence of thrusts, one per tick, each within the movement
   limit, whose integration by the sim's own propagation carries a ship
-  from the source rock's orbit to the destination rock's orbit at the
+  from the source asteroid's orbit to the destination asteroid's orbit at the
   arrival tick, to within a stated tolerance in position and in speed. A
   schedule exists at an arrival tick when its burns together take at most
   a stated share of the span and its integration meets the tolerance. The arrival tick is the earliest at
   which a schedule exists. A schedule departs on the tick after the send's
   window closes, the first tick its ships thrust on. Every ship of the send
   departs at once and flies the one schedule, so their offsets from each
-  other and from the rock at departure are carried to arrival: a force
+  other and from the asteroid at departure are carried to arrival: a force
   that leaves spread through its zone arrives spread through the
-  destination's. While its send forms a unit stands at its rock, a
+  destination's. While its send forms a unit stands at its asteroid, a
   shooter and a target there, and is counted toward its destination. A
   unit is flying from the tick its schedule departs until it ends. The tolerance is the schedule's. Separation in flight
   can push a ship in company off its schedule by arrival, and it holds
@@ -242,14 +241,14 @@ sets one count.
 - **Power.** Every unit has a power: its damage per second, through no
   plating, times its remaining HP. It is the one number the fields below sum and it falls
   as a unit is hurt.
-- **The fields.** Each tick, at each rock, each side has a strength
-  field: at any point, the sum over that side's units at the rock of
+- **The fields.** Each tick, at each asteroid, each side has a strength
+  field: at any point, the sum over that side's units at the asteroid of
   the unit's power times a smooth kernel of its distance from the point,
   the kernel's scale a constant of the zone. A unit reads the two fields
   at its own position, its side's and the enemy's, and the fraction of
   the strength there that is its own side's, so it knows who is strong
   here without knowing any absolute number.
-- **Holding.** At its rock a unit moves by the holding rule. Each tick it
+- **Holding.** At its asteroid a unit moves by the holding rule. Each tick it
   sums the steering terms below and thrusts by the sum, capped at its
   row's manoeuvring limit. Each term's weight is the row's. A term that
   pulls toward a place pulls toward a desired velocity, the difference
@@ -260,9 +259,9 @@ sets one count.
   and no row states a speed. Wander: a
   held force drifts through the zone and never sits still. Return: a
   pull back that grows with distance outside the zone, and a push out
-  that grows with depth inside the rock's own radius plus one spacing,
-  so the zone is a soft shell around the rock and no ship moves inside
-  the rock. Separation: a weak push from any ship of any seat nearer
+  that grows with depth inside the asteroid's own radius plus one spacing,
+  so the zone is a soft shell around the asteroid and no ship moves inside
+  the asteroid. Separation: a weak push from any ship of any seat nearer
   than the spacing, the distance a pair settles at; weak, since
   space is large. Cohesion: a pull up the gradient of its own side's
   field, toward where its allies' strength is. Caution: a push down the
@@ -278,16 +277,16 @@ sets one count.
   and is replaceable whole. In flight a unit thrusts by its schedule and
   by separation alone.
 - A flying unit is neither a shooter nor a target: battles happen at
-  rocks.
+  asteroids.
 
 ## Visibility
 
 Everything is visible to every player always: every entity, its row, its
-seat, its position and velocity, every rock with its orbit, its caps and
+seat, its position and velocity, every asteroid with its orbit, its caps and
 all its future positions, and the standings. Wants and frames are the
 one exception: a player sees their own and not another's. The standings at any tick
 are what the win rule would decide were the clock now: per side, the
-rocks held, the army value and whether it is still in. Nothing is hidden
+asteroids held, the army value and whether it is still in. Nothing is hidden
 and nothing is remembered, since there is nothing to remember.
 
 ## Build order
@@ -304,7 +303,7 @@ and nothing is remembered, since there is nothing to remember.
 
 Not rules. Each is a hypothesis the harness confirms or kills.
 
-- Do per-rock caps and regional materials stop wants from stacking into one
+- Do per-asteroid caps and regional materials stop wants from stacking into one
   force?
 - Does a drifting map force contact, or does turtling win?
 - Does "nearest shortfall" surprise the player often enough to matter?
@@ -312,5 +311,5 @@ Not rules. Each is a hypothesis the harness confirms or kills.
 - Do plating and falloff give enough counters without a matrix?
 - Do regional caps make three materials distinct?
 - Do outcomes hold when the tick rate is doubled?
-- How fast must rocks orbit, relative to a match, for neighbours to
+- How fast must asteroids orbit, relative to a match, for neighbours to
   change?

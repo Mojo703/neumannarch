@@ -85,13 +85,13 @@ impl Human {
 mod tests {
     use neumannarch_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
     use neumannarch_sim::roster::SHIPYARD;
-    use neumannarch_sim::{Retention, RockId};
+    use neumannarch_sim::{AsteroidId, Retention};
 
     use super::*;
 
     fn command(count: u32) -> Command {
         Command::Want {
-            rock: RockId(0),
+            asteroid: AsteroidId(0),
             row: SHIPYARD,
             count,
         }

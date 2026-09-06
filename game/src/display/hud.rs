@@ -30,11 +30,11 @@ const ZONE_ALPHA: f32 = 0.3;
 const RANGE_ALPHA: f32 = 0.22;
 
 pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
-    for rock in &scene.rocks {
+    for asteroid in &scene.asteroids {
         paint_circle(
             painter,
             viewport,
-            rock.pos,
+            asteroid.pos,
             scene.zone,
             ZONE_COLOUR.gamma_multiply(ZONE_ALPHA),
         );
@@ -54,7 +54,11 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
     }
 
     for flight in &scene.flights {
-        let Some(destination) = scene.rocks.iter().find(|rock| rock.id == flight.to) else {
+        let Some(destination) = scene
+            .asteroids
+            .iter()
+            .find(|asteroid| asteroid.id == flight.to)
+        else {
             continue;
         };
         let (Some(from), Some(to)) = (

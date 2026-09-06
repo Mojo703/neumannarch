@@ -4,7 +4,7 @@ use neumannarch_sim::state::Command;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    Retention, RockId, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
+    AsteroidId, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
 };
 
 pub(crate) const PLAYER: SeatId = SeatId(0);
@@ -58,14 +58,14 @@ impl Local {
         View::of(self.session.state(), seat, shots)
     }
 
-    pub(crate) fn want(&mut self, wants: &[(RockId, RowId, u32)]) {
+    pub(crate) fn want(&mut self, wants: &[(AsteroidId, RowId, u32)]) {
         self.want_of(PLAYER, wants);
     }
 
-    pub(crate) fn want_of(&mut self, seat: SeatId, wants: &[(RockId, RowId, u32)]) {
-        for (rock, row, count) in wants {
+    pub(crate) fn want_of(&mut self, seat: SeatId, wants: &[(AsteroidId, RowId, u32)]) {
+        for (asteroid, row, count) in wants {
             let command = Command::Want {
-                rock: *rock,
+                asteroid: *asteroid,
                 row: *row,
                 count: *count,
             };

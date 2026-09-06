@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use neumannarch_sim::roster::{Kind, Roster};
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{RockId, Time};
+use neumannarch_sim::{AsteroidId, Time};
 
 const CLAIM_PATIENCE: f64 = 90.0;
 
@@ -10,26 +10,26 @@ const CLAIM_BAR: f64 = 120.0;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Commitments {
-    claims: BTreeMap<RockId, Time>,
-    barred: BTreeMap<RockId, Time>,
-    pub committed: Option<RockId>,
+    claims: BTreeMap<AsteroidId, Time>,
+    barred: BTreeMap<AsteroidId, Time>,
+    pub committed: Option<AsteroidId>,
 }
 
 impl Commitments {
-    pub fn claimed(&self, rock: RockId) -> bool {
-        self.claims.contains_key(&rock)
+    pub fn claimed(&self, asteroid: AsteroidId) -> bool {
+        self.claims.contains_key(&asteroid)
     }
 
     pub fn claims(&self) -> usize {
         self.claims.len()
     }
 
-    pub fn barred(&self, rock: RockId) -> bool {
-        self.barred.contains_key(&rock)
+    pub fn barred(&self, asteroid: AsteroidId) -> bool {
+        self.barred.contains_key(&asteroid)
     }
 
-    pub fn claim(&mut self, rock: RockId, at: Time) {
-        self.claims.insert(rock, at);
+    pub fn claim(&mut self, asteroid: AsteroidId, at: Time) {
+        self.claims.insert(asteroid, at);
     }
 
     pub fn settle(&mut self, view: &View, roster: &Roster) {
@@ -46,21 +46,21 @@ impl Commitments {
         }
         let now = view.time.seconds();
         let mut lapsed = Vec::new();
-        self.claims.retain(|rock, at| {
-            if held.contains(rock) {
+        self.claims.retain(|asteroid, at| {
+            if held.contains(asteroid) {
                 return false;
             }
-            if mine.contains(rock) {
+            if mine.contains(asteroid) {
                 return true;
             }
             if now - at.seconds() >= CLAIM_PATIENCE {
-                lapsed.push(*rock);
+                lapsed.push(*asteroid);
                 return false;
             }
             true
         });
-        for rock in lapsed {
-            self.barred.insert(rock, view.time);
+        for asteroid in lapsed {
+            self.barred.insert(asteroid, view.time);
         }
         self.barred.retain(|_, at| now - at.seconds() < CLAIM_BAR);
     }

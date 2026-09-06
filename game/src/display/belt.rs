@@ -1,13 +1,13 @@
 use mirage_engine::prelude::*;
 
 use crate::display::glyph_quad::GlyphQuad;
-use crate::display::scene::{EntityView, RockView, Scene};
+use crate::display::scene::{AsteroidView, EntityView, Scene};
 use crate::display::tint;
 use crate::display::viewport::Viewport;
 
-const ROCK_SUBDIVISIONS: u32 = 2;
+const ASTEROID_SUBDIVISIONS: u32 = 2;
 
-const ROCK_COLOUR: Color = Color::rgb(0.55, 0.5, 0.45);
+const ASTEROID_COLOUR: Color = Color::rgb(0.55, 0.5, 0.45);
 
 const TINT_STRENGTH: f32 = 0.7;
 
@@ -22,8 +22,8 @@ where
     ctx.set_camera(viewport.camera());
     ctx.light(Light::directional(SUN, SUN_COLOUR));
 
-    for rock in &scene.rocks {
-        ctx.draw(rock_instance::<G>(rock, viewport));
+    for asteroid in &scene.asteroids {
+        ctx.draw(asteroid_instance::<G>(asteroid, viewport));
     }
 
     for entity in &scene.entities {
@@ -34,19 +34,22 @@ where
     }
 }
 
-fn rock_instance<G: Game>(rock: &RockView, viewport: &Viewport) -> Instance<Sphere, G::Styles> {
-    let diameter = (2.0 * rock.radius) as f32;
+fn asteroid_instance<G: Game>(
+    asteroid: &AsteroidView,
+    viewport: &Viewport,
+) -> Instance<Sphere, G::Styles> {
+    let diameter = (2.0 * asteroid.radius) as f32;
     Sphere {
-        subdivisions: ROCK_SUBDIVISIONS,
+        subdivisions: ASTEROID_SUBDIVISIONS,
     }
     .at(Transform::from_scale_rotation_translation(
         Vec3::splat(diameter),
         Quat::IDENTITY,
-        viewport.local(rock.pos),
+        viewport.local(asteroid.pos),
     ))
     .material(Material::lit(tint::toward(
-        ROCK_COLOUR,
-        rock.caps,
+        ASTEROID_COLOUR,
+        asteroid.caps,
         TINT_STRENGTH,
     )))
 }

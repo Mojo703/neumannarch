@@ -16,7 +16,7 @@ pub enum Mix {
 pub struct Personality {
     pub name: &'static str,
     pub seed: u64,
-    pub rocks: usize,
+    pub asteroids: usize,
     pub stores: u32,
     pub yards: usize,
     pub masons: u32,
@@ -35,7 +35,7 @@ impl Personality {
         Personality {
             name: "turtle",
             seed: 0x7075_7274_6c65,
-            rocks: 3,
+            asteroids: 3,
             stores: 2,
             yards: 1,
             masons: 1,
@@ -54,7 +54,7 @@ impl Personality {
         Personality {
             name: "expand",
             seed: 0x6578_7061_6e64,
-            rocks: 8,
+            asteroids: 8,
             stores: 1,
             yards: 3,
             masons: 3,

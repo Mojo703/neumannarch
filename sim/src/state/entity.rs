@@ -1,5 +1,5 @@
 use super::schedule::Flight;
-use crate::ids::{EntityId, RockId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::orbit::body::Body;
 use crate::real::Real;
 use crate::time::Time;
@@ -9,7 +9,7 @@ pub struct Entity {
     id: EntityId,
     seat: SeatId,
     row: RowId,
-    home: RockId,
+    home: AsteroidId,
     hp: Real,
     motion: Motion,
 }
@@ -25,7 +25,7 @@ impl Entity {
         id: EntityId,
         seat: SeatId,
         row: RowId,
-        home: RockId,
+        home: AsteroidId,
         hp: f64,
         motion: Motion,
     ) -> Entity {
@@ -51,7 +51,7 @@ impl Entity {
         self.row
     }
 
-    pub fn home(&self) -> RockId {
+    pub fn home(&self) -> AsteroidId {
         self.home
     }
 
@@ -71,7 +71,7 @@ impl Entity {
         self.hp.0 = (self.hp.0 + hp).min(full);
     }
 
-    pub(crate) fn set_home(&mut self, home: RockId) {
+    pub(crate) fn set_home(&mut self, home: AsteroidId) {
         self.home = home;
     }
 
@@ -93,7 +93,7 @@ impl Entity {
         self.flight().is_some_and(|flight| flight.has_departed(now))
     }
 
-    pub fn standing(&self, now: Time) -> Option<RockId> {
+    pub fn standing(&self, now: Time) -> Option<AsteroidId> {
         match self.flight() {
             None => Some(self.home),
             Some(flight) if flight.has_departed(now) => None,

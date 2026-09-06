@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{RockId, SeatId, TICKS_PER_SECOND, Time};
+use neumannarch_sim::{AsteroidId, SeatId, TICKS_PER_SECOND, Time};
 
 use crate::display::scene::Arc;
 
@@ -11,7 +11,7 @@ const FORGET: u64 = 10 * TICKS_PER_SECOND as u64;
 
 #[derive(Clone, Debug, Default)]
 pub struct Fights {
-    fights: BTreeMap<(RockId, SeatId), Fight>,
+    fights: BTreeMap<(AsteroidId, SeatId), Fight>,
 }
 
 #[derive(Clone, Debug)]
@@ -25,9 +25,9 @@ struct Fight {
 impl Fights {
     pub fn observe(&mut self, view: &View) {
         let totals = totals(view);
-        let hp_at = |key: &(RockId, SeatId)| totals.get(key).copied().unwrap_or(0.0);
+        let hp_at = |key: &(AsteroidId, SeatId)| totals.get(key).copied().unwrap_or(0.0);
         for exchange in &view.exchanges {
-            let key = (exchange.rock, exchange.seat);
+            let key = (exchange.asteroid, exchange.seat);
             self.fights
                 .entry(key)
                 .or_insert_with(|| Fight::new(hp_at(&key), view.time))
@@ -40,10 +40,10 @@ impl Fights {
             .retain(|_, fight| view.time.0.saturating_sub(fight.last_shot.0) <= FORGET);
     }
 
-    pub fn arcs(&self) -> impl Iterator<Item = (RockId, Arc)> + '_ {
+    pub fn arcs(&self) -> impl Iterator<Item = (AsteroidId, Arc)> + '_ {
         self.fights
             .iter()
-            .filter_map(|((rock, seat), fight)| Some((*rock, fight.arc(*seat)?)))
+            .filter_map(|((asteroid, seat), fight)| Some((*asteroid, fight.arc(*seat)?)))
     }
 }
 
@@ -80,13 +80,13 @@ impl Fight {
     }
 }
 
-fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
-    let mut totals: BTreeMap<(RockId, SeatId), f64> = BTreeMap::new();
+fn totals(view: &View) -> BTreeMap<(AsteroidId, SeatId), f64> {
+    let mut totals: BTreeMap<(AsteroidId, SeatId), f64> = BTreeMap::new();
     for held in &view.present {
-        let Some(rock) = held.at.standing() else {
+        let Some(asteroid) = held.at.standing() else {
             continue;
         };
-        *totals.entry((rock, held.seat)).or_insert(0.0) += held.hp;
+        *totals.entry((asteroid, held.seat)).or_insert(0.0) += held.hp;
     }
     totals
 }
@@ -98,11 +98,11 @@ mod tests {
     use neumannarch_sim::state::view::{Berth, Present};
     use neumannarch_sim::state::{Draft, Standings};
     use neumannarch_sim::step::fire::Exchange;
-    use neumannarch_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
+    use neumannarch_sim::{AsteroidId, EntityId, Materials, RowId, Stockpile, TeamId, Vec3};
 
     use super::*;
 
-    const ROCK: RockId = RockId(0);
+    const ASTEROID: AsteroidId = AsteroidId(0);
 
     const SEAT: SeatId = SeatId(0);
 
@@ -126,13 +126,13 @@ mod tests {
                 seat: SEAT,
                 body: Body::new(Vec3::ZERO, Vec3::ZERO),
                 hp,
-                home: ROCK,
-                at: Berth::Standing(ROCK),
+                home: ASTEROID,
+                at: Berth::Standing(ASTEROID),
             }],
             teams: Box::new([TeamId(0)]),
             exchanges: match shooting {
                 true => vec![Exchange {
-                    rock: ROCK,
+                    asteroid: ASTEROID,
                     seat: SEAT,
                     fired: false,
                     landed: true,
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn a_seat_wiped_out_at_the_rock_drains_to_nothing_and_still_draws() {
+    fn a_seat_wiped_out_at_the_asteroid_drains_to_nothing_and_still_draws() {
         let mut fights = Fights::default();
         fights.observe(&view(0, 100.0, true));
 

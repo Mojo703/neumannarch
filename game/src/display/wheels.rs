@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use mirage_engine::egui::{self, Pos2, Rect};
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::Draft;
-use neumannarch_sim::{Material, RockId, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, Material, RowId, SeatId};
 
 use crate::display::bars::Bars;
 use crate::display::ease::{self, Span};
@@ -18,41 +18,41 @@ const HOVER_MARGIN: f32 = 48.0;
 
 pub const NOT_YET: &str = "Not yet";
 
-pub const ROCK_TAKEN: &str = "Rock taken";
+pub const ASTEROID_TAKEN: &str = "Asteroid taken";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Aim<'a> {
     pub viewer: SeatId,
     pub pointer: Option<Pos2>,
-    pub hovered: Option<RockId>,
+    pub hovered: Option<AsteroidId>,
     pub step: u32,
-    pub wants: BTreeMap<(RockId, RowId), u32>,
+    pub wants: BTreeMap<(AsteroidId, RowId), u32>,
     pub draft: Option<&'a Draft>,
 }
 
 impl Aim<'_> {
-    pub fn refusal(&self, rock: RockId, row: RowId) -> Option<&'static str> {
+    pub fn refusal(&self, asteroid: AsteroidId, row: RowId) -> Option<&'static str> {
         let draft = self.draft.filter(|draft| draft.ended().is_none())?;
         match draft.awaits(self.viewer, row) {
             None => None,
             Some(false) => Some(NOT_YET),
-            Some(true) if draft.took(rock).is_some() => Some(ROCK_TAKEN),
+            Some(true) if draft.took(asteroid).is_some() => Some(ASTEROID_TAKEN),
             Some(true) => None,
         }
     }
 
-    fn bands_at(&self, rock: RockId, roster: &Roster) -> Bands {
+    fn bands_at(&self, asteroid: AsteroidId, roster: &Roster) -> Bands {
         Bands {
             step: self.step,
             wants: self
                 .wants
                 .iter()
-                .filter(|((at, _), _)| *at == rock)
+                .filter(|((at, _), _)| *at == asteroid)
                 .map(|((_, row), want)| (*row, *want))
                 .collect(),
             refused: roster
                 .iter()
-                .filter_map(|(row, _)| Some((row, self.refusal(rock, row)?.to_string())))
+                .filter_map(|(row, _)| Some((row, self.refusal(asteroid, row)?.to_string())))
                 .collect(),
         }
     }
@@ -74,13 +74,13 @@ impl Eased {
 }
 
 pub trait Ease {
-    fn ease(&mut self, rock: RockId, eased: Eased, target: f32) -> f32;
+    fn ease(&mut self, asteroid: AsteroidId, eased: Eased, target: f32) -> f32;
 }
 
 pub struct Still;
 
 impl Ease for Still {
-    fn ease(&mut self, _rock: RockId, _eased: Eased, target: f32) -> f32 {
+    fn ease(&mut self, _asteroid: AsteroidId, _eased: Eased, target: f32) -> f32 {
         target
     }
 }
@@ -89,7 +89,7 @@ impl Ease for Still {
 pub struct Motion {
     frame: u64,
     dt: f64,
-    tweens: BTreeMap<(RockId, Eased), Tween>,
+    tweens: BTreeMap<(AsteroidId, Eased), Tween>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -106,10 +106,10 @@ impl Motion {
 }
 
 impl Ease for Motion {
-    fn ease(&mut self, rock: RockId, eased: Eased, target: f32) -> f32 {
+    fn ease(&mut self, asteroid: AsteroidId, eased: Eased, target: f32) -> f32 {
         let frame = self.frame;
         let dt = self.dt;
-        let tween = self.tweens.entry((rock, eased)).or_insert(Tween {
+        let tween = self.tweens.entry((asteroid, eased)).or_insert(Tween {
             value: f64::from(eased.at_rest()),
             stepped: 0,
         });
@@ -165,7 +165,7 @@ impl Spoken {
 pub struct Wheels {
     wheels: Vec<Wheel>,
     bars: Bars,
-    hovered: Option<RockId>,
+    hovered: Option<AsteroidId>,
 }
 
 impl Wheels {
@@ -189,9 +189,9 @@ impl Wheels {
         let mut wheels: Vec<Wheel> = placed
             .iter()
             .filter_map(|placed| {
-                let view = scene.wheel_of(placed.rock)?;
+                let view = scene.wheel_of(placed.asteroid)?;
                 let bands = (placed.sizing.detail == Detail::Full)
-                    .then(|| aim.bands_at(placed.rock, roster));
+                    .then(|| aim.bands_at(placed.asteroid, roster));
                 let wheel = Wheel::over(*placed, view, roster, aim.viewer, bands);
                 wheel.draws().then_some(wheel)
             })
@@ -220,7 +220,7 @@ impl Wheels {
             .chain(self.bars.frames())
     }
 
-    pub fn hovered(&self) -> Option<RockId> {
+    pub fn hovered(&self) -> Option<AsteroidId> {
         self.hovered
     }
 
@@ -228,19 +228,19 @@ impl Wheels {
         self.wheels.iter()
     }
 
-    pub fn at(&self, at: Pos2) -> Option<RockId> {
+    pub fn at(&self, at: Pos2) -> Option<AsteroidId> {
         self.wheels
             .iter()
             .filter(|wheel| wheel.holds(at))
             .min_by(|a, b| a.centre().distance(at).total_cmp(&b.centre().distance(at)))
-            .map(Wheel::rock)
+            .map(Wheel::asteroid)
     }
 
-    pub fn band_at(&self, at: Pos2) -> Option<(RockId, RowId, WheelBand)> {
+    pub fn band_at(&self, at: Pos2) -> Option<(AsteroidId, RowId, WheelBand)> {
         self.wheels.iter().find_map(|wheel| {
             wheel
                 .band_at(at)
-                .map(|(row, band)| (wheel.rock(), row, band))
+                .map(|(row, band)| (wheel.asteroid(), row, band))
         })
     }
 
@@ -267,15 +267,15 @@ impl Wheels {
     pub fn paint(&self, painter: &egui::Painter, hover: Option<&Hover>) {
         self.bars.paint(painter);
         for wheel in self.wheels.iter().rev() {
-            wheel.paint(painter, band_of(hover, wheel.rock()));
+            wheel.paint(painter, band_of(hover, wheel.asteroid()));
         }
     }
 }
 
 impl Placed {
-    pub fn resting(rock: RockId, centre: Pos2) -> Placed {
+    pub fn resting(asteroid: AsteroidId, centre: Pos2) -> Placed {
         Placed {
-            rock,
+            asteroid,
             centre,
             sizing: Sizing::settled(Detail::Small),
             alpha: RESTING_ALPHA,
@@ -286,21 +286,21 @@ impl Placed {
         Placed {
             sizing: Sizing {
                 detail: self.sizing.detail,
-                scale: ease.ease(self.rock, Eased::Scale, self.sizing.scale),
+                scale: ease.ease(self.asteroid, Eased::Scale, self.sizing.scale),
             },
-            alpha: ease.ease(self.rock, Eased::Alpha, self.alpha),
+            alpha: ease.ease(self.asteroid, Eased::Alpha, self.alpha),
             ..self
         }
     }
 }
 
-fn band_of(hover: Option<&Hover>, rock: RockId) -> Option<(RowId, WheelBand)> {
+fn band_of(hover: Option<&Hover>, asteroid: AsteroidId) -> Option<(RowId, WheelBand)> {
     match hover {
         Some(Hover::Wheel {
-            rock: over,
+            asteroid: over,
             row,
             band,
-        }) if *over == rock => Some((*row, *band)),
+        }) if *over == asteroid => Some((*row, *band)),
         _ => None,
     }
 }
@@ -311,18 +311,18 @@ fn footprints(
     viewport: &Viewport,
     viewer: SeatId,
 ) -> Vec<Footprint> {
-    let rocks: BTreeMap<RockId, Pos2> = scene
-        .rocks
+    let asteroids: BTreeMap<AsteroidId, Pos2> = scene
+        .asteroids
         .iter()
-        .filter_map(|rock| Some((rock.id, viewport.point_of(rock.pos)?)))
+        .filter_map(|asteroid| Some((asteroid.id, viewport.point_of(asteroid.pos)?)))
         .collect();
     scene
         .wheels
         .iter()
         .filter_map(|wheel| {
             Some(Footprint::of(
-                wheel.rock,
-                *rocks.get(&wheel.rock)?,
+                wheel.asteroid,
+                *asteroids.get(&wheel.asteroid)?,
                 wheel,
                 roster,
                 viewer,
@@ -333,41 +333,41 @@ fn footprints(
 
 fn laid(
     footprints: &[Footprint],
-    hovered: Option<RockId>,
-    selected: Option<RockId>,
+    hovered: Option<AsteroidId>,
+    selected: Option<AsteroidId>,
 ) -> Vec<Placed> {
     let whole = hovered.or(selected);
     footprints
         .iter()
         .map(|footprint| {
-            let rock = Some(footprint.rock);
-            let detail = match rock == hovered || rock == selected {
+            let asteroid = Some(footprint.asteroid);
+            let detail = match asteroid == hovered || asteroid == selected {
                 true => Detail::Full,
                 false => Detail::Small,
             };
             Placed {
                 sizing: Sizing::settled(detail),
-                alpha: match rock == whole {
+                alpha: match asteroid == whole {
                     true => 1.0,
                     false => RESTING_ALPHA,
                 },
-                ..Placed::resting(footprint.rock, footprint.centre)
+                ..Placed::resting(footprint.asteroid, footprint.centre)
             }
         })
         .collect()
 }
 
-fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<RockId> {
+fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<AsteroidId> {
     let pointer = aim.pointer?;
     let extent = |placed: &Placed, detail: Detail| {
         footprints
             .iter()
-            .find(|footprint| footprint.rock == placed.rock)
+            .find(|footprint| footprint.asteroid == placed.asteroid)
             .map(|footprint| footprint.at(detail))
     };
-    let held = aim.hovered.filter(|rock| {
+    let held = aim.hovered.filter(|asteroid| {
         resting.iter().any(|placed| {
-            placed.rock == *rock
+            placed.asteroid == *asteroid
                 && extent(placed, Detail::Full)
                     .is_some_and(|extent| extent.expand(HOVER_MARGIN).contains(pointer))
         })
@@ -384,7 +384,7 @@ fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<Ro
                         .total_cmp(&b.centre.distance(pointer)),
                 )
             })
-            .map(|(placed, _)| placed.rock)
+            .map(|(placed, _)| placed.asteroid)
     })
 }
 
@@ -397,13 +397,13 @@ mod tests {
     use super::*;
     use crate::display::scene::{Entry, RowView, SectorView, WheelView};
 
-    const A: RockId = RockId(0);
+    const A: AsteroidId = AsteroidId(0);
 
-    const B: RockId = RockId(1);
+    const B: AsteroidId = AsteroidId(1);
 
-    fn view(rock: RockId) -> WheelView {
+    fn view(asteroid: AsteroidId) -> WheelView {
         WheelView {
-            rock,
+            asteroid,
             sectors: vec![SectorView {
                 seat: SeatId(0),
                 rows: vec![RowView {
@@ -422,11 +422,13 @@ mod tests {
         let roster = Roster::shipped();
         [(A, egui::pos2(0.0, 0.0)), (B, egui::pos2(apart, 0.0))]
             .into_iter()
-            .map(|(rock, centre)| Footprint::of(rock, centre, &view(rock), &roster, SeatId(0)))
+            .map(|(asteroid, centre)| {
+                Footprint::of(asteroid, centre, &view(asteroid), &roster, SeatId(0))
+            })
             .collect()
     }
 
-    fn aim(pointer: Pos2, hovered: Option<RockId>) -> Aim<'static> {
+    fn aim(pointer: Pos2, hovered: Option<AsteroidId>) -> Aim<'static> {
         Aim {
             viewer: SeatId(0),
             pointer: Some(pointer),
@@ -437,21 +439,25 @@ mod tests {
         }
     }
 
-    fn detail(placed: &[Placed], rock: RockId) -> Option<Detail> {
+    fn detail(placed: &[Placed], asteroid: AsteroidId) -> Option<Detail> {
         placed
             .iter()
-            .find(|placed| placed.rock == rock)
+            .find(|placed| placed.asteroid == asteroid)
             .map(|placed| placed.sizing.detail)
     }
 
-    fn alpha(placed: &[Placed], rock: RockId) -> Option<f32> {
+    fn alpha(placed: &[Placed], asteroid: AsteroidId) -> Option<f32> {
         placed
             .iter()
-            .find(|placed| placed.rock == rock)
+            .find(|placed| placed.asteroid == asteroid)
             .map(|placed| placed.alpha)
     }
 
-    fn placed(apart: f32, hovered: Option<RockId>, selected: Option<RockId>) -> Vec<Placed> {
+    fn placed(
+        apart: f32,
+        hovered: Option<AsteroidId>,
+        selected: Option<AsteroidId>,
+    ) -> Vec<Placed> {
         laid(&footprints(apart), hovered, selected)
     }
 
@@ -462,7 +468,7 @@ mod tests {
     #[test]
     fn nothing_of_a_wheel_or_a_bar_stands_inside_a_rect_it_is_cleared_of() {
         use crate::display::camera::BeltCamera;
-        use crate::display::scene::RockView;
+        use crate::display::scene::AsteroidView;
         use neumannarch_sim::{Materials, Vec3};
 
         let viewport = Viewport::of(
@@ -471,7 +477,7 @@ mod tests {
             1.0,
         );
         let scene = Scene {
-            rocks: vec![RockView {
+            asteroids: vec![AsteroidView {
                 id: A,
                 pos: Vec3::ZERO,
                 radius: 6.0,
@@ -558,7 +564,7 @@ mod tests {
         let stamped = Sequence::new(first.seat).stamp(
             session.state().tick(),
             Command::Want {
-                rock: A,
+                asteroid: A,
                 row: first.row,
                 count: 1,
             },
@@ -569,7 +575,7 @@ mod tests {
         let next = draft.running().expect("the next stage runs");
         assert_eq!(
             aim(next.seat, &draft).refusal(A, next.row),
-            Some(ROCK_TAKEN)
+            Some(ASTEROID_TAKEN)
         );
         assert_eq!(aim(next.seat, &draft).refusal(B, next.row), None);
         assert_eq!(
@@ -580,7 +586,7 @@ mod tests {
         assert_eq!(
             aim(next.seat, &draft).refusal(A, FRIGATE),
             None,
-            "a want that is no pick stands at a taken rock"
+            "a want that is no pick stands at a taken asteroid"
         );
 
         while session.state().drafting() {

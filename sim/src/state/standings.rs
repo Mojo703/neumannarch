@@ -11,7 +11,7 @@ pub struct Standings {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Team {
     pub team: TeamId,
-    pub rocks: u32,
+    pub asteroids: u32,
     pub value: f64,
     pub alive: bool,
 }
@@ -29,17 +29,17 @@ impl State {
 
     fn score(&self, team: TeamId) -> Team {
         let mine = |seat: SeatId| self[seat].team() == team;
-        let mut rocks: Vec<_> = self
+        let mut asteroids: Vec<_> = self
             .entities()
             .filter(|entity| mine(entity.seat()))
             .filter(|entity| entity.motion() == Motion::Fixed)
             .map(|entity| entity.home())
             .collect();
-        rocks.sort_unstable();
-        rocks.dedup();
+        asteroids.sort_unstable();
+        asteroids.dedup();
         Team {
             team,
-            rocks: rocks.len() as u32,
+            asteroids: asteroids.len() as u32,
             value: self
                 .entities()
                 .filter(|entity| mine(entity.seat()))
@@ -70,12 +70,12 @@ impl Standings {
         let best = self
             .teams
             .iter()
-            .map(|team| (team.rocks, team.value))
+            .map(|team| (team.asteroids, team.value))
             .max_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
         best.map_or(Vec::new(), |best| {
             self.teams
                 .iter()
-                .filter(|team| (team.rocks, team.value) == best)
+                .filter(|team| (team.asteroids, team.value) == best)
                 .map(|team| team.team)
                 .collect()
         })

@@ -6,7 +6,7 @@ use mirage_engine::prelude::{FrameCtx, Game};
 use neumannarch_protocol::Lobby;
 use neumannarch_sim::state::Command;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{RockId, RowId, SeatId, Session, Vec3};
+use neumannarch_sim::{AsteroidId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
@@ -40,13 +40,13 @@ const REPEAT_INTERVAL: f32 = 0.1;
 const SHIFT_STEP: u32 = 5;
 
 struct Drag {
-    from: RockId,
+    from: AsteroidId,
     count: u32,
     adjusted: f32,
 }
 
 struct Repeat {
-    rock: RockId,
+    asteroid: AsteroidId,
     row: RowId,
     band: WheelBand,
     held: f32,
@@ -82,8 +82,8 @@ pub struct Play {
     view: View,
     fights: Fights,
     camera: BeltCamera,
-    selection: Option<RockId>,
-    hovered: Option<RockId>,
+    selection: Option<AsteroidId>,
+    hovered: Option<AsteroidId>,
     doing: Mode,
     followed: bool,
     panning: Panning,
@@ -143,7 +143,7 @@ impl Play {
         self.machine.session()
     }
 
-    pub fn selection(&self) -> Option<RockId> {
+    pub fn selection(&self) -> Option<AsteroidId> {
         self.selection
     }
 
@@ -175,11 +175,11 @@ impl Play {
         &self.camera
     }
 
-    pub fn rock_pos(&self, rock: RockId) -> Option<Vec3> {
+    pub fn asteroid_pos(&self, asteroid: AsteroidId) -> Option<Vec3> {
         self.view
             .terrain
             .iter()
-            .find(|terrain| terrain.rock == rock)
+            .find(|terrain| terrain.asteroid == asteroid)
             .map(|terrain| terrain.orbit.at(self.view.time, self.view.gravity).pos)
     }
 
@@ -372,11 +372,11 @@ impl Play {
         }
     }
 
-    fn wants(&self) -> BTreeMap<(RockId, RowId), u32> {
+    fn wants(&self) -> BTreeMap<(AsteroidId, RowId), u32> {
         self.view
             .plans
             .iter()
-            .map(|plan| ((plan.rock, plan.row), plan.want))
+            .map(|plan| ((plan.asteroid, plan.row), plan.want))
             .collect()
     }
 
@@ -425,7 +425,7 @@ impl Play {
         else {
             return;
         };
-        if let Some(pos) = self.rock_pos(home) {
+        if let Some(pos) = self.asteroid_pos(home) {
             self.camera.set_focus(pos);
             self.followed = true;
         }
@@ -453,7 +453,7 @@ impl Play {
         };
         let mut gesture = core::mem::take(gesture);
         let at = viewport.point_at(ctx.pointer());
-        self.hovered = wheels.hovered().or_else(|| self.rock_at(viewport, at));
+        self.hovered = wheels.hovered().or_else(|| self.asteroid_at(viewport, at));
         let dt = ctx.dt().as_secs_f32();
         let sending = matches!(gesture, Gesture::Sending(_));
         let notches = self
@@ -461,7 +461,7 @@ impl Play {
             .drag(ctx, &mut self.camera, viewport.window(), !sending);
 
         let band = wheels.band_at(at);
-        let over = wheels.at(at).or_else(|| self.rock_at(viewport, at));
+        let over = wheels.at(at).or_else(|| self.asteroid_at(viewport, at));
         if let Gesture::Sending(drag) = &mut gesture {
             drag.adjust(notches);
         }
@@ -474,8 +474,8 @@ impl Play {
         if let Gesture::Editing(holding) = &mut gesture
             && holding.repeats(band, dt)
         {
-            let (rock, row, band) = (holding.rock, holding.row, holding.band);
-            self.edit(rock, row, band);
+            let (asteroid, row, band) = (holding.asteroid, holding.row, holding.band);
+            self.edit(asteroid, row, band);
         }
 
         let hover = match (&gesture, band) {
@@ -486,7 +486,11 @@ impl Play {
                     count: drag.count,
                 })
             }),
-            (_, Some((rock, row, band))) => Some(Hover::Wheel { rock, row, band }),
+            (_, Some((asteroid, row, band))) => Some(Hover::Wheel {
+                asteroid,
+                row,
+                band,
+            }),
             (Gesture::Still | Gesture::Editing(_), None) => None,
         };
         self.doing = Mode::Playing { gesture, hover };
@@ -494,15 +498,15 @@ impl Play {
 
     fn pressed(
         &mut self,
-        band: Option<(RockId, RowId, WheelBand)>,
-        over: Option<RockId>,
+        band: Option<(AsteroidId, RowId, WheelBand)>,
+        over: Option<AsteroidId>,
     ) -> Gesture {
         match (band, over) {
-            (Some((rock, row, band)), _) => {
-                self.selection = Some(rock);
-                self.edit(rock, row, band);
+            (Some((asteroid, row, band)), _) => {
+                self.selection = Some(asteroid);
+                self.edit(asteroid, row, band);
                 Gesture::Editing(Repeat {
-                    rock,
+                    asteroid,
                     row,
                     band,
                     held: 0.0,
@@ -521,7 +525,7 @@ impl Play {
         }
     }
 
-    fn released(&mut self, gesture: Gesture, over: Option<RockId>) -> Gesture {
+    fn released(&mut self, gesture: Gesture, over: Option<AsteroidId>) -> Gesture {
         if let Gesture::Sending(drag) = gesture {
             match over {
                 Some(to) if to != drag.from => {
@@ -534,36 +538,36 @@ impl Play {
                         self.issue(command);
                     }
                 }
-                Some(rock) => self.focuses(rock),
+                Some(asteroid) => self.focuses(asteroid),
                 None => {}
             }
         }
         Gesture::Still
     }
 
-    fn edit(&mut self, rock: RockId, row: RowId, band: WheelBand) {
-        let want = self.view.plan_of(rock, row).map_or(0, |plan| plan.want);
+    fn edit(&mut self, asteroid: AsteroidId, row: RowId, band: WheelBand) {
+        let want = self.view.plan_of(asteroid, row).map_or(0, |plan| plan.want);
         if band.wanted(want) != want {
-            self.issue(band.edit(rock, row, want));
+            self.issue(band.edit(asteroid, row, want));
         }
     }
 
-    fn rock_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<RockId> {
+    fn asteroid_at(&self, viewport: &Viewport, at: egui::Pos2) -> Option<AsteroidId> {
         self.view
             .terrain
             .iter()
             .filter_map(|terrain| {
-                let centre = viewport.point_of(self.rock_pos(terrain.rock)?)?;
+                let centre = viewport.point_of(self.asteroid_pos(terrain.asteroid)?)?;
                 let away = centre.distance(at);
-                (away <= crate::display::wheel::PICK_RADIUS).then_some((away, terrain.rock))
+                (away <= crate::display::wheel::PICK_RADIUS).then_some((away, terrain.asteroid))
             })
             .min_by(|(a, _), (b, _)| a.total_cmp(b))
-            .map(|(_, rock)| rock)
+            .map(|(_, asteroid)| asteroid)
     }
 
-    fn focuses(&mut self, rock: RockId) {
-        self.selection = Some(rock);
-        if let Some(pos) = self.rock_pos(rock) {
+    fn focuses(&mut self, asteroid: AsteroidId) {
+        self.selection = Some(asteroid);
+        if let Some(pos) = self.asteroid_pos(asteroid) {
             self.camera.set_focus(pos);
             self.followed = true;
         }
@@ -602,8 +606,8 @@ impl Drag {
 }
 
 impl Repeat {
-    fn repeats(&mut self, slot: Option<(RockId, RowId, WheelBand)>, dt: f32) -> bool {
-        if slot != Some((self.rock, self.row, self.band)) {
+    fn repeats(&mut self, slot: Option<(AsteroidId, RowId, WheelBand)>, dt: f32) -> bool {
+        if slot != Some((self.asteroid, self.row, self.band)) {
             return false;
         }
         self.held += dt;
@@ -628,7 +632,7 @@ mod tests {
             .run_by(PlayerId::HOST)
             .expect("the host holds a seat");
         let mut play = Play::of(lobby, Machine::of(started, &crew, &mut Local));
-        let from = RockId(0);
+        let from = AsteroidId(0);
         play.doing = Mode::Playing {
             gesture: Gesture::Sending(Drag {
                 from,
@@ -637,7 +641,7 @@ mod tests {
             }),
             hover: Some(Hover::Send(Sending {
                 from,
-                to: RockId(1),
+                to: AsteroidId(1),
                 count: 1,
             })),
         };

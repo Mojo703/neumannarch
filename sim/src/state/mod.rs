@@ -1,6 +1,7 @@
 use core::ops::{Index, IndexMut};
 use std::collections::BTreeMap;
 
+pub use asteroid::Asteroid;
 pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
@@ -8,7 +9,6 @@ pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
 pub use entity::{Entity, Motion};
 pub use frame::Frame;
 pub use ready::Ready;
-pub use rock::Rock;
 pub use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use send::Send;
@@ -18,7 +18,7 @@ pub use view::View;
 pub use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
-use crate::ids::{EntityId, RockId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
@@ -42,7 +42,7 @@ pub struct State {
     gravity: Gravity,
     seats: Vec<Seat>,
     roster: Roster,
-    rocks: Vec<Rock>,
+    asteroids: Vec<Asteroid>,
     entities: BTreeMap<EntityId, Entity>,
     next_entity: EntityId,
     wants: BTreeMap<Post, Wants>,
@@ -56,7 +56,7 @@ impl State {
         seed: u64,
         gravity: Gravity,
         roster: Roster,
-        rocks: Vec<Rock>,
+        asteroids: Vec<Asteroid>,
         seats: Vec<Seat>,
     ) -> State {
         State {
@@ -67,7 +67,7 @@ impl State {
             gravity,
             seats,
             roster,
-            rocks,
+            asteroids,
             entities: BTreeMap::new(),
             next_entity: EntityId(0),
             wants: BTreeMap::new(),
@@ -110,12 +110,12 @@ impl State {
         self.gravity
     }
 
-    pub fn rocks(&self) -> impl Iterator<Item = (RockId, &Rock)> {
-        (0..u32::MAX).map(RockId).zip(&self.rocks)
+    pub fn asteroids(&self) -> impl Iterator<Item = (AsteroidId, &Asteroid)> {
+        (0..u32::MAX).map(AsteroidId).zip(&self.asteroids)
     }
 
-    pub fn rock(&self, id: RockId) -> Option<&Rock> {
-        self.rocks.get(id.0 as usize)
+    pub fn asteroid(&self, id: AsteroidId) -> Option<&Asteroid> {
+        self.asteroids.get(id.0 as usize)
     }
 
     pub fn entities(&self) -> impl Iterator<Item = &Entity> {
@@ -146,16 +146,16 @@ impl State {
         self.wants.iter().map(|(post, wants)| (*post, wants))
     }
 
-    pub fn entities_at(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
+    pub fn entities_at(&self, asteroid: AsteroidId) -> impl Iterator<Item = &Entity> {
         self.entities
             .values()
-            .filter(move |entity| entity.home() == rock)
+            .filter(move |entity| entity.home() == asteroid)
     }
 
-    pub fn standing_at(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
+    pub fn standing_at(&self, asteroid: AsteroidId) -> impl Iterator<Item = &Entity> {
         self.entities
             .values()
-            .filter(move |entity| entity.standing(self.time()) == Some(rock))
+            .filter(move |entity| entity.standing(self.time()) == Some(asteroid))
     }
 
     pub fn ready(&self) -> &[Ready] {
@@ -179,19 +179,19 @@ impl State {
 
     pub fn count(&self, post: Post, row: RowId) -> u32 {
         let counted = self
-            .entities_at(post.rock)
+            .entities_at(post.asteroid)
             .filter(|entity| entity.seat() == post.seat && entity.row() == row)
             .count();
         u32::try_from(counted).unwrap_or(u32::MAX)
     }
 
-    pub fn holdings(&self) -> BTreeMap<(RockId, SeatId, RowId), Held> {
-        let mut holdings: BTreeMap<(RockId, SeatId, RowId), Held> = BTreeMap::new();
+    pub fn holdings(&self) -> BTreeMap<(AsteroidId, SeatId, RowId), Held> {
+        let mut holdings: BTreeMap<(AsteroidId, SeatId, RowId), Held> = BTreeMap::new();
         for entity in self.entities.values() {
-            let at = |rock: RockId| (rock, entity.seat(), entity.row());
+            let at = |asteroid: AsteroidId| (asteroid, entity.seat(), entity.row());
             match (entity.standing(self.time()), entity.flight()) {
-                (Some(rock), None) => holdings.entry(at(rock)).or_default().present += 1,
-                (Some(rock), Some(_)) => holdings.entry(at(rock)).or_default().leaving += 1,
+                (Some(asteroid), None) => holdings.entry(at(asteroid)).or_default().present += 1,
+                (Some(asteroid), Some(_)) => holdings.entry(at(asteroid)).or_default().leaving += 1,
                 (None, _) => {}
             }
             if entity.flight().is_some() {
@@ -201,13 +201,13 @@ impl State {
         holdings
     }
 
-    pub fn rock_body(&self, rock: RockId) -> Body {
-        self[rock].orbit().at(self.time(), self.gravity)
+    pub fn asteroid_body(&self, asteroid: AsteroidId) -> Body {
+        self[asteroid].orbit().at(self.time(), self.gravity)
     }
 
     pub fn body_of(&self, entity: &Entity) -> Body {
         match entity.motion() {
-            Motion::Fixed => self.rock_body(entity.home()),
+            Motion::Fixed => self.asteroid_body(entity.home()),
             Motion::Steered { body, .. } => body,
         }
     }
@@ -227,7 +227,7 @@ impl State {
         &mut self,
         seat: SeatId,
         row: RowId,
-        home: RockId,
+        home: AsteroidId,
         motion: Motion,
     ) -> EntityId {
         let id = self.next_entity;
@@ -256,7 +256,7 @@ impl State {
         self.tick = self.tick.next();
         if self.time().0.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
             self.seats.iter_mut().for_each(Seat::close_second);
-            self.rocks.iter_mut().for_each(Rock::close_second);
+            self.asteroids.iter_mut().for_each(Asteroid::close_second);
         }
     }
 
@@ -334,11 +334,11 @@ impl Index<EntityId> for State {
     }
 }
 
-impl Index<RockId> for State {
-    type Output = Rock;
+impl Index<AsteroidId> for State {
+    type Output = Asteroid;
 
-    fn index(&self, id: RockId) -> &Rock {
-        &self.rocks[id.0 as usize]
+    fn index(&self, id: AsteroidId) -> &Asteroid {
+        &self.asteroids[id.0 as usize]
     }
 }
 
@@ -358,9 +358,9 @@ impl Index<SeatId> for State {
     }
 }
 
-impl IndexMut<RockId> for State {
-    fn index_mut(&mut self, id: RockId) -> &mut Rock {
-        &mut self.rocks[id.0 as usize]
+impl IndexMut<AsteroidId> for State {
+    fn index_mut(&mut self, id: AsteroidId) -> &mut Asteroid {
+        &mut self.asteroids[id.0 as usize]
     }
 }
 
@@ -370,13 +370,13 @@ impl IndexMut<SeatId> for State {
     }
 }
 
+mod asteroid;
 mod command;
 mod draft;
 mod entity;
 mod frame;
 pub mod hash;
 mod ready;
-mod rock;
 mod schedule;
 mod seat;
 mod send;
@@ -394,7 +394,7 @@ mod tests {
     use crate::roster::Kind;
     use crate::vec3::Vec3;
 
-    const ROCK: RockId = RockId(0);
+    const ASTEROID: AsteroidId = AsteroidId(0);
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -412,41 +412,41 @@ mod tests {
     }
 
     #[test]
-    fn count_is_the_seat_entities_of_the_row_at_the_rock() {
+    fn count_is_the_seat_entities_of_the_row_at_the_asteroid() {
         let mut world = world();
         let structure = row_of(&world.state, Kind::Structure);
         let unit = row_of(&world.state, Kind::Unit);
-        let first = world.fix(0, structure, ROCK);
-        let second = world.fix(0, structure, ROCK);
-        world.fix(1, structure, ROCK);
+        let first = world.fix(0, structure, ASTEROID);
+        let second = world.fix(0, structure, ASTEROID);
+        world.fix(1, structure, ASTEROID);
         assert_ne!(first, second);
-        assert_eq!(world.count(0, ROCK, structure), 2);
-        assert_eq!(world.count(0, ROCK, unit), 0);
-        assert_eq!(world.state.entities_at(ROCK).count(), 3);
+        assert_eq!(world.count(0, ASTEROID, structure), 2);
+        assert_eq!(world.count(0, ASTEROID, unit), 0);
+        assert_eq!(world.state.entities_at(ASTEROID).count(), 3);
         assert_eq!(world.state[first].hp(), world.state[structure].hp.0);
         world.state.remove_entity(first);
-        assert_eq!(world.count(0, ROCK, structure), 1);
+        assert_eq!(world.count(0, ASTEROID, structure), 1);
         assert_eq!(world.state.entity(first), None);
         assert_eq!(world.state[second].id(), second);
     }
 
     #[test]
-    fn a_fixed_entity_has_its_rocks_body_and_a_free_one_its_own() {
+    fn a_fixed_entity_has_its_asteroids_body_and_a_free_one_its_own() {
         let mut world = world();
         let structure = row_of(&world.state, Kind::Structure);
         let unit = row_of(&world.state, Kind::Unit);
         let body = Body::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
-        let fixed = world.fix(0, structure, ROCK);
-        let free = world.free(0, unit, ROCK, body);
-        assert_eq!(world.body(fixed), world.state.rock_body(ROCK));
+        let fixed = world.fix(0, structure, ASTEROID);
+        let free = world.free(0, unit, ASTEROID, body);
+        assert_eq!(world.body(fixed), world.state.asteroid_body(ASTEROID));
         assert_eq!(world.body(free), body);
     }
 
     #[test]
-    fn a_rock_at_its_epoch_tick_is_at_the_body_it_came_from() {
+    fn a_asteroid_at_its_epoch_tick_is_at_the_body_it_came_from() {
         let world = world();
         assert_eq!(world.state.tick(), Tick::ZERO);
-        let body = world.state.rock_body(ROCK);
+        let body = world.state.asteroid_body(ASTEROID);
         assert!(
             body.pos.distance(Vec3::new(1.0e7, 0.0, 0.0)) < 1.0,
             "{body:?}"

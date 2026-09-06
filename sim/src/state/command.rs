@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::State;
-use crate::ids::{RockId, RowId, SeatId};
+use crate::ids::{AsteroidId, RowId, SeatId};
 use crate::post::Post;
 use crate::time::Tick;
 
@@ -12,7 +12,7 @@ pub const MAX_COMMANDS_PER_TICK: usize = 32;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Command {
     Want {
-        rock: RockId,
+        asteroid: AsteroidId,
         row: RowId,
         count: u32,
     },
@@ -52,11 +52,11 @@ pub enum Refused {
 pub enum Rejected {
     NoSuchSeat,
     DeadSeat,
-    NoSuchRock,
+    NoSuchAsteroid,
     NoSuchRow,
     TooMany,
     NotYet,
-    RockTaken,
+    AsteroidTaken,
 }
 
 impl Sequence {
@@ -116,9 +116,13 @@ impl Batch {
 
 impl State {
     pub(crate) fn apply(&mut self, issued: Issued) -> Result<(), Rejected> {
-        let Command::Want { rock, row, count } = issued.command;
+        let Command::Want {
+            asteroid,
+            row,
+            count,
+        } = issued.command;
         let post = Post {
-            rock,
+            asteroid,
             seat: issued.seat,
         };
         self.validate(post, row, count)?;
@@ -131,11 +135,11 @@ impl State {
 
     fn pick(&mut self, post: Post, row: RowId) -> Result<(), Rejected> {
         match self.draft.awaits(post.seat, row) {
-            Some(true) if self.draft.took(post.rock).is_none() => {
-                self.draft.place(post.rock, post.seat, row, self.tick);
+            Some(true) if self.draft.took(post.asteroid).is_none() => {
+                self.draft.place(post.asteroid, post.seat, row, self.tick);
                 Ok(())
             }
-            Some(true) => Err(Rejected::RockTaken),
+            Some(true) => Err(Rejected::AsteroidTaken),
             Some(false) => Err(Rejected::NotYet),
             None => Ok(()),
         }
@@ -148,8 +152,8 @@ impl State {
         if !seat.alive() {
             return Err(Rejected::DeadSeat);
         }
-        if self.rock(post.rock).is_none() {
-            return Err(Rejected::NoSuchRock);
+        if self.asteroid(post.asteroid).is_none() {
+            return Err(Rejected::NoSuchAsteroid);
         }
         if self.roster().get(row).is_none() {
             return Err(Rejected::NoSuchRow);

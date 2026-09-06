@@ -3,18 +3,21 @@ use std::collections::BTreeMap;
 use neumannarch_sim::roster::{Kind, Roster};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
-use neumannarch_sim::{RockId, RowId};
+use neumannarch_sim::{AsteroidId, RowId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sending {
-    pub from: RockId,
-    pub to: RockId,
+    pub from: AsteroidId,
+    pub to: AsteroidId,
     pub count: u32,
 }
 
 impl Sending {
-    pub fn present(view: &View, rock: RockId, roster: &Roster) -> u32 {
-        run(view, rock, roster).iter().map(|(_, held)| held).sum()
+    pub fn present(view: &View, asteroid: AsteroidId, roster: &Roster) -> u32 {
+        run(view, asteroid, roster)
+            .iter()
+            .map(|(_, held)| held)
+            .sum()
     }
 
     pub fn rows(&self, view: &View, roster: &Roster) -> Vec<(RowId, u32)> {
@@ -38,12 +41,12 @@ impl Sending {
             .flat_map(|(row, count)| {
                 [
                     Command::Want {
-                        rock: self.from,
+                        asteroid: self.from,
                         row,
                         count: wanted(view, self.from, row).saturating_sub(count),
                     },
                     Command::Want {
-                        rock: self.to,
+                        asteroid: self.to,
                         row,
                         count: (wanted(view, self.to, row) + count).min(MAX_WANT),
                     },
@@ -53,13 +56,13 @@ impl Sending {
     }
 }
 
-fn run(view: &View, rock: RockId, roster: &Roster) -> Vec<(RowId, u32)> {
+fn run(view: &View, asteroid: AsteroidId, roster: &Roster) -> Vec<(RowId, u32)> {
     let mut held: BTreeMap<RowId, u32> = BTreeMap::new();
     for unit in view
         .present
         .iter()
-        .filter(|unit| unit.seat == view.seat && unit.at.standing() == Some(rock))
-        .filter(|unit| unit.home == rock)
+        .filter(|unit| unit.seat == view.seat && unit.at.standing() == Some(asteroid))
+        .filter(|unit| unit.home == asteroid)
         .filter(|unit| roster[unit.row].kind() == Kind::Unit)
     {
         *held.entry(unit.row).or_insert(0) += 1;
@@ -75,8 +78,8 @@ fn run(view: &View, rock: RockId, roster: &Roster) -> Vec<(RowId, u32)> {
     rows
 }
 
-fn wanted(view: &View, rock: RockId, row: RowId) -> u32 {
-    view.plan_of(rock, row).map_or(0, |plan| plan.want)
+fn wanted(view: &View, asteroid: AsteroidId, row: RowId) -> u32 {
+    view.plan_of(asteroid, row).map_or(0, |plan| plan.want)
 }
 
 #[cfg(test)]
@@ -85,14 +88,14 @@ mod tests {
     use crate::display::local::Local;
     use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
 
-    fn rock(at: u32) -> RockId {
-        RockId(at)
+    fn asteroid(at: u32) -> AsteroidId {
+        AsteroidId(at)
     }
 
     fn placed() -> Local {
         let mut local = Local::start(1);
-        local.want(&[(rock(0), CONSTRUCTOR, 1)]);
-        local.want(&[(rock(2), SHIPYARD, 1)]);
+        local.want(&[(asteroid(0), CONSTRUCTOR, 1)]);
+        local.want(&[(asteroid(2), SHIPYARD, 1)]);
         local
     }
     #[test]
@@ -101,12 +104,12 @@ mod tests {
         let roster = local.session().state().roster();
 
         assert_eq!(
-            Sending::present(&local.view(), rock(0), roster),
+            Sending::present(&local.view(), asteroid(0), roster),
             1,
             "the constructor moves"
         );
         assert_eq!(
-            Sending::present(&local.view(), rock(2), roster),
+            Sending::present(&local.view(), asteroid(2), roster),
             0,
             "the shipyard never moves"
         );
@@ -117,8 +120,8 @@ mod tests {
         let local = placed();
         let roster = local.session().state().roster();
         let sending = Sending {
-            from: rock(0),
-            to: rock(1),
+            from: asteroid(0),
+            to: asteroid(1),
             count: 1,
         };
 
@@ -126,12 +129,12 @@ mod tests {
             sending.commands(&local.view(), roster),
             vec![
                 Command::Want {
-                    rock: rock(0),
+                    asteroid: asteroid(0),
                     row: CONSTRUCTOR,
                     count: 0,
                 },
                 Command::Want {
-                    rock: rock(1),
+                    asteroid: asteroid(1),
                     row: CONSTRUCTOR,
                     count: 1,
                 },
@@ -144,8 +147,8 @@ mod tests {
         let local = placed();
         let roster = local.session().state().roster();
         let sending = Sending {
-            from: rock(0),
-            to: rock(1),
+            from: asteroid(0),
+            to: asteroid(1),
             count: 9,
         };
 
@@ -157,8 +160,8 @@ mod tests {
         let local = placed();
         let roster = local.session().state().roster();
         let sending = Sending {
-            from: rock(7),
-            to: rock(1),
+            from: asteroid(7),
+            to: asteroid(1),
             count: 3,
         };
 
@@ -168,10 +171,10 @@ mod tests {
     #[test]
     fn a_unit_the_seat_no_longer_wants_there_can_still_be_sent() {
         let mut local = placed();
-        local.want(&[(rock(0), CONSTRUCTOR, 0)]);
+        local.want(&[(asteroid(0), CONSTRUCTOR, 0)]);
         let sending = Sending {
-            from: rock(0),
-            to: rock(1),
+            from: asteroid(0),
+            to: asteroid(1),
             count: 1,
         };
 

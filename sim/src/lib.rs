@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 pub use history::{Retention, Rewound, Session, Unseated, WINDOW_SECONDS};
-pub use ids::{EntityId, RockId, RowId, SeatId, TeamId};
+pub use ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
 pub use materials::{Material, Materials, Stockpile};
 pub use post::Post;
 pub use real::Real;

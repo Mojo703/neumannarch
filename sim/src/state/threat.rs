@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::State;
 use super::entity::Entity;
-use crate::ids::{EntityId, RockId, TeamId};
+use crate::ids::{AsteroidId, EntityId, TeamId};
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -16,7 +16,7 @@ pub struct Assigned(BTreeMap<EntityId, f64>);
 
 pub struct Threat<'a> {
     state: &'a State,
-    here: RockId,
+    here: AsteroidId,
     team: TeamId,
     from: Vec3,
     dealt: Vec<f64>,
@@ -86,7 +86,7 @@ mod tests {
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
-    const HOME: RockId = RockId(0);
+    const HOME: AsteroidId = AsteroidId(0);
 
     fn world() -> World {
         World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)])
@@ -94,7 +94,7 @@ mod tests {
 
     fn aimed(world: &World, shooter: EntityId) -> Option<Aim> {
         let sweep = world.state.sweep();
-        let here = world.state.rock_body(HOME).pos;
+        let here = world.state.asteroid_body(HOME).pos;
         Threat::of(&world.state, &world.state[shooter])?.best(
             sweep
                 .within(here, Belt::ZONE_RADIUS_METERS)
@@ -123,10 +123,10 @@ mod tests {
     }
 
     #[test]
-    fn an_enemy_at_another_rock_is_never_prey() {
+    fn an_enemy_at_another_asteroid_is_never_prey() {
         let mut world = world();
         let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        world.hold(1, RAIDER, RockId(1), 0.0);
+        world.hold(1, RAIDER, AsteroidId(1), 0.0);
 
         assert_eq!(aimed(&world, hunter), None);
     }
@@ -138,7 +138,7 @@ mod tests {
         let dangerous = world.hold(1, RAIDER, HOME, 2.0);
         let harmless = world.hold(1, CONSTRUCTOR, HOME, 4.0);
         let sweep = world.state.sweep();
-        let here = world.state.rock_body(HOME).pos;
+        let here = world.state.asteroid_body(HOME).pos;
         let threat = Threat::of(&world.state, &world.state[hunter]).expect("a standing shooter");
 
         let mut assigned = Assigned::default();

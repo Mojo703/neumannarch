@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::power::Power;
 use crate::belt::Belt;
-use crate::ids::{EntityId, RockId};
+use crate::ids::{AsteroidId, EntityId};
 use crate::state::{Entity, Motion, State};
 use crate::vec3::Vec3;
 
@@ -22,13 +22,13 @@ pub struct Fields(BTreeMap<EntityId, Sample>);
 
 impl Fields {
     pub fn of(state: &State) -> Fields {
-        let mut rolls: BTreeMap<RockId, Vec<&Entity>> = BTreeMap::new();
+        let mut rolls: BTreeMap<AsteroidId, Vec<&Entity>> = BTreeMap::new();
         for entity in state.entities() {
             if entity.motion() == Motion::Fixed {
                 continue;
             }
-            if let Some(rock) = entity.standing(state.time()) {
-                rolls.entry(rock).or_default().push(entity);
+            if let Some(asteroid) = entity.standing(state.time()) {
+                rolls.entry(asteroid).or_default().push(entity);
             }
         }
         let mut fields = Fields(BTreeMap::new());
@@ -149,14 +149,14 @@ impl Fraction {
 mod tests {
     use super::*;
     use crate::fixture::World;
-    use crate::ids::{RockId, SeatId, TeamId};
+    use crate::ids::{AsteroidId, SeatId, TeamId};
     use crate::orbit::body::Gravity;
     use crate::roster::{CONSTRUCTOR, FRIGATE};
     use crate::state::{Flight, Send};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
-    const HOME: RockId = RockId(0);
+    const HOME: AsteroidId = AsteroidId(0);
 
     fn world() -> World {
         World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)])
@@ -245,7 +245,7 @@ mod tests {
         world.hold(0, FRIGATE, HOME, 5.0);
         let outward = world
             .state
-            .rock_body(HOME)
+            .asteroid_body(HOME)
             .pos
             .normalized()
             .expect("a radius");
@@ -285,7 +285,7 @@ mod tests {
         let reader = world.hold(0, FRIGATE, HOME, 0.0);
         let flier = world.hold(0, FRIGATE, HOME, 2.0);
         let together = Fields::of(&world.state).at(reader).own;
-        let send = Send::joining(&world.state, HOME, RockId(1), SeatId(0), &[flier])
+        let send = Send::joining(&world.state, HOME, AsteroidId(1), SeatId(0), &[flier])
             .expect("a send across the ring");
         world.launch(flier, HOME, 2.0, Flight::new(HOME, send.schedule));
 

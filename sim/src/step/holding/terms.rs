@@ -37,8 +37,8 @@ pub fn caution(row: &Row, sample: Sample) -> Vec3 {
     sample.retreat() * row.steering.caution.0
 }
 
-pub fn returning(body: Body, row: &Row, rock: Body, strayed: f64) -> Vec3 {
-    toward(body, row, row.steering.returning, rock, strayed)
+pub fn returning(body: Body, row: &Row, asteroid: Body, strayed: f64) -> Vec3 {
+    toward(body, row, row.steering.returning, asteroid, strayed)
 }
 
 pub fn chase(body: Body, row: &Row, target: Body) -> Vec3 {
@@ -104,7 +104,7 @@ mod tests {
         }
     }
 
-    fn rock() -> Body {
+    fn asteroid() -> Body {
         Body::new(Vec3::ZERO, Vec3::ZERO)
     }
 
@@ -130,14 +130,16 @@ mod tests {
         let row = row();
         let far = Body::new(out(3.0 * Belt::ZONE_RADIUS_METERS), Vec3::ZERO);
         assert!(
-            (returning(far, &row, rock(), strayed(far)).length() - cruise(Belt::ARRIVAL_METERS))
-                .abs()
+            (returning(far, &row, asteroid(), strayed(far)).length()
+                - cruise(Belt::ARRIVAL_METERS))
+            .abs()
                 < 1e-9
         );
 
         let close = Body::new(out(Belt::ZONE_RADIUS_METERS + 1.0), Vec3::ZERO);
         assert!(
-            (returning(close, &row, rock(), strayed(close)).length() - cruise(1.0)).abs() < 1e-9
+            (returning(close, &row, asteroid(), strayed(close)).length() - cruise(1.0)).abs()
+                < 1e-9
         );
     }
 
@@ -148,35 +150,35 @@ mod tests {
             out(Belt::ZONE_RADIUS_METERS - 1.0),
             Vec3::new(0.3, 0.0, 0.0),
         );
-        let braking = returning(drifting, &row, rock(), strayed(drifting));
+        let braking = returning(drifting, &row, asteroid(), strayed(drifting));
         assert!(
             braking.distance(Vec3::new(-0.3, 0.0, 0.0)) < 1e-12,
             "{braking:?}"
         );
 
         let still = Body::new(out(Belt::ZONE_RADIUS_METERS - 1.0), Vec3::ZERO);
-        assert!(returning(still, &row, rock(), strayed(still)).length() < 1e-12);
+        assert!(returning(still, &row, asteroid(), strayed(still)).length() < 1e-12);
     }
 
     #[test]
-    fn return_pushes_out_of_the_rock_the_deeper_the_harder() {
+    fn return_pushes_out_of_the_asteroid_the_deeper_the_harder() {
         let row = row();
         let shallow = Body::new(out(floor() - 0.2), Vec3::ZERO);
         let deep = Body::new(out(0.1 * floor()), Vec3::ZERO);
         let at_floor = Body::new(out(floor()), Vec3::ZERO);
 
-        let shallow_pull = returning(shallow, &row, rock(), strayed(shallow));
-        let deep_pull = returning(deep, &row, rock(), strayed(deep));
+        let shallow_pull = returning(shallow, &row, asteroid(), strayed(shallow));
+        let deep_pull = returning(deep, &row, asteroid(), strayed(deep));
         assert!(
             shallow_pull.z > 0.0,
-            "it is pushed into the rock: {shallow_pull:?}"
+            "it is pushed into the asteroid: {shallow_pull:?}"
         );
         assert!(
             deep_pull.z > shallow_pull.z,
             "{deep_pull:?} against {shallow_pull:?}"
         );
         assert!(
-            returning(at_floor, &row, rock(), strayed(at_floor)).length() < 1e-12,
+            returning(at_floor, &row, asteroid(), strayed(at_floor)).length() < 1e-12,
             "the floor itself is pushed"
         );
     }

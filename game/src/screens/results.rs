@@ -21,17 +21,17 @@ const WIDTH: f32 = 520.0;
 
 const ACTION_WIDTH: f32 = 160.0;
 
-const ROCK_HELD: Glyph = Glyph {
+const ASTEROID_HELD: Glyph = Glyph {
     frame: Frame::Square,
     marks: Vec::new(),
     size: Size::Medium,
 };
 
-const ROCK_STEP: f32 = 2.5 * glyph::HALF;
+const ASTEROID_STEP: f32 = 2.5 * glyph::HALF;
 
 const WINNER_FROM: f32 = 84.0;
 
-const ROCKS_FROM: f32 = 176.0;
+const ASTEROIDS_FROM: f32 = 176.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {
@@ -111,12 +111,12 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
             panel::BODY_SIZE,
         );
     }
-    for at in 0..team.rocks {
+    for at in 0..team.asteroids {
         Stencil {
-            glyph: &ROCK_HELD,
+            glyph: &ASTEROID_HELD,
             cell: Cell {
                 centre: Pos2::new(
-                    rect.left() + ROCKS_FROM + at as f32 * ROCK_STEP,
+                    rect.left() + ASTEROIDS_FROM + at as f32 * ASTEROID_STEP,
                     rect.center().y,
                 ),
                 half: glyph::HALF,

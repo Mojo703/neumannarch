@@ -1,6 +1,6 @@
 use core::ops::Add;
 
-use crate::ids::{EntityId, RockId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::state::{Entity, State};
 use crate::time::Tick;
@@ -31,10 +31,10 @@ impl<'a> Construction<'a> {
         let dt = Tick(1).seconds();
         for seat in self.seats() {
             let mut stockpile = *self.state[seat].stockpile();
-            for rock in self.rocks_of(seat) {
-                let rates = self.builders(seat, rock);
-                let left = self.build(&mut progress, seat, rock, &rates, dt, &mut stockpile);
-                self.repair(&mut progress, seat, rock, left);
+            for asteroid in self.asteroids_of(seat) {
+                let rates = self.builders(seat, asteroid);
+                let left = self.build(&mut progress, seat, asteroid, &rates, dt, &mut stockpile);
+                self.repair(&mut progress, seat, asteroid, left);
             }
         }
         progress
@@ -52,21 +52,21 @@ impl<'a> Construction<'a> {
         seats
     }
 
-    fn rocks_of(&self, seat: SeatId) -> Vec<RockId> {
-        let mut rocks: Vec<RockId> = self
+    fn asteroids_of(&self, seat: SeatId) -> Vec<AsteroidId> {
+        let mut asteroids: Vec<AsteroidId> = self
             .state
             .entities()
             .filter(|entity| entity.seat() == seat && self.rate_of(entity) > 0.0)
             .filter_map(|entity| entity.standing(self.state.time()))
             .collect();
-        rocks.sort_unstable();
-        rocks.dedup();
-        rocks
+        asteroids.sort_unstable();
+        asteroids.dedup();
+        asteroids
     }
 
-    fn builders(&self, seat: SeatId, rock: RockId) -> Vec<f64> {
+    fn builders(&self, seat: SeatId, asteroid: AsteroidId) -> Vec<f64> {
         self.state
-            .standing_at(rock)
+            .standing_at(asteroid)
             .filter(|entity| entity.seat() == seat)
             .flat_map(|entity| self.state[entity.row()].builds())
             .collect()
@@ -83,12 +83,12 @@ impl<'a> Construction<'a> {
         &self,
         progress: &mut Progress,
         seat: SeatId,
-        rock: RockId,
+        asteroid: AsteroidId,
         rates: &[f64],
         dt: f64,
         stockpile: &mut Stockpile,
     ) -> f64 {
-        let frames = self.frames_at(seat, rock);
+        let frames = self.frames_at(seat, asteroid);
         let works: Vec<Work> = frames
             .iter()
             .map(|at| {
@@ -117,10 +117,10 @@ impl<'a> Construction<'a> {
         unused + spare
     }
 
-    fn repair(&self, progress: &mut Progress, seat: SeatId, rock: RockId, effort: f64) {
+    fn repair(&self, progress: &mut Progress, seat: SeatId, asteroid: AsteroidId, effort: f64) {
         let damaged: Vec<&Entity> = self
             .state
-            .standing_at(rock)
+            .standing_at(asteroid)
             .filter(|entity| entity.seat() == seat)
             .filter(|entity| entity.hp() < self.state[entity.row()].hp.0)
             .collect();
@@ -137,12 +137,12 @@ impl<'a> Construction<'a> {
         }
     }
 
-    fn frames_at(&self, seat: SeatId, rock: RockId) -> Vec<usize> {
+    fn frames_at(&self, seat: SeatId, asteroid: AsteroidId) -> Vec<usize> {
         self.state
             .frames()
             .iter()
             .enumerate()
-            .filter(|(_, frame)| frame.post().seat == seat && frame.post().rock == rock)
+            .filter(|(_, frame)| frame.post().seat == seat && frame.post().asteroid == asteroid)
             .map(|(at, _)| at)
             .collect()
     }

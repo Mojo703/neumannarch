@@ -4,7 +4,7 @@ use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stro
 use neumannarch_sim::roster::{Kind, Roster, Row};
 use neumannarch_sim::state::Command;
 use neumannarch_sim::state::view::Building;
-use neumannarch_sim::{RockId, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, RowId, SeatId};
 
 use crate::display::glyph::{self, Glyph};
 use crate::display::glyph_quad::seat_color32;
@@ -103,7 +103,7 @@ pub struct Sizing {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placed {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub centre: Pos2,
     pub sizing: Sizing,
     pub alpha: f32,
@@ -111,14 +111,14 @@ pub struct Placed {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Footprint {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub centre: Pos2,
     full: Rect,
     small: Rect,
 }
 
 pub struct Wheel {
-    rock: RockId,
+    asteroid: AsteroidId,
     centre: Pos2,
     scale: f32,
     alpha: f32,
@@ -160,7 +160,7 @@ enum Mark {
 
 impl Footprint {
     pub fn of(
-        rock: RockId,
+        asteroid: AsteroidId,
         centre: Pos2,
         view: &WheelView,
         roster: &Roster,
@@ -174,7 +174,7 @@ impl Footprint {
                 .fold(pick_square(centre), |bounds, slot| bounds.union(slot.frame))
         };
         Footprint {
-            rock,
+            asteroid,
             centre,
             full: bounds(Detail::Full),
             small: bounds(Detail::Small),
@@ -198,13 +198,13 @@ impl Wheel {
         bands: Option<Bands>,
     ) -> Wheel {
         let Placed {
-            rock,
+            asteroid,
             centre,
             sizing,
             alpha,
         } = placed;
         Wheel {
-            rock,
+            asteroid,
             centre,
             scale: sizing.scale,
             alpha,
@@ -213,8 +213,8 @@ impl Wheel {
         }
     }
 
-    pub fn rock(&self) -> RockId {
-        self.rock
+    pub fn asteroid(&self) -> AsteroidId {
+        self.asteroid
     }
 
     pub fn centre(&self) -> Pos2 {
@@ -633,9 +633,9 @@ impl Line {
 }
 
 impl WheelBand {
-    pub fn edit(self, rock: RockId, row: RowId, want: u32) -> Command {
+    pub fn edit(self, asteroid: AsteroidId, row: RowId, want: u32) -> Command {
         Command::Want {
-            rock,
+            asteroid,
             row,
             count: self.wanted(want),
         }
@@ -933,7 +933,7 @@ mod tests {
     use super::*;
     use crate::display::scene::RowView;
 
-    const ROCK: RockId = RockId(0);
+    const ASTEROID: AsteroidId = AsteroidId(0);
 
     const MINE: SeatId = SeatId(0);
 
@@ -967,13 +967,13 @@ mod tests {
         let roster = Roster::shipped();
         Wheel::over(
             Placed {
-                rock: ROCK,
+                asteroid: ASTEROID,
                 centre: CENTRE,
                 sizing: Sizing::settled(detail),
                 alpha: 1.0,
             },
             &WheelView {
-                rock: ROCK,
+                asteroid: ASTEROID,
                 sectors,
             },
             &roster,
@@ -999,7 +999,7 @@ mod tests {
                     Entry::Present(2),
                     Entry::Arriving {
                         count: 3,
-                        from: RockId(4),
+                        from: AsteroidId(4),
                     },
                     Entry::Wanted {
                         count: 1,
@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_wheel_stands_a_section_per_row_to_the_rocks_right_structures_first() {
+    fn a_selected_wheel_stands_a_section_per_row_to_the_asteroids_right_structures_first() {
         let roster = Roster::shipped();
         let wheel = wheel(
             vec![sector(MINE, Vec::new())],
@@ -1037,7 +1037,7 @@ mod tests {
         assert_eq!(slots.len(), roster.iter().count());
         assert!(
             slots.iter().all(|slot| slot.frame.left() > CENTRE.x),
-            "every section stands right of the rock"
+            "every section stands right of the asteroid"
         );
         assert!(
             slots.chunks(STRIPS_PER_COLUMN).all(|column| {
@@ -1061,12 +1061,12 @@ mod tests {
             .fold(slots[0].frame, |stack, slot| stack.union(slot.frame));
         assert!(
             (stack.center().y - CENTRE.y).abs() < 1.0,
-            "the stack is centred on the rock's height"
+            "the stack is centred on the asteroid's height"
         );
     }
 
     #[test]
-    fn sections_stand_on_an_arc_that_bows_away_from_the_rock() {
+    fn sections_stand_on_an_arc_that_bows_away_from_the_asteroid() {
         let wheel = wheel(
             vec![sector(MINE, Vec::new())],
             Detail::Full,
@@ -1081,7 +1081,7 @@ mod tests {
         for end in [slots[0], slots[slots.len() - 1]] {
             assert!(
                 end.frame.left() < middle.frame.left(),
-                "the ends of the stack stand nearer the rock than its middle"
+                "the ends of the stack stand nearer the asteroid than its middle"
             );
         }
     }
@@ -1382,9 +1382,9 @@ mod tests {
         assert_eq!(WheelBand::Plus(1).wanted(MAX_WANT), MAX_WANT);
         assert_eq!(WheelBand::Minus(1).wanted(0), 0);
         assert_eq!(
-            WheelBand::Plus(1).edit(ROCK, FRIGATE, 2),
+            WheelBand::Plus(1).edit(ASTEROID, FRIGATE, 2),
             Command::Want {
-                rock: ROCK,
+                asteroid: ASTEROID,
                 row: FRIGATE,
                 count: 3
             }
@@ -1408,7 +1408,7 @@ mod tests {
         );
         assert_eq!(
             said(at(1)).map(|spoken| spoken.phrase(&Roster::shipped())),
-            Some("Frigate arriving from Rock 5".to_string())
+            Some("Frigate arriving from Asteroid 5".to_string())
         );
         assert_eq!(
             said(slot.glyph_rect(1.0).center()),
@@ -1500,16 +1500,19 @@ mod tests {
     }
 
     #[test]
-    fn a_footprint_covers_the_rock_and_every_section_at_each_size() {
+    fn a_footprint_covers_the_asteroid_and_every_section_at_each_size() {
         let roster = Roster::shipped();
         let view = WheelView {
-            rock: ROCK,
+            asteroid: ASTEROID,
             sectors: held(),
         };
-        let footprint = Footprint::of(ROCK, CENTRE, &view, &roster, MINE);
+        let footprint = Footprint::of(ASTEROID, CENTRE, &view, &roster, MINE);
 
         for detail in [Detail::Full, Detail::Small] {
-            assert!(footprint.at(detail).contains(CENTRE), "the rock is on it");
+            assert!(
+                footprint.at(detail).contains(CENTRE),
+                "the asteroid is on it"
+            );
         }
         let full = wheel(held(), Detail::Full, Some(selected()));
         let slot = slot_of(&full, FRIGATE);

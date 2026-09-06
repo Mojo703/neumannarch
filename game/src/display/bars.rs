@@ -1,9 +1,9 @@
 use mirage_engine::egui::{self, Pos2, Rect, Shape};
-use neumannarch_sim::{Material, RockId};
+use neumannarch_sim::{AsteroidId, Material};
 
 use crate::display::hue;
 use crate::display::icon;
-use crate::display::scene::{RockView, Scene};
+use crate::display::scene::{AsteroidView, Scene};
 use crate::display::stencil::Cell;
 use crate::display::viewport::Viewport;
 use crate::display::wheel::{self, Placed, Side};
@@ -44,19 +44,19 @@ struct Bar {
 impl Bars {
     pub fn over(scene: &Scene, viewport: &Viewport, placed: &[Placed]) -> Bars {
         let largest = scene
-            .rocks
+            .asteroids
             .iter()
-            .flat_map(|rock| rock.caps.amounts().map(|(_, cap)| cap))
+            .flat_map(|asteroid| asteroid.caps.amounts().map(|(_, cap)| cap))
             .fold(0.0, f64::max);
         let bars = scene
-            .rocks
+            .asteroids
             .iter()
-            .filter_map(|rock| {
-                let placed = match placed.iter().find(|placed| placed.rock == rock.id) {
+            .filter_map(|asteroid| {
+                let placed = match placed.iter().find(|placed| placed.asteroid == asteroid.id) {
                     Some(placed) => *placed,
-                    None => Placed::resting(rock.id, viewport.point_of(rock.pos)?),
+                    None => Placed::resting(asteroid.id, viewport.point_of(asteroid.pos)?),
                 };
-                Some(stacked(rock, placed, largest))
+                Some(stacked(asteroid, placed, largest))
             })
             .flatten()
             .collect();
@@ -91,10 +91,13 @@ impl Bars {
             .map(|bar| (bar.frame.center(), bar.material, bar.pull, bar.cap))
     }
 
-    pub fn of_rock(&self, rock: RockId) -> impl Iterator<Item = (Material, Rect, Rect)> + '_ {
+    pub fn of_asteroid(
+        &self,
+        asteroid: AsteroidId,
+    ) -> impl Iterator<Item = (Material, Rect, Rect)> + '_ {
         self.bars
             .iter()
-            .filter(move |bar| bar.placed.rock == rock)
+            .filter(move |bar| bar.placed.asteroid == asteroid)
             .map(|bar| (bar.material, bar.frame, bar.band))
     }
 
@@ -104,18 +107,18 @@ impl Bars {
             .filter(|bar| {
                 self.bars
                     .iter()
-                    .find(|first| first.placed.rock == bar.placed.rock)
+                    .find(|first| first.placed.asteroid == bar.placed.asteroid)
                     .is_some_and(|first| core::ptr::eq(first, *bar))
             })
             .map(|first| {
                 let Placed {
-                    rock,
+                    asteroid,
                     centre,
                     sizing,
                     alpha,
                 } = first.placed;
                 let stack = self
-                    .of_rock(rock)
+                    .of_asteroid(asteroid)
                     .map(|(_, frame, _)| frame)
                     .reduce(|stack, frame| stack.union(frame))
                     .unwrap_or(first.frame);
@@ -169,10 +172,14 @@ impl Bar {
     }
 }
 
-fn stacked(rock: &RockView, placed: Placed, largest: f64) -> Vec<Bar> {
+fn stacked(asteroid: &AsteroidView, placed: Placed, largest: f64) -> Vec<Bar> {
     let scale = placed.sizing.scale;
     let centre = placed.centre;
-    let rows: Vec<(Material, f64)> = rock.caps.amounts().filter(|(_, cap)| *cap > 0.0).collect();
+    let rows: Vec<(Material, f64)> = asteroid
+        .caps
+        .amounts()
+        .filter(|(_, cap)| *cap > 0.0)
+        .collect();
     let height = wheel::SECTION_HEIGHT * scale;
     let step = (wheel::SECTION_HEIGHT + wheel::ROW_GAP) * scale;
     let total =
@@ -200,7 +207,7 @@ fn stacked(rock: &RockView, placed: Placed, largest: f64) -> Vec<Bar> {
                 material,
                 frame,
                 band,
-                pull: rock.pull[material],
+                pull: asteroid.pull[material],
                 cap,
                 placed,
             }
@@ -218,12 +225,12 @@ mod tests {
     use crate::display::wheel::{Detail, Sizing};
     use crate::display::wheels::RESTING_ALPHA;
 
-    const RICH: RockId = RockId(0);
+    const RICH: AsteroidId = AsteroidId(0);
 
-    const POOR: RockId = RockId(1);
+    const POOR: AsteroidId = AsteroidId(1);
 
     fn scene() -> Scene {
-        let rock = |id: RockId, pos: Vec3, caps: Materials, pull: Materials| RockView {
+        let asteroid = |id: AsteroidId, pos: Vec3, caps: Materials, pull: Materials| AsteroidView {
             id,
             pos,
             radius: 6.0,
@@ -231,14 +238,14 @@ mod tests {
             pull,
         };
         Scene {
-            rocks: vec![
-                rock(
+            asteroids: vec![
+                asteroid(
                     RICH,
                     Vec3::new(-300.0, 0.0, 0.0),
                     Materials::new(20.0, 10.0, 0.0),
                     Materials::new(12.0, 0.0, 0.0),
                 ),
-                rock(
+                asteroid(
                     POOR,
                     Vec3::new(300.0, 0.0, 0.0),
                     Materials::new(5.0, 5.0, 5.0),
@@ -264,22 +271,22 @@ mod tests {
         )
     }
 
-    fn rock_point(rock: RockId) -> Pos2 {
+    fn asteroid_point(asteroid: AsteroidId) -> Pos2 {
         let scene = scene();
-        let rock = scene
-            .rocks
+        let asteroid = scene
+            .asteroids
             .iter()
-            .find(|view| view.id == rock)
-            .expect("a rock");
-        viewport().point_of(rock.pos).expect("on screen")
+            .find(|view| view.id == asteroid)
+            .expect("an asteroid");
+        viewport().point_of(asteroid.pos).expect("on screen")
     }
 
     #[test]
-    fn a_rock_carries_a_bar_per_material_it_caps_at_its_left_stacked_on_its_height() {
+    fn a_asteroid_carries_a_bar_per_material_it_caps_at_its_left_stacked_on_its_height() {
         let bars = Bars::at_rest(&scene(), &viewport());
-        let centre = rock_point(RICH);
+        let centre = asteroid_point(RICH);
 
-        let rich: Vec<(Material, Rect, Rect)> = bars.of_rock(RICH).collect();
+        let rich: Vec<(Material, Rect, Rect)> = bars.of_asteroid(RICH).collect();
         assert_eq!(
             rich.iter()
                 .map(|(material, _, _)| *material)
@@ -294,14 +301,14 @@ mod tests {
         );
         let stack = rich[0].1.union(rich[1].1);
         assert!((stack.center().y - centre.y).abs() < 1.0);
-        assert_eq!(bars.of_rock(POOR).count(), 3);
+        assert_eq!(bars.of_asteroid(POOR).count(), 3);
     }
 
     #[test]
-    fn a_bar_grows_leftward_from_its_icon_at_the_rocks_side_by_its_cap_against_the_largest() {
+    fn a_bar_grows_leftward_from_its_icon_at_the_asteroids_side_by_its_cap_against_the_largest() {
         let bars = Bars::at_rest(&scene(), &viewport());
-        let bar = |rock, material| {
-            bars.of_rock(rock)
+        let bar = |asteroid, material| {
+            bars.of_asteroid(asteroid)
                 .find(|(shown, _, _)| *shown == material)
                 .map(|(_, frame, band)| (frame, band))
                 .expect("a bar")
@@ -311,13 +318,13 @@ mod tests {
         assert!((longest.width() - BAR_LENGTH * Detail::Small.scale()).abs() < 1e-3);
         assert!(
             longest.right() < frame.right() - ICON_SLOT * Detail::Small.scale(),
-            "the icon stands right of the bar, nearest the rock"
+            "the icon stands right of the bar, nearest the asteroid"
         );
         let (shorter_frame, shorter) = bar(RICH, Material::Volatiles);
         assert!((shorter.width() - longest.width() / 2.0).abs() < 1e-3);
         assert!(
             (shorter_frame.right() - frame.right()).abs() < 2.0,
-            "both rows end at the rock's side and the short one starts nearer it"
+            "both rows end at the asteroid's side and the short one starts nearer it"
         );
         assert!((bar(POOR, Material::Energy).1.width() - longest.width() / 4.0).abs() < 1e-3);
         assert!(
@@ -329,21 +336,21 @@ mod tests {
     #[test]
     fn the_bars_right_ends_stand_on_the_wheels_arc_mirrored_and_a_spine_runs_along_it() {
         let full = Placed {
-            rock: POOR,
-            centre: rock_point(POOR),
+            asteroid: POOR,
+            centre: asteroid_point(POOR),
             sizing: Sizing::settled(Detail::Full),
             alpha: 1.0,
         };
         let bars = Bars::over(&scene(), &viewport(), &[full]);
-        let frames: Vec<Rect> = bars.of_rock(POOR).map(|(_, frame, _)| frame).collect();
+        let frames: Vec<Rect> = bars.of_asteroid(POOR).map(|(_, frame, _)| frame).collect();
 
         assert_eq!(frames.len(), 3);
         assert!(
             frames[1].right() < frames[0].right() && frames[1].right() < frames[2].right(),
-            "the middle row ends farther from the rock than the ends, the wheel's bow mirrored"
+            "the middle row ends farther from the asteroid than the ends, the wheel's bow mirrored"
         );
         let spines: Vec<Shape> = bars.spines().collect();
-        assert_eq!(spines.len(), 2, "one spine per rock");
+        assert_eq!(spines.len(), 2, "one spine per asteroid");
         let Shape::Path(path) = &spines[1] else {
             panic!("a spine is a line: {:?}", spines[1]);
         };
@@ -356,27 +363,27 @@ mod tests {
                     && point.x < full.centre.x
                     && (stack.top()..=stack.bottom()).contains(&point.y)
             }),
-            "the spine runs between the bars' right ends and the rock"
+            "the spine runs between the bars' right ends and the asteroid"
         );
     }
 
     #[test]
-    fn a_bar_takes_the_scale_and_alpha_its_rock_was_placed_at_and_rests_small_elsewhere() {
+    fn a_bar_takes_the_scale_and_alpha_its_asteroid_was_placed_at_and_rests_small_elsewhere() {
         let full = Placed {
-            rock: RICH,
-            centre: rock_point(RICH),
+            asteroid: RICH,
+            centre: asteroid_point(RICH),
             sizing: Sizing::settled(Detail::Full),
             alpha: 1.0,
         };
         let bars = Bars::over(&scene(), &viewport(), &[full]);
 
-        let height = |rock| bars.of_rock(rock).next().expect("a bar").1.height();
+        let height = |asteroid| bars.of_asteroid(asteroid).next().expect("a bar").1.height();
         assert!((height(RICH) - wheel::SECTION_HEIGHT).abs() < 1e-3);
         assert!((height(POOR) - wheel::SECTION_HEIGHT * Detail::Small.scale()).abs() < 1e-3);
-        let bar = |rock| {
+        let bar = |asteroid| {
             bars.bars
                 .iter()
-                .find(|bar| bar.placed.rock == rock)
+                .find(|bar| bar.placed.asteroid == asteroid)
                 .expect("a bar")
         };
         assert_eq!(bar(RICH).placed.alpha, 1.0);
@@ -386,13 +393,13 @@ mod tests {
     #[test]
     fn a_bar_under_the_pointer_says_its_pull_of_its_cap() {
         let bars = Bars::at_rest(&scene(), &viewport());
-        let (_, frame, _) = bars.of_rock(RICH).next().expect("a bar");
+        let (_, frame, _) = bars.of_asteroid(RICH).next().expect("a bar");
 
         assert_eq!(
             bars.spoken_at(frame.center())
                 .map(|(_, material, pull, cap)| (material, pull, cap)),
             Some((Material::Metals, 12.0, 20.0))
         );
-        assert_eq!(bars.spoken_at(rock_point(RICH)), None);
+        assert_eq!(bars.spoken_at(asteroid_point(RICH)), None);
     }
 }

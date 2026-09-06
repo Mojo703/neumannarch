@@ -13,32 +13,32 @@ client.
 ## Ships are the truth
 
 Every ship and structure is drawn where the sim has it, always. A held
-force is readable because the sim holds it inside its rock's zone
+force is readable because the sim holds it inside its asteroid's zone
 (DESIGN.md, Movement and combat); the display never rearranges anything,
 and no glyph stands for a ship anywhere but at the ship.
 
 ## The two layers
 
-The belt is drawn in 3D, through the engine: rocks as meshes at their
+The belt is drawn in 3D, through the engine: asteroids as meshes at their
 bodies, and ships as billboarded textured quads showing the row's glyph,
 one draw per ship. It changes only as the sim moves a body, every tick.
 
 The HUD is painted in screen space over the belt camera's projection of
-world points: everything the sections below describe, except rocks and
+world points: everything the sections below describe, except asteroids and
 ships. Nothing on it is a widget or a panel; the painter is only a way to
 put pixels on screen. It draws after the belt and is never covered by it,
 and it changes with the sim and with the player's pointer, every frame.
 
 ## The wheel
 
-Every rock that holds a composition, and the selected rock whether or
-not it holds one, carries one wheel: the whole HUD of a rock. Ships and
+Every asteroid that holds a composition, and the selected asteroid whether or
+not it holds one, carries one wheel: the whole HUD of an asteroid. Ships and
 structures are drawn at their world positions and never on it.
 
-A wheel is a column of sections standing to the right of the rock,
-centred on the rock's height, their inner edges on an arc of a circle
-whose centre lies far to the rock's left, so the column bows toward the
-rock's right and the rock's left side carries the rock's resources
+A wheel is a column of sections standing to the right of the asteroid,
+centred on the asteroid's height, their inner edges on an arc of a circle
+whose centre lies far to the asteroid's left, so the column bows toward the
+asteroid's right and the asteroid's left side carries the asteroid's resources
 (Resources, below). A section is one upright strip for
 one row, of the glyph's height, never a box: the row's glyph at its
 left, then its counted lines side by side along the strip, each a small
@@ -54,7 +54,7 @@ lines, left to right:
   stay until a shortfall elsewhere wants them.
 - **In transit:** an arrow mark and one count of units leaving (in a
   send forming here) or arriving (in a send toward here); the arrow
-  points away from the rock for leaving and toward it for arriving.
+  points away from the asteroid for leaving and toward it for arriving.
 - **Wanted:** a hollow mark and the count still to come: the want not
   covered by present or arriving, the frame building counted among
   them, so the numeral holds while a frame opens and fills. Where a
@@ -62,18 +62,18 @@ lines, left to right:
   progress, and a frame that spent nothing this second for want of a
   material carries a belt along the box's base in that material's hue:
   metals, volatiles or energy, three fixed hues named in the game crate.
-  A dashed mark when no builder is at the rock.
+  A dashed mark when no builder is at the asteroid.
 
 Sections stand in a fixed order down the column, structures first and
 then units, each by cost. A section is drawn only where the row can be
-edited or stands here: the selected rock's own sector shows every row, a
+edited or stands here: the selected asteroid's own sector shows every row, a
 row with nothing here as its hollow glyph alone, dimmed, and every other
 sector shows only rows with a line to draw. When more than one seat
-holds a composition at a rock, the column stacks one sector per seat,
+holds a composition at an asteroid, the column stacks one sector per seat,
 seats in seat order from the top, each sector as tall as its own
 sections with a gap between sectors. A sector taller than a stated
 number of strips wraps into a second column beside the first, and a
-third past that, so a crowded rock stays within the screen's height; a
+third past that, so a crowded asteroid stays within the screen's height; a
 column is as wide as its strips can grow, a digit and a signed step more
 than they show, so a count rising or a band's step appearing never runs
 under the next column. A sector carries a spine: a thin line in the
@@ -84,7 +84,7 @@ selection rests, small elsewhere. Hover and selection are one state
 drawn one way, with the same scale, the same detail, the same bands and
 the same alpha; selection differs from hover only in that it outlasts
 the pointer and holds the camera's focus. While the pointer rests on
-another rock's wheel, the selected wheel keeps its full size and its
+another asteroid's wheel, the selected wheel keeps its full size and its
 bands and is drawn at the faint alpha of a small wheel, and is whole
 again when the pointer leaves; the hovered wheel is full and whole. Two
 wheels may be full at once, the hovered one whole and the selected one
@@ -102,17 +102,17 @@ is hovered is decided against the wheels as they stood before any grew,
 and a hovered wheel stays hovered until the pointer leaves its full
 extent by a margin of a band's width or more, so growing under the
 pointer never changes which wheel is hovered, an overshoot past an edge
-closes nothing, and nothing jitters. A bare rock under the pointer
+closes nothing, and nothing jitters. A bare asteroid under the pointer
 carries the seat's own wheel as a selected one does, every row hollow,
-so what a rock could hold shows before it is clicked.
+so what an asteroid could hold shows before it is clicked.
 
 The wheels' numerals, the stockpile's and the clock's are the only
 numerals on the HUD. Ownership is colour, and colour is the team's; a
 team's seats share it. Hovering any line shows one short phrase beside
 it naming the row and saying what the line is and why: "Frigate here",
 "Frigate building", "Frigate short of metals", "No builder for Frigate",
-"Frigate wanted", "Frigate arriving from Rock 3", "Frigate leaving for
-Rock 5". Hovering a glyph shows the row's name alone.
+"Frigate wanted", "Frigate arriving from Asteroid 3", "Frigate leaving for
+Asteroid 5". Hovering a glyph shows the row's name alone.
 
 ## The glyph
 
@@ -165,7 +165,7 @@ longer says which way the stock moves and how fast. At capacity the
 income segment runs past the bar's right end, and that overrun is the
 loss, at the fill's own alpha, never fainter; the net numeral sits
 after the overrun. An empty bar with a negative net is a stall and
-draws nothing more, since the frame's belt at the rock names the
+draws nothing more, since the frame's belt at the asteroid names the
 material. Hovering a cell shows one short phrase beneath it, the
 capacity, "of 300"; the two segments already carry the in and the out. While a wheel's plus band is hovered, each
 material's bar marks the row's cost as the darker segment inside the
@@ -191,47 +191,47 @@ game starts into the same primitives the marks are made of, so it is
 stroked hollow or filled solid and tinted by whatever draws it, and it
 reads at the smallest glyph size, where thirty units are six pixels.
 An icon is drawn wherever a material is named: the Extract mark on an
-extractor's glyph, the stockpile's cells and the rock bars. They are
+extractor's glyph, the stockpile's cells and the asteroid bars. They are
 the owner's drawings and the game reproduces them exactly, as it does
 the marks.
 
 ## Resources
 
-Every rock carries three bars at its left, the mirror of the wheel at
+Every asteroid carries three bars at its left, the mirror of the wheel at
 its right: one per material in the fixed order, stacked, each of one
 strip's height, their right ends on the same arc the wheel's sections
-stand on, mirrored, its centre far to the rock's right, and along that
+stand on, mirrored, its centre far to the asteroid's right, and along that
 arc a spine in grey ink, the wheel's spine in no seat's colour. The
-icon stands at the bar's right end, nearest the rock, and the bar
+icon stands at the bar's right end, nearest the asteroid, and the bar
 grows leftward from it. A bar's cap is a band of the material's hue
-dimmed toward the backdrop, its length the rock's cap for the material
-against the largest cap of any material on the belt, so a rich rock has
+dimmed toward the backdrop, its length the asteroid's cap for the material
+against the largest cap of any material on the belt, so a rich asteroid has
 long bands and a poor one short and the cap reads on any display; the
 pull over the last second by every extractor there of any seat is the
 same hue at full strength laid over the band from its right end, so
 fill against band is pull against cap. No outline carries the cap. A
-cap of zero draws no bar. An extractor the seat wants at the rock
+cap of zero draws no bar. An extractor the seat wants at the asteroid
 and has not yet standing shows on that material's bar past the pull:
 a frame that is building as a fainter segment of the hue, as long as
 the extractor's yield would be against the cap, filling with the
 frame's progress; a want with no frame yet as a hollow outline of the
 same segment; so a player schedules construction against what the
-rock will give. The bars are drawn at every rock always and
+asteroid will give. The bars are drawn at every asteroid always and
 take the wheel's two states with it: full where the wheel is full,
 small elsewhere, easing between them as the wheel does, drawn at the
 wheel's pixel scale at every zoom, so a crowded belt overlaps them.
 The small state is the bars alone, no icons, standing tight against
-the rock as the small wheel stands tight on its other side; the full
+the asteroid as the small wheel stands tight on its other side; the full
 state adds the icons and the room they need. Hovering a bar shows "Metals 12
 of 20".
 
 ## Fights
 
-While shots are exchanged at a rock, each engaged seat's spine lights
+While shots are exchanged at an asteroid, each engaged seat's spine lights
 as a bar: a thick segment of the seat's colour from the top of its
 sector, on the same arc, of one fixed length whoever the seat is, so
 two seats' bars compare at a glance. The bar is full at the fight's
-start and drains downward as that player's total HP at the rock falls.
+start and drains downward as that player's total HP at the asteroid falls.
 Damage from the last second and a half trails the drain as a white
 segment that catches up; white, since a red trail vanishes on a red
 seat. A sector with nothing standing stays one bar tall while its bar
@@ -241,7 +241,7 @@ is the force.
 
 ## Flights
 
-A ship between rocks carries its glyph as a billboard, with a line
+A ship between asteroids carries its glyph as a billboard, with a line
 ahead along the path its schedule will fly, the sim's own prediction
 integrated from the ship's body to its arrival, never a straight
 line. The line is faint at the ship and full at the destination, and
@@ -253,7 +253,7 @@ from the ship into the wheel's present count.
 
 Build is flow, so there is no queue; the player edits wants. A full
 wheel, hovered or selected, looks one way and carries its
-interactions; hovering shows them and clicking the rock locks them in
+interactions; hovering shows them and clicking the asteroid locks them in
 place when the pointer leaves. Each of its own sections gains
 a plus band and a minus band between its glyph and its counts, plus
 above minus, each an action button in the style of every other, an
@@ -263,7 +263,7 @@ band under the pointer; while Shift is held the bands bear
 "+5" and "-5" and add or remove five. A hovered band brightens and
 fills. A band that would change nothing, plus at the cap or minus at
 zero, is dimmed and bears no phrase. A click adds or removes that many
-wants and selects the rock. Holding repeats after a third of a second
+wants and selects the asteroid. Holding repeats after a third of a second
 and every tenth of a second after that. A full wheel takes input
 through its bands and through the drag under Sending, and nothing else;
 a small wheel takes none and shows no bands.
@@ -283,7 +283,7 @@ A wheel shows at most twelve sections. A larger roster collapses to two,
 a square and a triangle, and choosing one opens that category's own
 wheel in its place, which does not collapse again.
 
-Sending: drag from one rock's wheel to another's. While the drag is
+Sending: drag from one asteroid's wheel to another's. While the drag is
 held, the source wheel dims the lines that would go and the destination
 wheel shows them as an arriving line at half alpha, a hover preview like
 the plus band's; the mouse wheel adjusts how many; release issues the
@@ -296,14 +296,14 @@ of the camera eases over a short span, pan, zoom and the jump to a new
 focus alike, never a cut. The camera is
 attached to a focus point that moves at the local orbital velocity, so the
 player's region stays on screen while the belt turns. The focus starts at
-the belt's centre until the player's first placement, then at that rock;
-clicking a rock's wheel makes it the focus. A pan, a zoom and the jump
+the belt's centre until the player's first placement, then at that asteroid;
+clicking an asteroid's wheel makes it the focus. A pan, a zoom and the jump
 to a new focus each ease over the slow span, never a cut.
 
 ## Ranges
 
-Every rock's zone is drawn as one faint circle at the zone's radius in
-the belt, always, in one ink. Every armed ship at a rock carries one
+Every asteroid's zone is drawn as one faint circle at the zone's radius in
+the belt, always, in one ink. Every armed ship at an asteroid carries one
 faint circle at its longest weapon range in its owner's colour; a ship
 in flight carries none, since it is not a shooter. Both are painted on
 the HUD over the belt camera's projection, thin, at low alpha, and are
@@ -381,7 +381,7 @@ follows Controls, above.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
-  zoom whose zone circles stand apart, each rock wearing its resource
+  zoom whose zone circles stand apart, each asteroid wearing its resource
   bars; it redraws the instant the seed changes, and it pans and zooms
   under the same controls as the match. Over it, at the left, the seats
   as a table of four rows, one per seat the match can hold, under column
@@ -423,37 +423,37 @@ follows Controls, above.
   the bot's name, a guest's name); and at the right a bar of one fixed
   length: full before the stage begins, draining over the stage's span
   while it runs, empty once it ran out unplaced and until its seat
-  places, and replaced by the rock's name, "Rock 3", once placed. After
+  places, and replaced by the asteroid's name, "Asteroid 3", once placed. After
   the last stage ends, one last row, titled Clock, drains the grace.
   The running stage's row is whole and every other row is faint, as a
   small wheel is. The strip's clock cell reads 0:00 with its bar full.
   A bot's name is drawn from a short list the bot's personality owns,
   chosen by the seed and the seat, so a match's bots read as people
   and two bots of one personality read apart; the lobby's Holder
-  choice still names the personality. A rock a draft placement stands
+  choice still names the personality. An asteroid a draft placement stands
   on shows the placed row on its small wheel as a wanted line in the
   seat's colour, the one wanted line a small wheel ever shows, so a
-  taken rock reads as taken from the belt. Placing goes through the
-  wheel: a bare rock under the pointer shows the seat's own hollow
+  taken asteroid reads as taken from the belt. Placing goes through the
+  wheel: a bare asteroid under the pointer shows the seat's own hollow
   wheel. Every band is live during the draft, since a want accepted
   then stands until the clock runs, except a reserve band before the
   seat's first stage, disabled with "Not yet", and a reserve band at a
-  rock the draft has taken, disabled with "Rock taken", which are the
+  asteroid the draft has taken, disabled with "Asteroid taken", which are the
   sim's own refusals and nothing more. Nothing is refused silently.
   When the last placement lands or the grace runs out, the panel goes
   over the slow span, and the clock's numeral starts.
 - **Results.** At the clock: the final belt, held still, under a panel
-  titled Results: one row per team in the match's colours, its rocks held
-  as a count of rock glyphs and its army value, the winning row marked;
+  titled Results: one row per team in the match's colours, its asteroids held
+  as a count of asteroid glyphs and its army value, the winning row marked;
   then Rematch, which returns to the lobby with its shape kept, and Leave
   to the title. The word standings appears nowhere on screen.
 
 ## Judging
 
 Legibility is judged on screenshots rendered through the engine's offscreen
-Session over fixed scenes: a region with several rocks, mixed forces, a
-fight, and a flight; a fight at one rock; the whole belt. A judge that has
-not seen the code answers, from the image alone: who holds each rock, which
+Session over fixed scenes: a region with several asteroids, mixed forces, a
+fight, and a flight; a fight at one asteroid; the whole belt. A judge that has
+not seen the code answers, from the image alone: who holds each asteroid, which
 side is winning, what is in flight and where to. Every misread is a defect.
 
 ## Later layers

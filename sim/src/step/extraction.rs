@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{RockId, SeatId};
+use crate::ids::{AsteroidId, SeatId};
 use crate::materials::{Material, Materials};
 use crate::state::State;
 use crate::time::Tick;
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Income(BTreeMap<(RockId, SeatId), Materials>);
+pub struct Income(BTreeMap<(AsteroidId, SeatId), Materials>);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Extractor {
@@ -19,26 +19,26 @@ impl Income {
     pub fn extracted(state: &State) -> Income {
         let dt = Tick(1).seconds();
         let mut taken = Income::default();
-        for (id, rock) in state.rocks() {
+        for (id, asteroid) in state.asteroids() {
             taken
                 .0
-                .extend(extract(id, rock.caps(), &Extractor::standing_at(state, id), dt).0);
+                .extend(extract(id, asteroid.caps(), &Extractor::standing_at(state, id), dt).0);
         }
         taken
     }
 
     pub fn apply(&self, state: &mut State) {
-        for ((rock, seat), taken) in &self.0 {
+        for ((asteroid, seat), taken) in &self.0 {
             state[*seat].earn(*taken);
-            state[*rock].extract(*taken);
+            state[*asteroid].extract(*taken);
         }
     }
 }
 
 impl Extractor {
-    fn standing_at(state: &State, rock: RockId) -> Vec<Extractor> {
+    fn standing_at(state: &State, asteroid: AsteroidId) -> Vec<Extractor> {
         let mut extractors = Vec::new();
-        for entity in state.standing_at(rock) {
+        for entity in state.standing_at(asteroid) {
             let seat = entity.seat();
             let pulls = state[entity.row()].extracts();
             extractors.extend(pulls.map(|(material, rate)| Extractor {
@@ -51,7 +51,7 @@ impl Extractor {
     }
 }
 
-fn extract(rock: RockId, caps: Materials, extractors: &[Extractor], dt: f64) -> Income {
+fn extract(asteroid: AsteroidId, caps: Materials, extractors: &[Extractor], dt: f64) -> Income {
     let mut income: BTreeMap<SeatId, Materials> = BTreeMap::new();
     for (material, cap) in caps.amounts() {
         let pulling: Vec<&Extractor> = extractors
@@ -66,7 +66,7 @@ fn extract(rock: RockId, caps: Materials, extractors: &[Extractor], dt: f64) -> 
     Income(
         income
             .into_iter()
-            .map(|(seat, taken)| ((rock, seat), taken))
+            .map(|(seat, taken)| ((asteroid, seat), taken))
             .collect(),
     )
 }
@@ -91,7 +91,7 @@ fn split(cap: f64, rates: &[f64]) -> Vec<f64> {
 mod tests {
     use super::*;
 
-    const ROCK: RockId = RockId(3);
+    const ASTEROID: AsteroidId = AsteroidId(3);
 
     fn sum(shares: &[f64]) -> f64 {
         shares.iter().sum()
@@ -106,7 +106,7 @@ mod tests {
     }
 
     fn income(taken: [(SeatId, Materials); 2]) -> Income {
-        Income(taken.map(|(seat, taken)| ((ROCK, seat), taken)).into())
+        Income(taken.map(|(seat, taken)| ((ASTEROID, seat), taken)).into())
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
             extractor(2, Material::Metals, 4.0),
         ];
 
-        let taken = extract(ROCK, Materials::new(6.0, 1.0, 9.0), &extractors, 1.0);
+        let taken = extract(ASTEROID, Materials::new(6.0, 1.0, 9.0), &extractors, 1.0);
 
         assert_eq!(
             taken,
@@ -182,14 +182,19 @@ mod tests {
     }
 
     #[test]
-    fn extract_sums_a_seats_extractors_at_the_rock_they_stand_at() {
+    fn extract_sums_a_seats_extractors_at_the_asteroid_they_stand_at() {
         let extractors = [
             extractor(2, Material::Metals, 1.0),
             extractor(1, Material::Metals, 2.0),
             extractor(2, Material::Energy, 3.0),
         ];
 
-        let taken = extract(ROCK, Materials::new(100.0, 3.0, 100.0), &extractors, 0.5);
+        let taken = extract(
+            ASTEROID,
+            Materials::new(100.0, 3.0, 100.0),
+            &extractors,
+            0.5,
+        );
 
         assert_eq!(
             taken,
@@ -202,7 +207,7 @@ mod tests {
 
     #[test]
     fn no_extractors_yield_no_income() {
-        let bare = extract(ROCK, Materials::new(1.0, 1.0, 1.0), &[], 1.0);
+        let bare = extract(ASTEROID, Materials::new(1.0, 1.0, 1.0), &[], 1.0);
         assert_eq!(bare, Income::default());
     }
 }

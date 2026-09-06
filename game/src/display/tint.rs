@@ -39,9 +39,13 @@ mod tests {
     }
 
     #[test]
-    fn a_rock_is_tinted_toward_the_material_it_is_rich_in_and_an_even_rock_is_not() {
+    fn a_asteroid_is_tinted_toward_the_material_it_is_rich_in_and_an_even_asteroid_is_not() {
         assert_eq!(toward(BASE, Materials::new(4.0, 4.0, 4.0), 1.0), BASE);
-        assert_eq!(toward(BASE, Materials::ZERO, 1.0), BASE, "nor a bare rock");
+        assert_eq!(
+            toward(BASE, Materials::ZERO, 1.0),
+            BASE,
+            "nor a bare asteroid"
+        );
 
         let regions = [
             Materials::new(8.0, 1.0, 1.0),

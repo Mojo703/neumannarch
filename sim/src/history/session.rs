@@ -188,7 +188,7 @@ mod tests {
 
     use super::*;
     use crate::TICKS_PER_SECOND;
-    use crate::ids::{RockId, RowId, TeamId};
+    use crate::ids::{AsteroidId, RowId, TeamId};
     use crate::roster::{FRIGATE, METALS_EXTRACTOR, SHIPYARD};
     use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion, STAGE_SPAN, Stage};
     use crate::step::spawn_body;
@@ -229,15 +229,19 @@ mod tests {
         }
     }
 
-    fn rock(at: u32) -> RockId {
-        RockId(at)
+    fn asteroid(at: u32) -> AsteroidId {
+        AsteroidId(at)
     }
 
-    fn want(seat: u8, seq: u32, rock: RockId, row: RowId, count: u32) -> Issued {
+    fn want(seat: u8, seq: u32, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
-            command: Command::Want { rock, row, count },
+            command: Command::Want {
+                asteroid,
+                row,
+                count,
+            },
         }
     }
 
@@ -254,7 +258,7 @@ mod tests {
             .enumerate()
             .map(|(at, stage)| {
                 let seq = u32::try_from(at).expect("a stage a seat");
-                let placing = want(stage.seat.0, seq, rock(at as u32), stage.row, 1);
+                let placing = want(stage.seat.0, seq, asteroid(at as u32), stage.row, 1);
                 stamped(STAGE_SPAN.0 * at as u64, placing)
             })
             .collect();
@@ -268,10 +272,10 @@ mod tests {
         State::start(&setup()).draft().stages().to_vec()
     }
 
-    fn worked() -> RockId {
+    fn worked() -> AsteroidId {
         let mine = |stage: &&Stage| stage.seat == SeatId(0) && stage.row == SHIPYARD;
         let at = stages().iter().position(|stage| mine(&stage));
-        rock(at.expect("seat zero drafts a shipyard") as u32)
+        asteroid(at.expect("seat zero drafts a shipyard") as u32)
     }
 
     fn early() -> Vec<Stamped> {
@@ -311,7 +315,7 @@ mod tests {
         assert!(seat.spend().total() > 0.0, "a frame drains the stockpile");
         assert!(
             on_time.state()[worked()].pull().total() > 0.0,
-            "the rock is worked"
+            "the asteroid is worked"
         );
 
         let mut late = kept(SPAN);
@@ -338,7 +342,7 @@ mod tests {
         let mut session = session(span);
         run(&mut session, 20);
         let latest = session.state().tick();
-        let issued = want(0, 0, rock(0), SHIPYARD, 1);
+        let issued = want(0, 0, asteroid(0), SHIPYARD, 1);
 
         assert_eq!(
             session.insert(stamped(latest.back(span).0 - 1, issued)),
@@ -356,18 +360,18 @@ mod tests {
         for seq in 1..MAX_COMMANDS_PER_TICK as u32 {
             assert!(
                 session
-                    .insert(stamped(latest.0, want(0, seq, rock(0), SHIPYARD, 1)))
+                    .insert(stamped(latest.0, want(0, seq, asteroid(0), SHIPYARD, 1)))
                     .is_ok()
             );
         }
         let over = MAX_COMMANDS_PER_TICK as u32;
         assert_eq!(
-            session.insert(stamped(latest.0, want(0, over, rock(0), SHIPYARD, 1))),
+            session.insert(stamped(latest.0, want(0, over, asteroid(0), SHIPYARD, 1))),
             Err(Refused::TooMany)
         );
         assert!(
             session
-                .insert(stamped(latest.0, want(1, over, rock(0), SHIPYARD, 1)))
+                .insert(stamped(latest.0, want(1, over, asteroid(0), SHIPYARD, 1)))
                 .is_ok(),
             "the cap is one seat's"
         );
@@ -468,7 +472,7 @@ mod tests {
         let mut session =
             Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
-            let place = rock(at % 21);
+            let place = asteroid(at % 21);
             let body = spawn_body(&session.live, place, Time::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
@@ -486,7 +490,7 @@ mod tests {
             reason = "a test measuring wall time is not the sim reading a clock"
         )]
         let started = std::time::Instant::now();
-        let rewound = session.insert(stamped(oldest.0, want(1, 0, rock(4), FRIGATE, 1)));
+        let rewound = session.insert(stamped(oldest.0, want(1, 0, asteroid(4), FRIGATE, 1)));
         let took = started.elapsed().as_secs_f64();
 
         assert_eq!(rewound, Ok(Rewound::From(oldest)));

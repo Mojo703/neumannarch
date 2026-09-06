@@ -62,7 +62,7 @@ mod tests {
     use neumannarch_game::screens::{control, lobby, title};
     use neumannarch_protocol::Notice;
     use neumannarch_sim::roster::SHIPYARD;
-    use neumannarch_sim::{RockId, RowId, Time};
+    use neumannarch_sim::{AsteroidId, RowId, Time};
 
     use super::*;
 
@@ -70,7 +70,7 @@ mod tests {
 
     const PATIENCE: usize = 600;
 
-    const ROCK: RockId = RockId(10);
+    const ASTEROID: AsteroidId = AsteroidId(10);
 
     static ONE_DRIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -324,12 +324,12 @@ mod tests {
     }
 
     fn placed(session: &mut Offscreen<Probe>) {
-        let centre = rock_at(session);
+        let centre = asteroid_at(session);
         click_at(session, centre);
         assert_eq!(
             play(session).selection(),
-            Some(ROCK),
-            "clicking a rock selects it"
+            Some(ASTEROID),
+            "clicking an asteroid selects it"
         );
         settled(session);
 
@@ -348,7 +348,7 @@ mod tests {
             .iter()
             .find(|present| present.row == SHIPYARD && present.seat == mine)
             .expect("the reserve placed the shipyard");
-        assert_eq!(shipyard.home, ROCK);
+        assert_eq!(shipyard.home, ASTEROID);
 
         session.set_pointer(Vec2::new(centre.x, centre.y));
         session.step();
@@ -359,8 +359,8 @@ mod tests {
         let wheels = play(session).wheels(&viewport(session), Some(pointer), false, &mut Still);
         wheels
             .iter()
-            .find(|wheel| wheel.rock() == ROCK)
-            .expect("the selected rock carries a wheel")
+            .find(|wheel| wheel.asteroid() == ASTEROID)
+            .expect("the selected asteroid carries a wheel")
             .band(row, WheelBand::Plus(1))
             .expect("the row's band is on the wheel")
     }
@@ -410,7 +410,7 @@ mod tests {
             .view()
             .terrain
             .iter()
-            .filter_map(|terrain| viewport.point_of(play.rock_pos(terrain.rock)?))
+            .filter_map(|terrain| viewport.point_of(play.asteroid_pos(terrain.asteroid)?))
             .filter(|at| {
                 (0.0..TARGET.x as f32).contains(&at.x) && (0.0..TARGET.y as f32).contains(&at.y)
             })
@@ -418,7 +418,7 @@ mod tests {
 
         assert!(
             framed > 1,
-            "the opening zoom shows {framed} rocks, so there is nothing to choose between"
+            "the opening zoom shows {framed} asteroids, so there is nothing to choose between"
         );
     }
 
@@ -440,27 +440,27 @@ mod tests {
         let dragged = egui::vec2(-120.0, 60.0);
         session.set_pointer(Vec2::new(from.x, from.y));
         session.step();
-        let was = rock_at(&session);
+        let was = asteroid_at(&session);
 
         session.press(MouseButton::Right);
         session.set_pointer(Vec2::new(from.x + dragged.x, from.y + dragged.y));
         session.step();
         settled(&mut session);
 
-        let now = rock_at(&session);
+        let now = asteroid_at(&session);
         assert!(
             (now - was - dragged).length() <= 0.06 * dragged.length(),
-            "the rock moved from {was} to {now}, not by {dragged}"
+            "the asteroid moved from {was} to {now}, not by {dragged}"
         );
     }
 
-    fn rock_at(session: &Offscreen<Probe>) -> egui::Pos2 {
+    fn asteroid_at(session: &Offscreen<Probe>) -> egui::Pos2 {
         viewport(session)
             .point_of(
                 play(session)
-                    .rock_pos(ROCK)
-                    .expect("the rock is on the map"),
+                    .asteroid_pos(ASTEROID)
+                    .expect("the asteroid is on the map"),
             )
-            .expect("the rock is in front of the eye")
+            .expect("the asteroid is in front of the eye")
     }
 }

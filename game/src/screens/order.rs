@@ -1,11 +1,11 @@
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::{Draft, GRACE, STAGE_SPAN};
-use neumannarch_sim::{RockId, SeatId, Tick};
+use neumannarch_sim::{AsteroidId, SeatId, Tick};
 
 use crate::display::glyph::{self, Glyph};
 use crate::display::glyph_quad::seat_color32;
-use crate::display::scene::{Fill, rock_name};
+use crate::display::scene::{Fill, asteroid_name};
 use crate::display::stencil::{Cell, Stencil};
 use crate::display::wheel;
 use crate::display::wheels::RESTING_ALPHA;
@@ -54,7 +54,7 @@ pub enum Standing {
     Waiting,
     Running { left: f32 },
     RanOut,
-    Placed(RockId),
+    Placed(AsteroidId),
 }
 
 impl Order {
@@ -95,7 +95,7 @@ impl Order {
                 stage: Some((stage.seat, Glyph::of(&roster[stage.row]))),
                 name: names[usize::from(stage.seat.0)].clone(),
                 standing: match (stage.placed, running) {
-                    (Some(rock), _) => Standing::Placed(rock),
+                    (Some(asteroid), _) => Standing::Placed(asteroid),
                     (None, Some(now)) if at == now => Standing::Running {
                         left: left(STAGE_SPAN),
                     },
@@ -204,11 +204,11 @@ impl Row {
             Standing::Waiting => fill(1.0),
             Standing::Running { left } => fill(left),
             Standing::RanOut => fill(0.0),
-            Standing::Placed(rock) => {
+            Standing::Placed(asteroid) => {
                 painter.text(
                     Pos2::new(bar.left(), middle),
                     Align2::LEFT_CENTER,
-                    rock_name(rock),
+                    asteroid_name(asteroid),
                     FontId::monospace(wheel::LINE_HEIGHT),
                     ink(panel::INK),
                 );
@@ -239,7 +239,7 @@ mod tests {
         (session, names)
     }
 
-    fn place(session: &mut Session, seat: SeatId, rock: RockId) {
+    fn place(session: &mut Session, seat: SeatId, asteroid: AsteroidId) {
         let stage = session
             .state()
             .draft()
@@ -249,7 +249,7 @@ mod tests {
         let stamped = Sequence::new(seat).stamp(
             session.state().tick(),
             Command::Want {
-                rock,
+                asteroid,
                 row: stage.row,
                 count: 1,
             },
@@ -349,15 +349,15 @@ mod tests {
     }
 
     #[test]
-    fn a_placed_stage_names_its_rock_and_fills_its_glyph() {
+    fn a_placed_stage_names_its_asteroid_and_fills_its_glyph() {
         let (mut session, names) = skirmish();
         let seat = session.state().draft().stages()[0].seat;
-        place(&mut session, seat, RockId(2));
+        place(&mut session, seat, AsteroidId(2));
 
         let order = order(&session, &names);
 
-        assert_eq!(order.rows[0].standing, Standing::Placed(RockId(2)));
-        assert_eq!(rock_name(RockId(2)), "Rock 3");
+        assert_eq!(order.rows[0].standing, Standing::Placed(AsteroidId(2)));
+        assert_eq!(asteroid_name(AsteroidId(2)), "Asteroid 3");
         assert!(matches!(order.rows[1].standing, Standing::Running { .. }));
         for row in &order.rows {
             let (seat, _) = row.stage.as_ref().expect("a stage row");

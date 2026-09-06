@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{EntityId, RockId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::roster::Weapon;
 use crate::state::sweep::Sweep;
 use crate::state::{Aim, Assigned, Entity, Ready, State, Threat};
@@ -16,7 +16,7 @@ pub struct Hit {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Exchange {
-    pub rock: RockId,
+    pub asteroid: AsteroidId,
     pub seat: SeatId,
     pub fired: bool,
     pub landed: bool,
@@ -127,15 +127,17 @@ impl Shots {
     }
 
     pub fn exchanges(&self, state: &State) -> Vec<Exchange> {
-        let mut found: BTreeMap<(RockId, SeatId), (bool, bool)> = BTreeMap::new();
+        let mut found: BTreeMap<(AsteroidId, SeatId), (bool, bool)> = BTreeMap::new();
         let mut note = |id: EntityId, landed: bool| {
             let Some(entity) = state.entity(id) else {
                 return;
             };
-            let Some(rock) = entity.standing(state.time()) else {
+            let Some(asteroid) = entity.standing(state.time()) else {
                 return;
             };
-            let at = found.entry((rock, entity.seat())).or_insert((false, false));
+            let at = found
+                .entry((asteroid, entity.seat()))
+                .or_insert((false, false));
             match landed {
                 true => at.1 = true,
                 false => at.0 = true,
@@ -147,8 +149,8 @@ impl Shots {
         }
         found
             .into_iter()
-            .map(|((rock, seat), (fired, landed))| Exchange {
-                rock,
+            .map(|((asteroid, seat), (fired, landed))| Exchange {
+                asteroid,
                 seat,
                 fired,
                 landed,

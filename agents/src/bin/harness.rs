@@ -7,7 +7,7 @@ use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
 use neumannarch_sim::state::standings::Standings;
 use neumannarch_sim::state::{Batch, Command, Issued, Seat, State};
 use neumannarch_sim::{
-    EntityId, Materials, Real, Retention, RockId, RowId, SeatId, Session, Setup, Stamped,
+    AsteroidId, EntityId, Materials, Real, Retention, RowId, SeatId, Session, Setup, Stamped,
     TICKS_PER_SECOND, TeamId, Tick, Time, WINDOW_SECONDS,
 };
 
@@ -50,7 +50,7 @@ const FORCE: u32 = 40;
 
 const ENGAGEMENT: Time = Time(90 * TICKS_PER_SECOND as u64);
 
-const FIELD: RockId = RockId(0);
+const FIELD: AsteroidId = AsteroidId(0);
 
 type Axis = fn(&mut Weights, f64);
 
@@ -260,14 +260,17 @@ fn matrix() {
             }
             let standings = run.session.state().standings();
             let teams = standings.teams();
-            let rocks = |at: usize| teams.get(at).map_or(0, |team| team.rocks);
+            let asteroids = |at: usize| teams.get(at).map_or(0, |team| team.asteroids);
             let verdict = match standings.leaders().as_slice() {
                 [TeamId(0)] => "win",
                 [TeamId(1)] => "loss",
                 _ => "draw",
             };
             let _ = theirs;
-            print!("{:>12}", format!("{verdict} {}-{}", rocks(0), rocks(1)));
+            print!(
+                "{:>12}",
+                format!("{verdict} {}-{}", asteroids(0), asteroids(1))
+            );
         }
         println!();
     }
@@ -296,7 +299,7 @@ fn drafts() {
                 settled = held(run.session.state());
             }
         }
-        spread += usize::from(settled.iter().all(|rocks| *rocks >= 2));
+        spread += usize::from(settled.iter().all(|asteroids| *asteroids >= 2));
         let state = run.session.state();
         let first = TeamId(state.draft().stages()[0].seat.0);
         let leaders = state.standings().leaders();
@@ -312,7 +315,7 @@ fn drafts() {
             }
         };
         println!(
-            "  seed {seed}: team {} picked first, {verdict} won; {} rocks at 90s {}-{}",
+            "  seed {seed}: team {} picked first, {verdict} won; {} asteroids at 90s {}-{}",
             first.0,
             drafted(state),
             settled[0],
@@ -320,28 +323,28 @@ fn drafts() {
         );
     }
     println!("  the first picker won {won} of {MIRRORS}, {drawn} drawn");
-    println!("  both teams held two rocks at ninety seconds in {spread} of {MIRRORS}");
+    println!("  both teams held two asteroids at ninety seconds in {spread} of {MIRRORS}");
 }
 
 fn held(state: &State) -> [u32; 2] {
     let standings = state.standings();
-    let rocks = |at: usize| standings.teams().get(at).map_or(0, |team| team.rocks);
-    [rocks(0), rocks(1)]
+    let asteroids = |at: usize| standings.teams().get(at).map_or(0, |team| team.asteroids);
+    [asteroids(0), asteroids(1)]
 }
 
 fn drafted(state: &State) -> String {
     let seats: Vec<String> = SEATS
         .iter()
         .map(|seat| {
-            let rocks: Vec<String> = state
+            let asteroids: Vec<String> = state
                 .draft()
                 .placements(*seat)
-                .map(|(rock, _)| {
-                    let caps = state[rock].caps();
-                    format!("{} ({})", rock.0, caps.total() as u64)
+                .map(|(asteroid, _)| {
+                    let caps = state[asteroid].caps();
+                    format!("{} ({})", asteroid.0, caps.total() as u64)
                 })
                 .collect();
-            format!("seat {} took {}", seat.0, rocks.join(" and "))
+            format!("seat {} took {}", seat.0, asteroids.join(" and "))
         })
         .collect();
     seats.join(", ")
@@ -448,8 +451,8 @@ fn line(state: &State) -> String {
                 .filter(|entity| state[entity.seat()].team() == team.team)
                 .count();
             format!(
-                "team {} {} rocks, {} value, {entities} entities",
-                team.team.0, team.rocks, team.value as u64
+                "team {} {} asteroids, {} value, {entities} entities",
+                team.team.0, team.asteroids, team.value as u64
             )
         })
         .collect();
@@ -470,9 +473,9 @@ fn report(state: &State) {
     let standings: Standings = state.standings();
     for team in standings.teams() {
         println!(
-            "team {}: {} rocks, {} army value, {}",
+            "team {}: {} asteroids, {} army value, {}",
             team.team.0,
-            team.rocks,
+            team.asteroids,
             team.value as u64,
             match team.alive {
                 true => "in",
@@ -495,7 +498,7 @@ fn check(what: &str, passed: bool) -> bool {
 
 fn swept() {
     println!(
-        "holding sweep: {FORCE} a side at one rock, {} seconds a run",
+        "holding sweep: {FORCE} a side at one asteroid, {} seconds a run",
         ENGAGEMENT.seconds()
     );
     println!(
@@ -603,7 +606,7 @@ fn engage(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
             seat,
             seq: 0,
             command: Command::Want {
-                rock: FIELD,
+                asteroid: FIELD,
                 row,
                 count: FORCE,
             },

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use field::Fields;
 
 use crate::belt::Belt;
-use crate::ids::{EntityId, RockId};
+use crate::ids::{AsteroidId, EntityId};
 use crate::orbit::body::Body;
 use crate::roster::Row;
 use crate::state::sweep::Sweep;
@@ -43,18 +43,23 @@ impl<'a> Holding<'a> {
             return Some(apart.capped(row.manoeuvring.0));
         };
         let sample = fields.at(entity.id());
-        let rock = &self.state[here];
-        let rock_body = self.state.rock_body(here);
+        let asteroid = &self.state[here];
+        let asteroid_body = self.state.asteroid_body(here);
         let sum = apart
             + terms::wander(row, self.state.time(), entity.id())
-            + terms::returning(body, row, rock_body, rock.strayed(rock_body, body.pos))
+            + terms::returning(
+                body,
+                row,
+                asteroid_body,
+                asteroid.strayed(asteroid_body, body.pos),
+            )
             + terms::cohesion(row, sample)
             + terms::caution(row, sample)
             + self.chasing(entity, body, row, here);
         Some(sum.capped(row.manoeuvring.0))
     }
 
-    fn chasing(&self, entity: &Entity, body: Body, row: &Row, here: RockId) -> Vec3 {
+    fn chasing(&self, entity: &Entity, body: Body, row: &Row, here: AsteroidId) -> Vec3 {
         let Some(standoff) = row.standoff() else {
             return Vec3::ZERO;
         };
@@ -68,7 +73,7 @@ impl<'a> Holding<'a> {
         terms::chase(body, row, Body::new(prey.pos + toward * standoff, prey.vel))
     }
 
-    fn target(&self, entity: &Entity, here: RockId) -> Option<&Entity> {
+    fn target(&self, entity: &Entity, here: AsteroidId) -> Option<&Entity> {
         let aim = Threat::of(self.state, entity)?
             .best(self.state.standing_at(here), &Assigned::default())?;
         self.state.entity(aim.target)
