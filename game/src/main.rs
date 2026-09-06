@@ -141,7 +141,8 @@ mod tests {
     }
 
     fn settled(session: &mut Offscreen<Probe>) {
-        let ticks = (ease::SPAN_SECONDS / neumannarch_sim::TICK.as_secs_f64()).ceil() as u64;
+        let ticks =
+            (ease::Span::Slow.seconds() / neumannarch_sim::TICK.as_secs_f64()).ceil() as u64;
         advance(session, ticks);
         session.step();
     }

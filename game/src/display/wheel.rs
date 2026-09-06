@@ -237,6 +237,18 @@ impl Wheel {
         !self.sectors.is_empty()
     }
 
+    pub fn clear_of(&mut self, rect: Rect) {
+        for sector in &mut self.sectors {
+            sector.slots.retain(|slot| !slot.frame.intersects(rect));
+        }
+        self.sectors
+            .retain(|sector| !sector.slots.is_empty() || sector.arc.is_some());
+    }
+
+    pub fn frames(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.slots().map(|slot| slot.frame)
+    }
+
     pub fn band(&self, row: RowId, band: WheelBand) -> Option<Pos2> {
         let slot = self
             .sectors
@@ -379,6 +391,7 @@ impl Wheel {
                 half: GLYPH_HALF * slot.glyph.size.scale() * self.scale,
             },
             colour,
+            outline: Color32::WHITE,
             fill,
             alpha,
             starved: None,
@@ -561,10 +574,15 @@ impl Detail {
         }
     }
 
-    fn shows(self, mark: Mark) -> bool {
+    fn shows(self, mark: Mark, entries: &[Shown]) -> bool {
         match self {
             Detail::Full => true,
-            Detail::Small => mark != Mark::Wanted,
+            Detail::Small => {
+                mark != Mark::Wanted
+                    || entries
+                        .iter()
+                        .all(|shown| matches!(shown.entry, Entry::Placed))
+            }
         }
     }
 }
@@ -862,7 +880,7 @@ fn rows_of(view: &SectorView, roster: &Roster, detail: Detail, edits: bool) -> V
                 glyph: Glyph::of(data),
                 lines: lines(entries)
                     .into_iter()
-                    .filter(|(mark, entries)| !entries.is_empty() && detail.shows(*mark))
+                    .filter(|(mark, entries)| !entries.is_empty() && detail.shows(*mark, entries))
                     .collect(),
             }
         })
@@ -897,7 +915,7 @@ fn marked(entry: Entry) -> Mark {
         Entry::Surplus(_) => Mark::Surplus,
         Entry::Leaving { .. } => Mark::Leaving,
         Entry::Arriving { .. } => Mark::Arriving,
-        Entry::Building(_) | Entry::Wanted { .. } => Mark::Wanted,
+        Entry::Building(_) | Entry::Wanted { .. } | Entry::Placed => Mark::Wanted,
     }
 }
 
@@ -1171,6 +1189,20 @@ mod tests {
                     .frame
                     .height()
         );
+
+        let placed = wheel(
+            vec![sector(THEIRS, vec![row(SHIPYARD, vec![Entry::Placed])])],
+            Detail::Small,
+            None,
+        );
+        let slot = slot_of(&placed, SHIPYARD);
+        assert_eq!(
+            slot.lines.len(),
+            1,
+            "a draft placement is the one want it shows"
+        );
+        assert_eq!(slot.lines[0].mark, Mark::Wanted);
+        assert_eq!(slot.lines[0].count, 1);
     }
 
     #[test]

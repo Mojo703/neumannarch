@@ -28,6 +28,10 @@ for the one that talks to the owner. Project state lives in TODO.md.
 - Commit only on the owner's explicit word, once per commit. There is no
   standing authorization in this repo. Stop before a commit so the owner can
   verify the working tree.
+- A commit carries its documentation (owner, 2026-09-06): before the
+  commit, DESIGN.md, DISPLAY.md and ARCHITECTURE.md say what the code
+  now does, and TODO.md's ledger and queue are brought to the truth;
+  TODO.md never describes a commit, the message is the record.
 - A question goes on the question tool in the same turn it arises, never
   deferred to a later turn (owner, 2026-09-06). Text in the same turn as
   a tool call is collapsed in the terminal, so the reading before a

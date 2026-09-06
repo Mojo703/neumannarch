@@ -1,13 +1,26 @@
 use core::time::Duration;
 
-pub const SPAN_SECONDS: f64 = 0.02;
-
-pub fn toward(value: f64, target: f64, dt: f64) -> f64 {
-    toward_over(value, target, dt, SPAN_SECONDS)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Span {
+    Fast,
+    Slow,
 }
 
-pub fn toward_over(value: f64, target: f64, dt: f64, span: f64) -> f64 {
-    let share = (dt / span).clamp(0.0, 1.0);
+impl Span {
+    pub fn duration(self) -> Duration {
+        match self {
+            Span::Fast => Duration::from_millis(20),
+            Span::Slow => Duration::from_millis(100),
+        }
+    }
+
+    pub fn seconds(self) -> f64 {
+        self.duration().as_secs_f64()
+    }
+}
+
+pub fn toward(value: f64, target: f64, dt: f64, span: Span) -> f64 {
+    let share = (dt / span.seconds()).clamp(0.0, 1.0);
     value + (target - value) * share
 }
 
@@ -42,19 +55,26 @@ mod tests {
 
     #[test]
     fn a_value_closes_the_spans_share_of_its_gap_and_never_overshoots() {
-        assert_eq!(toward(0.0, 1.0, SPAN_SECONDS / 2.0), 0.5);
-        assert_eq!(toward(0.0, 1.0, SPAN_SECONDS), 1.0);
+        let fast = Span::Fast.seconds();
+        assert_eq!(toward(0.0, 1.0, fast / 2.0, Span::Fast), 0.5);
+        assert_eq!(toward(0.0, 1.0, fast, Span::Fast), 1.0);
         assert_eq!(
-            toward(0.0, 1.0, SPAN_SECONDS * 4.0),
+            toward(0.0, 1.0, fast * 4.0, Span::Fast),
             1.0,
             "a slow frame lands"
         );
-        assert_eq!(toward(1.0, 0.0, SPAN_SECONDS / 4.0), 0.75);
-        assert_eq!(toward(3.0, 3.0, 0.016), 3.0, "a settled value holds");
+        assert_eq!(toward(1.0, 0.0, fast / 4.0, Span::Fast), 0.75);
         assert_eq!(
-            toward_over(0.0, 1.0, 0.1, 0.4),
-            0.25,
-            "a longer span closes less"
+            toward(3.0, 3.0, 0.016, Span::Fast),
+            3.0,
+            "a settled value holds"
         );
+    }
+
+    #[test]
+    fn the_slow_span_is_five_fast_ones() {
+        assert_eq!(Span::Fast.duration(), Duration::from_millis(20));
+        assert_eq!(Span::Slow.duration(), Duration::from_millis(100));
+        assert!((toward(0.0, 1.0, Span::Fast.seconds(), Span::Slow) - 0.2).abs() < 1e-9);
     }
 }

@@ -31,6 +31,10 @@ impl Viewport {
         self.window
     }
 
+    pub fn bounds(&self) -> egui::Rect {
+        crate::screens::panel::window_of(self.window, self.points_per_pixel)
+    }
+
     pub(crate) fn local(&self, world: Vec3) -> math::Vec3 {
         let relative = world - self.focus;
         math::Vec3::new(relative.x as f32, relative.y as f32, relative.z as f32)

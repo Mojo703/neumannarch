@@ -10,7 +10,7 @@ use neumannarch_sim::{RockId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
-use crate::display::ease::{self, Clock};
+use crate::display::ease::{self, Clock, Span};
 use crate::display::fights::Fights;
 use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::{Client, Hover, Scene, WheelBand};
@@ -25,8 +25,8 @@ use crate::net::transport::Transport;
 use crate::screens::control;
 use crate::screens::held::{self, Held};
 use crate::screens::lobby::seat_names;
-use crate::screens::order::{self, Order};
-use crate::screens::panel::{self, Panel};
+use crate::screens::order::Order;
+use crate::screens::panel::Panel;
 use crate::screens::panning::Panning;
 use crate::screens::pause::{self, Pause};
 use crate::screens::{Playable, results};
@@ -111,7 +111,11 @@ impl Play {
         );
         Play {
             lobby,
-            names: seat_names(machine.seating(), machine.player()),
+            names: seat_names(
+                machine.seating(),
+                machine.player(),
+                machine.session().setup().seed(),
+            ),
             machine,
             view,
             fights: Fights::default(),
@@ -209,12 +213,7 @@ impl Play {
         let dt = self.clock.frame(ctx.elapsed());
         let mut motion = core::mem::take(&mut self.motion);
         motion.begin(dt);
-        self.order_alpha = ease::toward_over(
-            self.order_alpha,
-            self.order_target(),
-            dt,
-            order::FADE_SECONDS,
-        );
+        self.order_alpha = ease::toward(self.order_alpha, self.order_target(), dt, Span::Slow);
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
         let shifted = ctx.down(Button::Shift);
@@ -230,9 +229,11 @@ impl Play {
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
         let pointer = viewport.point_at(ctx.pointer());
         let scene = self.scene();
-        let wheels = Wheels::over(
+        let over = viewport.bounds();
+        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let wheels = self.wheels_over(
             &scene,
-            self.roster(),
+            strip.as_ref(),
             &viewport,
             &self.aim(Some(pointer), shifted),
             &mut motion,
@@ -241,9 +242,7 @@ impl Play {
 
         belt::draw(&scene, &viewport, ctx);
         let clicked = ctx.pressed(Button::Select);
-        let over = panel::window_of(window, points_per_pixel);
         let phrase = self.phrase(&wheels, pointer);
-        let strip = scene.strip.map(|view| Strip::across(over, view));
         let order = self.order(over);
         let hover = self.hover().copied();
         let doing = &self.doing;
@@ -261,6 +260,9 @@ impl Play {
             let panel = Panel::new(ui.painter(), over, pointer, clicked);
             if let Some((beside, phrase)) = phrase {
                 let mut controls = control::Controls::over(&panel);
+                if let Some(strip) = &strip {
+                    controls.avoid(strip.frame());
+                }
                 controls.note(beside, phrase);
                 controls.finish();
             }
@@ -328,13 +330,32 @@ impl Play {
         shifted: bool,
         ease: &mut impl Ease,
     ) -> Wheels {
-        Wheels::over(
-            &self.scene(),
-            self.roster(),
+        let scene = self.scene();
+        let strip = scene
+            .strip
+            .map(|view| Strip::across(viewport.bounds(), view));
+        self.wheels_over(
+            &scene,
+            strip.as_ref(),
             viewport,
             &self.aim(pointer, shifted),
             ease,
         )
+    }
+
+    fn wheels_over(
+        &self,
+        scene: &Scene,
+        strip: Option<&Strip>,
+        viewport: &Viewport,
+        aim: &Aim<'_>,
+        ease: &mut impl Ease,
+    ) -> Wheels {
+        let wheels = Wheels::over(scene, self.roster(), viewport, aim, ease);
+        match strip {
+            Some(strip) => wheels.clear_of(strip.frame()),
+            None => wheels,
+        }
     }
 
     fn aim(&self, pointer: Option<egui::Pos2>, shifted: bool) -> Aim<'_> {

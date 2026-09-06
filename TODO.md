@@ -9,34 +9,17 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The whole day's work is one uncommitted tree, gate green on the
-overseer's run (15 ok result lines, replay hash 0x4e8901533900b1d4):
-the view's income, spend and pull; the strip with the clock cell, the
-rock bars, the icons as marks; one extractor row per material with the
-bots' economy matched to build capacity; the placement draft in the
-sim and the bots; the time split (`Tick` the step count, `Time` the
-match's time, `Moment` fractional `Time`); two compactions. The look
-scenes were judged by fresh eyes: icons, bars, stock and net read; the
-elapsed clock was read as a countdown and the owner keeps it.
+Nothing is in flight. One unit at a time on plain subagents; teammate
+mode is off from the next session.
 
-In flight, Opus (the compaction agent): the draft as stages, from the
-owner's play. DESIGN Start is the target: one stage at a time, ending
-on its seat's placement or the span, a timed-out seat placing later
-alongside, a bot placing on its stage's first tick; the view carries
-the stages for the panel.
-
-Next, Fable under the owner's steering, once the stages land: DISPLAY
-"The draft" (the initiative-list panel, the wheel's bands disabled
-with "After the draft", "Not yet", "Rock taken"), the Extract mark
-as chevron plus icon inside the frame (the icons clipped the frame),
-and Resources as rewritten 2026-09-06 from the owner's play: the bars
-on the wheel's mirrored arc with a grey spine, the cap as a dimmed
-band of the hue and the pull as the full hue over it, no outline.
-Commits, ruled 2026-09-06: two. The first once the stage unit is
-green: the readings, the extractors, the draft's rules, the time
-split. The second after the Fable draft screen and the owner's play.
-Then, before the belt: the send-destroys-frame defect (a sim unit)
-and the hover preview asked of the sim (a sim and display unit). Then
+Next, before the belt: the send-destroys-frame defect (a sim unit)
+and the hover preview asked of the sim (a sim and display unit), which
+also draws the preview's cost on the stockpile bars (DISPLAY The
+stockpile, ruled 2026-09-06: segments only, never a numeral). Then a
+small view and display unit: an extractor wanted or building at a rock
+shows its coming yield on the rock's bar (DISPLAY Resources, ruled
+2026-09-06, frames and wants both, to help the player schedule
+construction). Then
 the belt, plan item 3, scope ruled 2026-09-06: generation from the
 seed with regional caps, the fixed table deleted, the lobby preview
 from the seed; the star in the middle of the system, not distant, as
@@ -112,10 +95,10 @@ Open from the draft unit:
   distant): every panic path becomes error propagation and handling;
   with the id-minting stores above and the raw-index item. A crate-wide
   audit, after the belt.
-- One easing span (owner, 2026-09-06): every eased change on screen
-  uses `ease::SPAN_SECONDS` and nothing else; the panel's own fade
-  constant is deleted in the draft visual unit. Kept as a rule for
-  every display brief.
+- Two easing spans and no other (owner, 2026-09-06): an enum of Fast
+  and Slow whose duration is 20 ms or 100 ms; fast for what the pointer
+  causes, slow for the camera and the screens (DISPLAY The wheel). Built
+  in the draft visual unit; a rule for every display brief after.
 - Engine friction 2026-09-06: the engine's `headless::Session` changed
   signature (a generic and an init closure, no `state`) under the game
   mid-session and broke the look binary until the visual agent fixed
@@ -169,16 +152,12 @@ code does not yet do, naming the unit that lands it. A brief quotes its
 lines from here; landing deletes them; the overseer reads this section
 against the code at every session start.
 
-- DISPLAY The stockpile and the clock, Icons, Resources: whole
-  sections; the view carries no income, spend or pull. The logic unit
-  in flight, then the Fable visual unit.
-- DISPLAY Ranges: the zone circle is drawn in the rock's tint from its
-  caps; the target is one ink. The Fable visual unit.
-- DESIGN Weapons Extract: one material per Extract weapon, one
-  extractor row per material; the code has one row pulling all three.
-  The extractor unit.
-- DISPLAY Glyph: the Extract mark is the material's icon; the code
-  draws a chevron. The extractor unit and the Fable visual unit.
+- DISPLAY The stockpile and the clock: a hovered plus band marks the
+  row's cost on each bar and a minus band the refund; not drawn. The
+  hover preview unit.
+- DISPLAY Resources: an extractor wanted or building at a rock shows
+  its coming yield on the rock's bar; not drawn. The extractor-coming
+  unit.
 - DISPLAY Lobby: no Seat column; the lobby still draws one with the
   seat's number in a square of its colour (screens/lobby.rs). Plan 6.
 - DISPLAY Lobby: the team choice shows a square of the team's colour in

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use mirage_engine::egui::{self, Pos2};
+use mirage_engine::egui::{self, Pos2, Rect};
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::Draft;
 use neumannarch_sim::{Material, RockId, RowId, SeatId};
 
 use crate::display::bars::Bars;
-use crate::display::ease;
+use crate::display::ease::{self, Span};
 use crate::display::label::{self, titled};
 use crate::display::scene::{Hover, Scene, Shown, WheelBand};
 use crate::display::viewport::Viewport;
@@ -115,7 +115,7 @@ impl Ease for Motion {
         });
         if tween.stepped != frame {
             tween.stepped = frame;
-            tween.value = ease::toward(tween.value, f64::from(target), dt);
+            tween.value = ease::toward(tween.value, f64::from(target), dt, Span::Fast);
         }
         tween.value as f32
     }
@@ -202,6 +202,22 @@ impl Wheels {
             bars: Bars::over(scene, viewport, &placed),
             hovered,
         }
+    }
+
+    pub fn clear_of(mut self, rect: Rect) -> Wheels {
+        for wheel in &mut self.wheels {
+            wheel.clear_of(rect);
+        }
+        self.wheels.retain(Wheel::draws);
+        self.bars.clear_of(rect);
+        self
+    }
+
+    pub fn frames(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.wheels
+            .iter()
+            .flat_map(Wheel::frames)
+            .chain(self.bars.frames())
     }
 
     pub fn hovered(&self) -> Option<RockId> {
@@ -444,6 +460,67 @@ mod tests {
     }
 
     #[test]
+    fn nothing_of_a_wheel_or_a_bar_stands_inside_a_rect_it_is_cleared_of() {
+        use crate::display::camera::BeltCamera;
+        use crate::display::scene::RockView;
+        use neumannarch_sim::{Materials, Vec3};
+
+        let viewport = Viewport::of(
+            &BeltCamera::new(Vec3::ZERO, 2_000.0),
+            mirage_engine::math::UVec2::new(1280, 720),
+            1.0,
+        );
+        let scene = Scene {
+            rocks: vec![RockView {
+                id: A,
+                pos: Vec3::ZERO,
+                radius: 6.0,
+                caps: Materials::new(20.0, 10.0, 5.0),
+                pull: Materials::ZERO,
+            }],
+            entities: Vec::new(),
+            wheels: vec![view(A)],
+            flights: Vec::new(),
+            strip: None,
+            zone: 1.0,
+            seat: SeatId(0),
+            selection: Some(A),
+            hover: None,
+        };
+        let roster = Roster::shipped();
+        let centre = viewport.point_of(Vec3::ZERO).expect("on screen");
+        let whole = Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still);
+        let top = whole
+            .frames()
+            .fold(Rect::NOTHING, |bounds, frame| bounds.union(frame))
+            .top();
+        let strip = Rect::from_min_max(
+            egui::pos2(centre.x - 400.0, top - 10.0),
+            egui::pos2(centre.x + 400.0, top + 20.0),
+        );
+        assert!(
+            whole.frames().any(|frame| frame.intersects(strip)),
+            "the wheel and its bars reach into the strip"
+        );
+        let crossing = whole
+            .frames()
+            .find(|frame| frame.intersects(strip))
+            .expect("a frame under the strip");
+
+        let cleared = Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still)
+            .clear_of(strip);
+
+        assert!(cleared.frames().all(|frame| !frame.intersects(strip)));
+        assert!(cleared.frames().count() < whole.frames().count());
+        assert_eq!(
+            cleared.band_at(crossing.center()),
+            None,
+            "what is not drawn takes no click"
+        );
+        assert_eq!(cleared.spoken_at(crossing.center()), None);
+    }
+
+    #[test]
     fn a_band_during_the_draft_is_refused_by_the_drafts_own_rule_and_live_after_it() {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(600)).expect("two teams");
         let mut session =
@@ -621,19 +698,20 @@ mod tests {
         };
         let small = Detail::Small.scale();
 
-        let born = frame(&mut motion, ease::SPAN_SECONDS / 2.0, 1.0);
+        let fast = Span::Fast.seconds();
+        let born = frame(&mut motion, fast / 2.0, 1.0);
         assert!(
             (born - (small + 1.0) / 2.0).abs() < 1e-3,
             "{born}: a wheel first drawn full grows from small"
         );
-        assert_eq!(frame(&mut motion, ease::SPAN_SECONDS, 1.0), 1.0);
+        assert_eq!(frame(&mut motion, fast, 1.0), 1.0);
         assert_eq!(frame(&mut motion, 1.0, 1.0), 1.0, "and holds");
-        let back = frame(&mut motion, ease::SPAN_SECONDS / 2.0, small);
+        let back = frame(&mut motion, fast / 2.0, small);
         assert!(
             (back - (small + 1.0) / 2.0).abs() < 1e-3,
             "{back}: it shrinks by the same span"
         );
-        assert_eq!(frame(&mut motion, ease::SPAN_SECONDS, small), small);
+        assert_eq!(frame(&mut motion, fast, small), small);
     }
 
     #[test]

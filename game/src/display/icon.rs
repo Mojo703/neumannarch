@@ -9,15 +9,13 @@ const CURVE_STEPS: usize = 8;
 
 pub const CENTRE: (f32, f32) = (30.0, 30.0);
 
-const SOURCES: [&str; 3] = [
-    include_str!("../../icons/metals.svg"),
-    include_str!("../../icons/volatiles.svg"),
-    include_str!("../../icons/energy.svg"),
-];
+const SHEET: &str = include_str!("../../icons/materials.svg");
+
+const GROUPS: [&str; 3] = ["metals", "volatiles", "energy"];
 
 static ICONS: LazyLock<[Icon; 3]> = LazyLock::new(|| {
     Material::EVERY.map(|material| {
-        Icon::parse(SOURCES[material as usize])
+        Icon::parse(SHEET, GROUPS[material as usize])
             .unwrap_or_else(|why| panic!("the {material:?} icon is not an icon: {why:?}"))
     })
 });
@@ -30,6 +28,7 @@ pub struct Icon {
 #[derive(Debug)]
 pub enum NotAnIcon {
     Svg(usvg::Error),
+    NoSuchGroup,
     NotOnePath,
     Stroked,
     Unfilled,
@@ -41,9 +40,13 @@ pub fn of(material: Material) -> &'static Icon {
 }
 
 impl Icon {
-    pub fn parse(svg: &str) -> Result<Icon, NotAnIcon> {
-        let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(NotAnIcon::Svg)?;
-        let [usvg::Node::Path(path)] = tree.root().children() else {
+    pub fn parse(sheet: &str, group: &str) -> Result<Icon, NotAnIcon> {
+        let tree =
+            usvg::Tree::from_str(sheet, &usvg::Options::default()).map_err(NotAnIcon::Svg)?;
+        let Some(usvg::Node::Group(group)) = tree.node_by_id(group) else {
+            return Err(NotAnIcon::NoSuchGroup);
+        };
+        let [usvg::Node::Path(path)] = group.children() else {
             return Err(NotAnIcon::NotOnePath);
         };
         if path.stroke().is_some() {
@@ -209,32 +212,37 @@ mod tests {
     #[test]
     fn a_drawing_that_is_not_one_closed_filled_path_is_refused() {
         let svg = |body: &str| {
-            format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60">{body}</svg>"#)
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><g id="drawn">{body}</g></svg>"#
+            )
         };
+        let parse = |body: &str| Icon::parse(&svg(body), "drawn");
         assert!(matches!(
-            Icon::parse(&svg(
-                r#"<path d="M0 0 L10 0 L10 10 Z"/><path d="M20 20 L30 20 L30 30 Z"/>"#
-            )),
+            parse(r#"<path d="M0 0 L10 0 L10 10 Z"/><path d="M20 20 L30 20 L30 30 Z"/>"#),
             Err(NotAnIcon::NotOnePath)
         ));
         assert!(matches!(
-            Icon::parse(&svg(r#"<path stroke="red" d="M0 0 L10 0 L10 10 Z"/>"#)),
+            parse(r#"<path stroke="red" d="M0 0 L10 0 L10 10 Z"/>"#),
             Err(NotAnIcon::Stroked)
         ));
         assert!(matches!(
-            Icon::parse(&svg(r#"<path fill="none" d="M0 0 L10 0 L10 10 Z"/>"#)),
+            parse(r#"<path fill="none" d="M0 0 L10 0 L10 10 Z"/>"#),
             Err(NotAnIcon::Unfilled)
         ));
         assert!(matches!(
-            Icon::parse(&svg(r#"<path d="M0 0 L10 0 L10 10"/>"#)),
+            parse(r#"<path d="M0 0 L10 0 L10 10"/>"#),
             Err(NotAnIcon::Open)
         ));
-        assert!(matches!(Icon::parse("not svg"), Err(NotAnIcon::Svg(_))));
+        assert!(matches!(
+            Icon::parse(&svg(r#"<path d="M0 0 L10 0 L10 10 Z"/>"#), "absent"),
+            Err(NotAnIcon::NoSuchGroup)
+        ));
+        assert!(matches!(
+            Icon::parse("not svg", "drawn"),
+            Err(NotAnIcon::Svg(_))
+        ));
         assert!(
-            Icon::parse(&svg(
-                r#"<path d="M0 0 L10 0 L10 10 Z"/><text x="1" y="1">TEMP</text>"#
-            ))
-            .is_ok(),
+            parse(r#"<path d="M0 0 L10 0 L10 10 Z"/><text x="1" y="1">TEMP</text>"#).is_ok(),
             "a word painted across a drawing is not part of it"
         );
     }

@@ -1,6 +1,6 @@
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use neumannarch_sim::roster::Roster;
-use neumannarch_sim::state::{Draft, STAGE_SPAN};
+use neumannarch_sim::state::{Draft, GRACE, STAGE_SPAN};
 use neumannarch_sim::{RockId, SeatId, Tick};
 
 use crate::display::glyph::{self, Glyph};
@@ -11,37 +11,41 @@ use crate::display::wheel;
 use crate::display::wheels::RESTING_ALPHA;
 use crate::screens::panel;
 
-pub const FADE_SECONDS: f64 = 0.3;
-
-pub const WIDTH: f32 = 272.0;
-
-pub const LEFT: f32 = panel::MARGIN;
+pub const LEFT: f32 = panel::MARGIN / 2.0;
 
 pub const TOP: f32 = panel::MARGIN * 1.5;
 
-const INSET: f32 = panel::ROW_HEIGHT / 2.0;
+const TITLE: &str = "Draft";
 
-const SWATCH: f32 = panel::ROW_HEIGHT * 0.6;
+const CLOCK: &str = "Clock";
 
-const GAP: f32 = 8.0;
+const INSET: f32 = 10.0;
 
-const NAME_WIDTH: f32 = 10.0 * panel::CHARACTER_WIDTH;
+const ROW_HEIGHT: f32 = 2.0 * glyph::HALF + 2.0;
 
-const STATE_WIDTH: f32 = 84.0;
+const GLYPH_SLOT: f32 = 2.0 * glyph::HALF;
 
-const BAR_HEIGHT: f32 = wheel::LINE_HEIGHT;
+const GAP: f32 = 6.0;
+
+const NAME_WIDTH: f32 = 9.0 * wheel::CHARACTER_WIDTH;
+
+const BAR_LENGTH: f32 = 60.0;
+
+const BAR_HEIGHT: f32 = wheel::MARK;
+
+pub const WIDTH: f32 = INSET + GLYPH_SLOT + GAP + NAME_WIDTH + GAP + BAR_LENGTH + INSET;
 
 pub struct Order {
     frame: Rect,
+    title: Pos2,
     rows: Vec<Row>,
     alpha: f32,
 }
 
 struct Row {
     rect: Rect,
-    seat: SeatId,
+    stage: Option<(SeatId, Glyph)>,
     name: String,
-    glyph: Glyph,
     standing: Standing,
 }
 
@@ -66,40 +70,56 @@ impl Order {
         let running = stages
             .iter()
             .position(|stage| Some(*stage) == draft.running());
-        let left = (1.0 - tick.0.saturating_sub(draft.began().0) as f32 / STAGE_SPAN.0 as f32)
-            .clamp(0.0, 1.0);
-        let top = Pos2::new(window.left() + LEFT + INSET, window.top() + TOP + INSET);
-        let rows: Vec<Row> = panel::column(top, WIDTH - 2.0 * INSET, stages.len())
-            .zip(stages)
+        let since = tick.0.saturating_sub(draft.began().0) as f32;
+        let left = |span: Tick| (1.0 - since / span.0 as f32).clamp(0.0, 1.0);
+        let corner = Pos2::new(window.left() + LEFT, window.top() + TOP);
+        let title = Pos2::new(
+            corner.x + WIDTH / 2.0,
+            corner.y + INSET + wheel::LINE_HEIGHT / 2.0,
+        );
+        let first = Pos2::new(
+            corner.x + INSET,
+            corner.y + INSET + wheel::LINE_HEIGHT + GAP,
+        );
+        let row_at = |index: usize| {
+            Rect::from_min_size(
+                Pos2::new(first.x, first.y + index as f32 * ROW_HEIGHT),
+                Vec2::new(WIDTH - 2.0 * INSET, ROW_HEIGHT),
+            )
+        };
+        let mut rows: Vec<Row> = stages
+            .iter()
             .enumerate()
-            .map(|(at, (rect, stage))| Row {
-                rect,
-                seat: stage.seat,
+            .map(|(at, stage)| Row {
+                rect: row_at(at),
+                stage: Some((stage.seat, Glyph::of(&roster[stage.row]))),
                 name: names[usize::from(stage.seat.0)].clone(),
-                glyph: Glyph::of(&roster[stage.row]),
                 standing: match (stage.placed, running) {
                     (Some(rock), _) => Standing::Placed(rock),
-                    (None, Some(now)) if at == now => Standing::Running { left },
+                    (None, Some(now)) if at == now => Standing::Running {
+                        left: left(STAGE_SPAN),
+                    },
                     (None, Some(now)) if at > now => Standing::Waiting,
                     (None, _) => Standing::RanOut,
                 },
             })
             .collect();
-        let frame = rows
-            .iter()
-            .map(|row| row.rect)
-            .reduce(|frame, rect| frame.union(rect))
-            .unwrap_or(Rect::from_min_size(top, Vec2::ZERO))
-            .expand(INSET);
-        Order { frame, rows, alpha }
-    }
-
-    pub fn frame(&self) -> Rect {
-        self.frame
-    }
-
-    pub fn standings(&self) -> impl Iterator<Item = (SeatId, Standing)> + '_ {
-        self.rows.iter().map(|row| (row.seat, row.standing))
+        if running.is_none() && draft.ended().is_none() {
+            rows.push(Row {
+                rect: row_at(rows.len()),
+                stage: None,
+                name: CLOCK.to_string(),
+                standing: Standing::Running { left: left(GRACE) },
+            });
+        }
+        let bottom = rows.last().map_or(first.y, |row| row.rect.bottom()) + INSET;
+        let frame = Rect::from_min_max(corner, Pos2::new(corner.x + WIDTH, bottom));
+        Order {
+            frame,
+            title,
+            rows,
+            alpha,
+        }
     }
 
     pub fn paint(&self, painter: &egui::Painter) {
@@ -110,6 +130,13 @@ impl Order {
             0.0,
             Stroke::new(1.0, faded(panel::LINE)),
             egui::StrokeKind::Inside,
+        );
+        painter.text(
+            self.title,
+            Align2::CENTER_CENTER,
+            TITLE,
+            FontId::monospace(wheel::LINE_HEIGHT),
+            faded(panel::INK),
         );
         for row in &self.rows {
             let alpha = self.alpha
@@ -123,60 +150,66 @@ impl Order {
 }
 
 impl Row {
+    fn marked(&self, seat: SeatId) -> (Fill, Color32) {
+        match self.standing {
+            Standing::Placed(_) => (Fill::Solid, Color32::WHITE),
+            _ => (Fill::Hollow, seat_color32(seat)),
+        }
+    }
+
     fn paint(&self, painter: &egui::Painter, alpha: f32) {
         let ink = |colour: Color32| colour.gamma_multiply(alpha);
         let middle = self.rect.center().y;
-        let swatch = Rect::from_center_size(
-            Pos2::new(self.rect.left() + SWATCH / 2.0, middle),
-            Vec2::splat(SWATCH),
-        );
-        painter.rect_filled(swatch, 0.0, ink(seat_color32(self.seat)));
+        if let Some((seat, glyph)) = &self.stage {
+            let (fill, outline) = self.marked(*seat);
+            Stencil {
+                glyph,
+                cell: Cell {
+                    centre: Pos2::new(self.rect.left() + GLYPH_SLOT / 2.0, middle),
+                    half: glyph::HALF * glyph.size.scale(),
+                },
+                colour: seat_color32(*seat),
+                outline,
+                fill,
+                alpha,
+                starved: None,
+            }
+            .paint(painter);
+        }
         painter.text(
-            Pos2::new(swatch.right() + GAP, middle),
+            Pos2::new(self.rect.left() + GLYPH_SLOT + GAP, middle),
             Align2::LEFT_CENTER,
             &self.name,
-            FontId::monospace(panel::BODY_SIZE),
+            FontId::monospace(wheel::LINE_HEIGHT),
             ink(panel::INK),
         );
-        Stencil {
-            glyph: &self.glyph,
-            cell: Cell {
-                centre: Pos2::new(
-                    swatch.right() + GAP + NAME_WIDTH + GAP + glyph::HALF,
-                    middle,
-                ),
-                half: glyph::HALF * self.glyph.size.scale(),
-            },
-            colour: seat_color32(self.seat),
-            fill: match self.standing {
-                Standing::Placed(_) => Fill::Solid,
-                _ => Fill::Hollow,
-            },
-            alpha,
-            starved: None,
-        }
-        .paint(painter);
-        let state = Rect::from_min_size(
-            Pos2::new(self.rect.right() - STATE_WIDTH, middle - BAR_HEIGHT / 2.0),
-            Vec2::new(STATE_WIDTH, BAR_HEIGHT),
+        let bar = Rect::from_min_size(
+            Pos2::new(self.rect.right() - BAR_LENGTH, middle - BAR_HEIGHT / 2.0),
+            Vec2::new(BAR_LENGTH, BAR_HEIGHT),
         );
+        let fill = |left: f32| {
+            painter.rect_filled(
+                Rect::from_min_size(bar.min, Vec2::new(bar.width() * left, bar.height())),
+                0.0,
+                ink(panel::DIM_INK),
+            );
+            painter.rect_stroke(
+                bar,
+                0.0,
+                Stroke::new(1.0, ink(panel::LINE)),
+                egui::StrokeKind::Inside,
+            );
+        };
         match self.standing {
-            Standing::Waiting => {}
-            Standing::Running { left } => {
-                painter.rect_filled(
-                    Rect::from_min_size(state.min, Vec2::new(state.width() * left, state.height())),
-                    0.0,
-                    ink(panel::DIM_INK),
-                );
-                paint_track(painter, state, ink(panel::LINE));
-            }
-            Standing::RanOut => paint_track(painter, state, ink(panel::LINE)),
+            Standing::Waiting => fill(1.0),
+            Standing::Running { left } => fill(left),
+            Standing::RanOut => fill(0.0),
             Standing::Placed(rock) => {
                 painter.text(
-                    Pos2::new(state.left(), middle),
+                    Pos2::new(bar.left(), middle),
                     Align2::LEFT_CENTER,
                     rock_name(rock),
-                    FontId::monospace(panel::BODY_SIZE),
+                    FontId::monospace(wheel::LINE_HEIGHT),
                     ink(panel::INK),
                 );
             }
@@ -184,19 +217,10 @@ impl Row {
     }
 }
 
-fn paint_track(painter: &egui::Painter, track: Rect, colour: Color32) {
-    painter.rect_stroke(
-        track,
-        0.0,
-        Stroke::new(1.0, colour),
-        egui::StrokeKind::Inside,
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use neumannarch_protocol::{Lobby, PlayerId};
-    use neumannarch_sim::state::{Command, GRACE};
+    use neumannarch_sim::state::Command;
     use neumannarch_sim::{Retention, Sequence, Session};
 
     use super::*;
@@ -208,7 +232,7 @@ mod tests {
         let started = Lobby::skirmish(PlayerId::HOST)
             .freeze()
             .expect("a skirmish starts");
-        let names = seat_names(started.seating(), PlayerId::HOST);
+        let names = seat_names(started.seating(), PlayerId::HOST, started.setup().seed());
         let (setup, _) = started.parts();
         let session = Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)])
             .expect("both seats are local");
@@ -253,18 +277,22 @@ mod tests {
     }
 
     #[test]
-    fn a_row_per_stage_in_the_order_they_run_named_for_its_seat() {
+    fn a_row_per_stage_in_the_order_they_run_named_for_its_seat_under_the_title() {
         let (session, names) = skirmish();
         let order = order(&session, &names);
         let stages = session.state().draft().stages();
 
-        assert_eq!(order.rows.len(), stages.len());
+        assert_eq!(
+            order.rows.len(),
+            stages.len(),
+            "no clock row while a stage runs"
+        );
         assert!(
-            order
-                .rows
-                .iter()
-                .zip(stages)
-                .all(|(row, stage)| row.seat == stage.seat),
+            order.rows.iter().zip(stages).all(|(row, stage)| row
+                .stage
+                .as_ref()
+                .map(|(seat, _)| *seat)
+                == Some(stage.seat)),
             "each row is its stage's seat"
         );
         assert_eq!(
@@ -275,25 +303,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             stages
                 .iter()
-                .map(|stage| match stage.seat {
-                    SeatId(0) => "You",
-                    _ => "Expand",
-                })
+                .map(|stage| names[usize::from(stage.seat.0)].as_str())
                 .collect::<Vec<_>>()
         );
         assert!(
             order
                 .rows
                 .windows(2)
-                .all(|pair| pair[0].rect.bottom() < pair[1].rect.top()),
-            "rows stack downward"
+                .all(|pair| (pair[0].rect.bottom() - pair[1].rect.top()).abs() < 1e-3),
+            "rows stack downward without a gap"
         );
-        assert!(order.frame().left() >= WINDOW.left() && order.frame().top() > 0.0);
+        assert!(order.frame.left() >= WINDOW.left() && order.frame.top() > 0.0);
+        assert!((order.frame.width() - WIDTH).abs() < 1e-3);
+        assert!(
+            order.title.y < order.rows[0].rect.top(),
+            "the title stands above the rows"
+        );
         assert!(
             order
                 .rows
                 .iter()
-                .all(|row| order.frame().contains_rect(row.rect)),
+                .all(|row| order.frame.contains_rect(row.rect)),
             "the panel holds every row"
         );
     }
@@ -329,10 +359,23 @@ mod tests {
         assert_eq!(order.rows[0].standing, Standing::Placed(RockId(2)));
         assert_eq!(rock_name(RockId(2)), "Rock 3");
         assert!(matches!(order.rows[1].standing, Standing::Running { .. }));
+        for row in &order.rows {
+            let (seat, _) = row.stage.as_ref().expect("a stage row");
+            let seat = *seat;
+            assert_eq!(
+                row.marked(seat),
+                match row.standing {
+                    Standing::Placed(_) => (Fill::Solid, Color32::WHITE),
+                    _ => (Fill::Hollow, seat_color32(seat)),
+                },
+                "the glyph is filled in the seat's colour once placed and hollow in it before"
+            );
+        }
+        assert_ne!(seat_color32(SeatId(0)), seat_color32(SeatId(1)));
     }
 
     #[test]
-    fn every_unplaced_stage_ran_out_once_the_grace_runs() {
+    fn once_the_last_stage_ends_a_clock_row_drains_the_grace() {
         let (mut session, names) = skirmish();
         let stages = session.state().draft().stages().len() as u64;
         run(&mut session, stages * STAGE_SPAN.0 + GRACE.0 / 2);
@@ -340,10 +383,18 @@ mod tests {
 
         let order = order(&session, &names);
 
+        assert_eq!(order.rows.len(), stages as usize + 1);
         assert!(
-            order
-                .standings()
-                .all(|(_, standing)| standing == Standing::RanOut)
+            order.rows[..stages as usize]
+                .iter()
+                .all(|row| row.standing == Standing::RanOut)
         );
+        let clock = order.rows.last().expect("the clock row");
+        assert!(clock.stage.is_none(), "the clock places nothing");
+        assert_eq!(clock.name, CLOCK);
+        let Standing::Running { left } = clock.standing else {
+            panic!("the grace drains: {:?}", clock.standing);
+        };
+        assert!((left - 0.5).abs() < 0.01, "{left}");
     }
 }

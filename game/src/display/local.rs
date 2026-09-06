@@ -20,17 +20,25 @@ pub(crate) struct Local {
 
 impl Local {
     pub(crate) fn start(teams: u8) -> Local {
+        let mut local = Local::drafting(teams);
+        local.start_the_clock();
+        local
+    }
+
+    pub(crate) fn drafting(teams: u8) -> Local {
         let teams = (0..teams).map(TeamId).collect();
         let setup = Setup::new(teams, 0, CLOCK).expect("a match of these teams");
-        let mut local = Local {
+        Local {
             session: Session::new(setup, Retention::shipped(), &[PLAYER])
                 .expect("seat zero is seated"),
             sequences: BTreeMap::new(),
-        };
-        while local.session.state().drafting() {
-            local.session.advance();
         }
-        local
+    }
+
+    pub(crate) fn start_the_clock(&mut self) {
+        while self.session.state().drafting() {
+            self.session.advance();
+        }
     }
 
     pub(crate) fn session(&self) -> &Session {

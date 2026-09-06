@@ -21,7 +21,7 @@ use neumannarch_game::display::{belt, hud};
 use neumannarch_game::screens::control::Controls;
 use neumannarch_game::screens::lobby::seat_names;
 use neumannarch_game::screens::order::Order;
-use neumannarch_game::screens::panel::{self, Panel};
+use neumannarch_game::screens::panel::Panel;
 use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
 use neumannarch_sim::Session as Match;
 use neumannarch_sim::roster::{
@@ -103,16 +103,20 @@ impl Game for Looker {
         belt::draw(&self.scene, &viewport, ctx);
 
         let roster = Roster::shipped();
+        let scene = &self.scene;
+        let over = viewport.bounds();
+        let strip = scene.strip.map(|view| Strip::across(over, view));
         let wheels = Wheels::over(
-            &self.scene,
+            scene,
             &roster,
             &viewport,
-            &aim(&self.scene, self.drafting.as_ref()),
+            &aim(scene, self.drafting.as_ref()),
             &mut Still,
         );
-        let scene = &self.scene;
-        let over = panel::window_of(window, points_per_pixel);
-        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let wheels = match &strip {
+            Some(strip) => wheels.clear_of(strip.frame()),
+            None => wheels,
+        };
         let order = self.drafting.as_ref().map(|drafting| {
             Order::over(
                 over,
@@ -147,6 +151,9 @@ impl Game for Looker {
             if let Some((beside, phrase)) = note {
                 let panel = Panel::new(ui.painter(), over, egui::Pos2::ZERO, false);
                 let mut controls = Controls::over(&panel);
+                if let Some(strip) = &strip {
+                    controls.avoid(strip.frame());
+                }
                 controls.note(beside, phrase);
                 controls.finish();
             }
@@ -571,7 +578,7 @@ fn skirmish_where_you_go_first() -> (Match, Vec<String>) {
                 .edit(PlayerId::HOST, LobbyEdit::SetSeed(seed))
                 .expect("the host sets the seed");
             let started = lobby.freeze().expect("a skirmish starts");
-            let names = seat_names(started.seating(), PlayerId::HOST);
+            let names = seat_names(started.seating(), PlayerId::HOST, seed);
             let (setup, _) = started.parts();
             let session =
                 Match::new(setup, Retention::shipped(), &[YOU]).expect("the host is seated");

@@ -5,7 +5,7 @@ use mirage_engine::{Camera, Projection, View};
 use neumannarch_sim::Vec3;
 use neumannarch_sim::orbit::Gravity;
 
-use crate::display::ease;
+use crate::display::ease::{self, Span};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeltCamera {
@@ -46,11 +46,11 @@ impl BeltCamera {
     pub fn settle(&mut self, dt: f64) {
         let Vec3 { x, y, z } = self.focus;
         self.shown_focus = Vec3::new(
-            ease::toward(self.shown_focus.x, x, dt),
-            ease::toward(self.shown_focus.y, y, dt),
-            ease::toward(self.shown_focus.z, z, dt),
+            ease::toward(self.shown_focus.x, x, dt, Span::Slow),
+            ease::toward(self.shown_focus.y, y, dt, Span::Slow),
+            ease::toward(self.shown_focus.z, z, dt, Span::Slow),
         );
-        self.shown_distance = ease::toward(self.shown_distance, self.distance, dt);
+        self.shown_distance = ease::toward(self.shown_distance, self.distance, dt, Span::Slow);
     }
 
     pub fn pan(&mut self, delta: Vec3) {
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(camera.focus(), far, "the target is taken at once");
         assert_eq!(camera.shown_focus(), start, "and shown only as it settles");
 
-        camera.settle(ease::SPAN_SECONDS / 2.0);
+        camera.settle(Span::Slow.seconds() / 2.0);
         assert!(
             camera
                 .shown_focus()
@@ -175,7 +175,7 @@ mod tests {
         );
         assert!((camera.shown_distance - 600.0).abs() < 1e-6);
 
-        camera.settle(ease::SPAN_SECONDS);
+        camera.settle(Span::Slow.seconds());
         assert_eq!(camera.shown_focus(), far);
         assert_eq!(camera.shown_distance, camera.distance());
     }
@@ -210,7 +210,7 @@ mod tests {
 
         let mut dragged = camera;
         dragged.pan_by_pixels(delta, WINDOW);
-        dragged.settle(ease::SPAN_SECONDS);
+        dragged.settle(Span::Slow.seconds());
 
         let now = crate::display::viewport::Viewport::of(&dragged, WINDOW, 1.0)
             .pixel_of(held)

@@ -6,7 +6,7 @@ use neumannarch_protocol::{
     Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, Occupant, PlayerId, Refused, Seating,
 };
 use neumannarch_sim::belt::Belt;
-use neumannarch_sim::{TICKS_PER_SECOND, TeamId, Tick, Time};
+use neumannarch_sim::{SeatId, TICKS_PER_SECOND, TeamId, Tick, Time};
 
 use crate::controls::Button;
 use crate::display::bars::Bars;
@@ -37,6 +37,12 @@ pub(crate) const CLOCKS: [Tick; 4] = [
 ];
 
 const BOTS: [Bot; 2] = [Bot::Turtle, Bot::Expand];
+
+const NAMES_PER_BOT: usize = MAX_SLOTS;
+
+const TURTLE_NAMES: [&str; NAMES_PER_BOT] = ["Hollis", "Marta", "Ingrid", "Petra"];
+
+const EXPAND_NAMES: [&str; NAMES_PER_BOT] = ["Cassius", "Nadia", "Ravi", "Soledad"];
 
 const SEAT_WIDTH: f32 = 52.0;
 
@@ -536,10 +542,21 @@ pub fn occupant_name(occupant: Occupant, me: PlayerId) -> String {
     }
 }
 
-pub fn seat_names(seating: &Seating, me: PlayerId) -> Vec<String> {
+pub fn bot_name(bot: Bot, seed: u64, seat: SeatId) -> &'static str {
+    let names: &[&str; NAMES_PER_BOT] = match bot {
+        Bot::Turtle => &TURTLE_NAMES,
+        Bot::Expand => &EXPAND_NAMES,
+    };
+    names[(seed.wrapping_add(u64::from(seat.0)) % NAMES_PER_BOT as u64) as usize]
+}
+
+pub fn seat_names(seating: &Seating, me: PlayerId, seed: u64) -> Vec<String> {
     seating
         .seats()
-        .map(|(_, occupant)| occupant_name(occupant, me))
+        .map(|(seat, occupant)| match occupant {
+            Occupant::Bot(bot) => bot_name(bot, seed, seat).to_string(),
+            Occupant::Player(_) => occupant_name(occupant, me),
+        })
         .collect()
 }
 
@@ -578,6 +595,54 @@ mod tests {
 
     fn window() -> Rect {
         Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 720.0))
+    }
+
+    #[test]
+    fn a_bots_name_is_drawn_from_its_personalitys_list_by_seed_and_seat() {
+        for bot in BOTS {
+            for seed in 0..16u64 {
+                let names: Vec<&str> = (0..MAX_SLOTS as u8)
+                    .map(|seat| bot_name(bot, seed, SeatId(seat)))
+                    .collect();
+                let mut apart = names.clone();
+                apart.sort_unstable();
+                apart.dedup();
+                assert_eq!(
+                    apart.len(),
+                    names.len(),
+                    "{bot:?} at seed {seed}: {names:?}"
+                );
+            }
+            assert_ne!(
+                (0..16u64)
+                    .map(|seed| bot_name(bot, seed, SeatId(1)))
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len(),
+                1,
+                "the seed draws"
+            );
+            assert_eq!(
+                bot_name(bot, 3, SeatId(1)),
+                bot_name(bot, 3, SeatId(1)),
+                "and the draw is fixed"
+            );
+        }
+        let mut lobby = skirmish();
+        lobby
+            .edit(
+                PlayerId::HOST,
+                LobbyEdit::SetSlot {
+                    slot: 2,
+                    holder: Holder::Bot(Bot::Expand),
+                },
+            )
+            .expect("the host seats a second bot");
+        let started = lobby.freeze().expect("a skirmish starts");
+        let names = seat_names(started.seating(), PlayerId::HOST, started.setup().seed());
+        assert_eq!(names[0], "You");
+        assert!(EXPAND_NAMES.contains(&names[1].as_str()), "{names:?}");
+        assert!(EXPAND_NAMES.contains(&names[2].as_str()), "{names:?}");
+        assert_ne!(names[1], names[2], "two bots of one personality read apart");
     }
 
     #[test]

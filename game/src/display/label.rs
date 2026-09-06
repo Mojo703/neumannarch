@@ -121,6 +121,7 @@ mod tests {
                 count: 1,
                 dashed: true,
             },
+            Entry::Placed,
         ];
         let refusals = [
             Refused::NotHost,
@@ -203,16 +204,16 @@ mod tests {
             .chain([TeamId(0), TeamId(3)].map(team_name))
             .chain([PlayerId::HOST, PlayerId(3)].map(player_name))
             .chain(CLOCKS.map(clock_name))
-            .chain(Material::EVERY.into_iter().flat_map(|material| {
-                strip
-                    .phrases(material)
+            .chain(
+                Material::EVERY
                     .into_iter()
-                    .chain([strip.net(material)])
-            }))
+                    .flat_map(|material| [strip.phrase(material), strip.net(material)]),
+            )
             .chain([strip.elapsed()])
             .chain(bars.iter().map(|bar| bar.phrase(&roster)))
             .chain(refused_bands.iter().map(|band| band.phrase(&roster)))
-            .chain(seat_names(seated.seating(), PlayerId::HOST))
+            .chain((0..8u64).flat_map(|seed| seat_names(seated.seating(), PlayerId::HOST, seed)))
+            .chain(["Draft".to_string(), "Clock".to_string()])
             .chain([rock_name(RockId(11))])
             .collect()
     }

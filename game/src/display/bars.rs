@@ -67,6 +67,14 @@ impl Bars {
         Bars::over(scene, viewport, &[])
     }
 
+    pub fn clear_of(&mut self, rect: Rect) {
+        self.bars.retain(|bar| !bar.frame.intersects(rect));
+    }
+
+    pub fn frames(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.bars.iter().map(|bar| bar.frame)
+    }
+
     pub fn paint(&self, painter: &egui::Painter) {
         for spine in self.spines() {
             painter.add(spine);

@@ -1,4 +1,4 @@
-use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
+use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use neumannarch_protocol::Lobby;
@@ -122,6 +122,7 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
                 half: glyph::HALF,
             },
             colour: seat_color32(colour),
+            outline: Color32::WHITE,
             fill: Fill::Solid,
             alpha: 1.0,
             starved: None,

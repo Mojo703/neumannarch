@@ -89,6 +89,7 @@ pub enum Entry {
     Building(Building),
     Arriving { count: u32, from: RockId },
     Wanted { count: u32, dashed: bool },
+    Placed,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -223,7 +224,7 @@ impl Entry {
             Entry::Present(_) | Entry::Leaving { .. } => Fill::Solid,
             Entry::Building(building) => Fill::Filling(building.progress as f32),
             Entry::Surplus(_) | Entry::Arriving { .. } => Fill::Hollow,
-            Entry::Wanted { dashed: false, .. } => Fill::Hollow,
+            Entry::Wanted { dashed: false, .. } | Entry::Placed => Fill::Hollow,
             Entry::Wanted { dashed: true, .. } => Fill::Dashed,
         }
     }
@@ -239,6 +240,7 @@ impl Entry {
             | Entry::Leaving { count, .. }
             | Entry::Arriving { count, .. }
             | Entry::Wanted { count, .. } => Some(count),
+            Entry::Placed => Some(1),
             Entry::Building(_) => None,
         }
     }
@@ -259,6 +261,7 @@ impl Entry {
             Entry::Arriving { from, .. } => format!("{name} arriving from {}", rock_name(from)),
             Entry::Wanted { dashed: true, .. } => format!("No builder for {name}"),
             Entry::Wanted { dashed: false, .. } => format!("{name} wanted"),
+            Entry::Placed => format!("{name} placed"),
         }
     }
 }
@@ -317,6 +320,15 @@ impl Sectors {
                 }
             }
         }
+        let placements: Vec<(RockId, SeatId, RowId)> = match view.draft.ended() {
+            None => view
+                .draft
+                .stages()
+                .iter()
+                .filter_map(|stage| Some((stage.placed?, stage.seat, stage.row)))
+                .collect(),
+            Some(_) => Vec::new(),
+        };
         for plan in &view.plans {
             let entries = rows
                 .entry((plan.rock, view.seat))
@@ -329,13 +341,20 @@ impl Sectors {
             let short = plan
                 .want
                 .saturating_sub(covered(view, plan.rock, plan.row) + wanted_frames(plan.building));
-            if short > 0 {
+            if short > 0 && !placements.contains(&(plan.rock, view.seat, plan.row)) {
                 entries.push(shown(Entry::Wanted {
                     count: short,
                     dashed: !builds_at(view, plan.rock, view.seat),
                 }));
             }
             entries.sort_by_key(order);
+        }
+        for (rock, seat, row) in placements {
+            rows.entry((rock, seat))
+                .or_default()
+                .entry(row)
+                .or_default()
+                .push(shown(Entry::Placed));
         }
         let arcs: BTreeMap<(RockId, SeatId), Arc> = fights
             .arcs()
@@ -420,7 +439,7 @@ fn order(shown: &Shown) -> u8 {
         Entry::Leaving { .. } => 2,
         Entry::Building(_) => 3,
         Entry::Arriving { .. } => 4,
-        Entry::Wanted { .. } => 5,
+        Entry::Wanted { .. } | Entry::Placed => 5,
     }
 }
 
@@ -562,6 +581,53 @@ mod tests {
         assert_eq!(scene.wheels.len(), 1, "one wheel, at the rock it wants at");
         assert_eq!(scene.wheels[0].rock, at(0));
         assert!(scene.wheel_of(at(5)).is_none());
+    }
+
+    #[test]
+    fn a_draft_placement_stands_on_its_rock_as_a_placed_line_until_the_clock_starts() {
+        let mut local = Local::drafting(2);
+        let stages = local.session().state().draft().stages().to_vec();
+        let mine = stages
+            .iter()
+            .find(|stage| stage.seat == PLAYER)
+            .expect("the player picks");
+        let theirs = stages
+            .iter()
+            .find(|stage| stage.seat == RIVAL)
+            .expect("the rival picks");
+        let (first, second) = match stages[0].seat == PLAYER {
+            true => ((PLAYER, mine), (RIVAL, theirs)),
+            false => ((RIVAL, theirs), (PLAYER, mine)),
+        };
+        local.want_of(first.0, &[(at(0), first.1.row, 1)]);
+        local.want_of(second.0, &[(at(1), second.1.row, 1)]);
+
+        let drafting = scene(&local);
+        for (rock, (seat, stage)) in [(at(0), first), (at(1), second)] {
+            assert_eq!(
+                entries(&drafting, rock, seat, stage.row),
+                vec![shown(Entry::Placed)],
+                "the placement is the one line at its rock"
+            );
+        }
+        assert_eq!(Entry::Placed.count(), Some(1));
+        assert_eq!(Entry::Placed.fill(), Fill::Hollow);
+        assert_eq!(Entry::Placed.phrase("Shipyard"), "Shipyard placed");
+
+        local.start_the_clock();
+        local.run(1);
+        let started = scene(&local);
+        assert!(
+            started.wheels.iter().all(|wheel| {
+                wheel.sectors.iter().all(|sector| {
+                    sector
+                        .rows
+                        .iter()
+                        .all(|row| row.entries.iter().all(|shown| shown.entry != Entry::Placed))
+                })
+            }),
+            "once the clock runs the structure stands and the line is gone"
+        );
     }
 
     #[test]

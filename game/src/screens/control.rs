@@ -206,6 +206,10 @@ impl<'a> Controls<'a> {
         self.note = Some(Note { beside, sentence });
     }
 
+    pub fn avoid(&mut self, rect: Rect) {
+        self.shown.push(rect);
+    }
+
     pub fn finish(self) -> bool {
         if let Some(list) = &self.list {
             self.panel

@@ -744,6 +744,7 @@ pub enum Entry {
     Building(Building),
     Arriving { count: u32, from: RockId },
     Wanted { count: u32, dashed: bool },
+    Placed,                          // a draft placement, until the clock starts
 }
 pub enum Fill { Solid, Hollow, Filling(f32), Dashed }
 pub enum WheelBand { Plus(u32), Minus(u32) }
@@ -772,7 +773,12 @@ impl Entry {
   stands empty until it wants something: without it no first want could
   be placed, and a bare rock could not grow before its click. A sector holds only
   the rows that have an entry; another seat's sector never carries a
-  wanted or a building entry, since wants and frames are its own.
+  wanted or a building entry, since wants and frames are its own. The
+  one exception is the draft: while it runs, every placed stage of
+  `View::draft` stands on its rock as `Entry::Placed` in the placing
+  seat's sector, in place of the viewer's own wanted entry for that
+  row, and a small wheel shows that line, the one wanted line it ever
+  shows, so a taken rock reads as taken from the belt.
 - `Entry` is one fact about a row at a rock, and its variants are what
   DISPLAY.md's states are. `Shown::previewed` is what the pointer says
   would change, drawn at half alpha; `Entry::dim` is what is dim by its
@@ -798,9 +804,11 @@ impl Entry {
   zone circle on the HUD is one ink for every rock.
 - `icon::Icon`: one material's icon, the closed rings of its SVG in the
   glyph's sixty-unit cell, parsed by `usvg` (no text, no fonts) from the
-  three files under `game/icons/` into a `LazyLock` the first time any
-  glyph is drawn, which is the mesh catalog at boot; a file that is not
-  one closed filled path is a boot-time panic naming the material.
+  one sheet `game/icons/materials.svg`, `Icon::parse(sheet, group)`
+  reading the group with the material's id, into a `LazyLock` the first
+  time any glyph is drawn, which is the mesh catalog at boot; a group
+  that is missing or is not one closed filled path is a boot-time panic
+  naming the material.
   `icon::of(material)` is the drawing and `placed(centre, width)` is it
   as a `Primitive::Path`, so the glyph's Extract mark, the stockpile's
   cells and the rock bars draw it through the same painter and
@@ -810,14 +818,17 @@ impl Entry {
   vertex heights, so a nut's hole is a hole.
 - `strip::Strip`: the stockpile and the clock, laid out across the top
   centre from `scene::StripView` (the seat's stockpile, income, spend,
-  elapsed tick and clock), in the wheel's vocabulary: a scrim box per
-  cell, the count font for every numeral, the bar a box of the count
-  line's height outlined in the panel's line ink, filled to the stock in
-  the hue faded toward the backdrop, the spend segment darker inside the
+  elapsed tick and clock), in the wheel's vocabulary: one box in the
+  screens' scrim and line around every cell, the cells the wheel's cell
+  gap apart, a cell running icon, stock numeral, bar, net numeral; the
+  count font for every numeral, the bar a box of the count line's
+  height outlined in the panel's line ink, filled to the stock in the
+  hue faded toward the backdrop, the spend segment darker inside the
   tip and the income segment fainter past it, the overrun the fill
   itself running past the box's end when the stock is at capacity. The
   clock's fill is the panel's dim ink so the elapsed numeral reads over
-  it. `spoken_at` is the cell under the pointer and its two phrases.
+  it. `spoken_at` is the cell under the pointer and its one phrase, the
+  capacity.
 - `bars::Bars`: every rock's resource bars, the mirror of its wheel: a
   row per material with a cap, at the wheel strip's height, the icon at
   the row's right end nearest the rock and the bar growing leftward from
@@ -862,7 +873,8 @@ impl Entry {
   selection rests on it and `Small` everywhere else, two fixed scales and
   two fixed slot counts, never a size that follows the crowd. A small
   wheel carries a section only for the rows standing or moving there and
-  never a wanted slot. `Bands { step, wants }` is passed only to a
+  never a wanted slot, but for a draft placement's `Entry::Placed` line.
+  `Bands { step, wants, refused }` is passed only to a
   full wheel, so a small wheel takes no input by construction, and the
   bands stand as two buttons between each section's glyph and its cells,
   plus over minus. `Sizing { detail,
@@ -886,7 +898,7 @@ impl Entry {
   `spoken_at` answers `Spoken::Refused { why }` at the strip's right
   edge, where a live band shows its step. `Ease` is
   where a wheel's scale and alpha are eased toward their targets over
-  `ease::SPAN_SECONDS`: `Motion`, a store the play screen owns and steps
+  `Span::Fast`: `Motion`, a store the play screen owns and steps
   once per frame by the engine's own `dt`, never egui's clock, in which
   a wheel first drawn starts at rest so it grows rather than appears;
   `Still` in tests and in `look`. Size and alpha are two axes: a wheel
@@ -904,18 +916,19 @@ impl Entry {
   phrase from the roster. `Wheels` owns the frame's `Bars` too, laid
   from the same eased `Placed` list, so a rock's bars grow and fade with
   its wheel.
-- `ease`: `SPAN_SECONDS`, the one span every eased value on screen
-  settles over, and `toward`, which closes that span's share of a
-  value's gap to its target in one frame; `toward_over` is the same
-  step over a stated span, which only the draft panel's fade takes.
+- `ease`: `Span { Fast, Slow }`, the two spans every eased value on
+  screen settles over and no other, `duration` 20 ms and 100 ms; `Fast`
+  for what the pointer causes, a wheel's growth, hover and bands, `Slow`
+  for what the camera and the screens do, pan, zoom, refocus and the
+  draft panel's coming and going. `toward(value, target, dt, span)`
+  closes that span's share of a value's gap to its target in one frame.
 - `screens::order::Order`: the draft's panel, DISPLAY.md's initiative
-  list, the third panel inside a match.
+  list, the third panel inside a match, titled Draft.
 
 ```rust
-pub struct Order { frame: Rect, rows: Vec<Row>, alpha: f32 }
-struct Row { rect, seat: SeatId, name: String, glyph: Glyph, standing: Standing }
+pub struct Order { frame: Rect, title: Pos2, rows: Vec<Row>, alpha: f32 }
+struct Row { rect, stage: Option<(SeatId, Glyph)>, name: String, standing: Standing }
 pub enum Standing { Waiting, Running { left: f32 }, RanOut, Placed(RockId) }
-pub const FADE_SECONDS: f64;
 
 impl Order {
     pub fn over(window: Rect, draft: &Draft, tick: Tick, roster: &Roster,
@@ -924,20 +937,29 @@ impl Order {
 }
 ```
 
-  One row per `Draft::stages` entry in order, laid by `panel::column`
-  at the lobby table's corner, so it clears the strip at any width. A
-  row's `Standing` is read off the draft alone: `Placed` where the stage
-  carries a rock; `Running` for the stage at `Draft::running`'s position,
-  `left` the share of `STAGE_SPAN` since `Draft::began` still to run;
-  `RanOut` for an unplaced stage before it, or every unplaced stage once
-  no stage runs; `Waiting` after it. The running row is whole and every
-  other faint at `wheels::RESTING_ALPHA`; the glyph is hollow until
-  placed and solid after, through `Stencil`. `names` are the seats'
-  names in seat order from `lobby::seat_names(&Seating, me)`, which
-  `Machine` now keeps the `Seating` for; `Play` owns the panel's alpha,
-  eased by `ease::toward_over` over `FADE_SECONDS` toward one while the
-  draft runs and zero once `Draft::ended`, and draws the panel while it
-  is above zero.
+  One row per `Draft::stages` entry in order, packed without a gap
+  under the title, at the screen's left below the strip, the panel as
+  wide as its rows. A row's `Standing` is read off the draft alone:
+  `Placed` where the stage carries a rock; `Running` for the stage at
+  `Draft::running`'s position, `left` the share of `STAGE_SPAN` since
+  `Draft::began` still to run; `RanOut` for an unplaced stage before it,
+  or every unplaced stage once no stage runs; `Waiting` after it. Once
+  no stage runs and the draft has not ended, a last row with no stage,
+  named Clock, is `Running` with `left` the share of `GRACE` still to
+  run. The bar is one length in every row: full while `Waiting`,
+  draining while `Running`, empty once `RanOut`, and the rock's name in
+  its place once `Placed`. The running row is whole and every other
+  faint at `wheels::RESTING_ALPHA`; a stage's glyph is hollow in the
+  seat's colour until placed and solid after, through `Stencil`, and
+  carries the seat. `names` are the seats' names in seat order from
+  `lobby::seat_names(&Seating, me, seed)`, which `Machine` keeps the
+  `Seating` for: You, "Player N", or for a bot `lobby::bot_name(bot,
+  seed, seat)`, one of `MAX_SLOTS` names the game crate holds per
+  personality, indexed by the seed plus the seat, so two bots of one
+  personality in one match never share a name; the lobby's Holder choice
+  still names the personality. `Play` owns the panel's alpha, eased by
+  `ease::toward` over `Span::Slow` toward one while the draft runs and zero once
+  `Draft::ended`, and draws the panel while it is above zero.
 - `camera::BeltCamera`: the focus point moving at the local orbital
   velocity, pan by meters or by pointer pixels, and zoom within a range
   stated against the belt's own scale. A pan, a zoom or a new focus sets
@@ -957,7 +979,12 @@ impl Order {
   every rock's zone circle in one ink, every standing armed ship's range
   circle in its owner's colour, and the flight lines. The wheels and the
   bars are painted after it, through `Wheels::paint`, and the strip
-  after them, so nothing on the belt covers a wheel.
+  after them over an opaque backdrop, so nothing on the belt covers a
+  wheel and nothing shows through the strip; `Wheels::clear_of(rect)`
+  drops every section and every bar whose frame intersects the strip's
+  box before painting or hit-testing, and `Controls::avoid(rect)` keeps
+  a hover note out of it, so nothing of the HUD is drawn inside the
+  box or half under its edge.
 - The binary is the playable: a `Game` whose `tick` and `frame` are the
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped

@@ -93,8 +93,10 @@ in transit, never wanted, and is drawn faint; a full wheel is drawn
 whole, and a faint wheel is painted before a whole one. Neither size
 follows the crowd, and a wheel covered by another is no fainter and does
 not move. Every change between the two states, by hover or by selection
-alike, eases over one short span, a constant of the display, never a
-jump. A faded glyph is blended toward the backdrop, never drawn
+alike, eases over the fast span, never a jump. Every eased change on
+screen uses one of two spans and no other, fast and slow, named
+constants of the game crate: fast for what the pointer causes, slow
+for what the camera and the screens do. A faded glyph is blended toward the backdrop, never drawn
 translucent, so its strokes do not double where they cross. Which wheel
 is hovered is decided against the wheels as they stood before any grew,
 and a hovered wheel stays hovered until the pointer leaves its full
@@ -143,15 +145,17 @@ Fill is the owner's colour; the outline is white.
 
 ## The stockpile and the clock
 
-One strip across the top centre, of the wheel strip's height: three
-cells, one per material, metals then volatiles then energy, and a
-fourth cell for the clock. A material's cell, left to right: the
-material's icon (Icons, below) at the glyph's height; a bar of one
-fixed length, the same for every cell, filled from its left end to the
-stock over the capacity in the material's hue; inside the bar at its
-left end the stock as a numeral in ink; after the bar's right end the
-net as a signed numeral in ink, "+3" or "-5", income less spend per
-second over the last second. Income is what the seat's extractors
+One strip across the top centre, of the wheel strip's height: one
+box in the screens' style, a scrim with the screens' line around it,
+holding four cells packed the wheel's cell gap apart and no more,
+three one per material, metals then volatiles then energy, and a
+fourth for the clock. A material's cell, left to right: the
+material's icon (Icons, below) at the glyph's height; the stock as a
+numeral in ink; a bar of one fixed length, the same for every cell,
+filled from its left end to the stock over the capacity in the
+material's hue, so an empty bar is an empty bar and no numeral stands
+on it; after the bar's right end the net as a signed numeral in ink,
+"+3" or "-5", income less spend per second over the last second. Income is what the seat's extractors
 pulled, before the capacity clamp; spend is what its frames drained; a
 cancelled frame's refund is neither, and the stock's jump on a cancel
 is its own reading. Past the fill's tip a fainter segment of
@@ -162,8 +166,12 @@ income segment runs past the bar's right end, and that overrun is the
 loss, at the fill's own alpha, never fainter; the net numeral sits
 after the overrun. An empty bar with a negative net is a stall and
 draws nothing more, since the frame's belt at the rock names the
-material. Hovering a cell shows two short phrases beneath it, one per
-line: "Metals 120 of 300" and "+12 in -9 out".
+material. Hovering a cell shows one short phrase beneath it, the
+capacity, "of 300"; the two segments already carry the in and the out. While a wheel's plus band is hovered, each
+material's bar marks the row's cost as the darker segment inside the
+fill's tip, in place of the spend projection, and a minus band marks
+the refund as the fainter segment past the tip, so what a want costs
+is read where it is paid and never as a numeral.
 
 The clock's cell is a bar of the same length in ink, full at the start,
 its fill shrinking from the right as the match runs, so the filled part
@@ -172,10 +180,13 @@ as a numeral. It has no icon, no hue and no hover.
 
 ## Icons
 
-The three material icons are three SVG drawings in the game crate, one
-per material, each in the glyph's sixty-unit cell: metals a hex nut, a
-hexagon with a small hole; volatiles a drop; energy a bolt. Each is one
-closed path, no open stroke, no gradient and no text, parsed when the
+The three material icons are one SVG sheet in the game crate,
+`game/icons/materials.svg`, three groups with the ids metals,
+volatiles and energy, each one drawing in its own sixty-unit cell laid
+side by side, so the owner edits the three as a whole: metals a hex
+nut, a hexagon with a small hole; volatiles a drop; energy a bolt.
+Each group is one closed path, no open stroke, no gradient and no
+text, read by its id when the
 game starts into the same primitives the marks are made of, so it is
 stroked hollow or filled solid and tinted by whatever draws it, and it
 reads at the smallest glyph size, where thirty units are six pixels.
@@ -199,7 +210,13 @@ long bands and a poor one short and the cap reads on any display; the
 pull over the last second by every extractor there of any seat is the
 same hue at full strength laid over the band from its right end, so
 fill against band is pull against cap. No outline carries the cap. A
-cap of zero draws no bar. The bars are drawn at every rock always and
+cap of zero draws no bar. An extractor the seat wants at the rock
+and has not yet standing shows on that material's bar past the pull:
+a frame that is building as a fainter segment of the hue, as long as
+the extractor's yield would be against the cap, filling with the
+frame's progress; a want with no frame yet as a hollow outline of the
+same segment; so a player schedules construction against what the
+rock will give. The bars are drawn at every rock always and
 take the wheel's two states with it: full where the wheel is full,
 small elsewhere, easing between them as the wheel does, one drawing at
 two scales and two alphas, drawn at the wheel's pixel scale at every
@@ -277,8 +294,7 @@ attached to a focus point that moves at the local orbital velocity, so the
 player's region stays on screen while the belt turns. The focus starts at
 the belt's centre until the player's first placement, then at that rock;
 clicking a rock's wheel makes it the focus. A pan, a zoom and the jump
-to a new focus each ease over the same span as a wheel's growth, never
-a cut.
+to a new focus each ease over the slow span, never a cut.
 
 ## Ranges
 
@@ -421,8 +437,7 @@ follows Controls, above.
   rock the draft has taken, disabled with "Rock taken", which are the
   sim's own refusals and nothing more. Nothing is refused silently.
   When the last placement lands or the grace runs out, the panel goes
-  over the one easing span every change on screen uses, and the
-  clock's numeral starts.
+  over the slow span, and the clock's numeral starts.
 - **Results.** At the clock: the final belt, held still, under a panel
   titled Results: one row per team in the match's colours, its rocks held
   as a count of rock glyphs and its army value, the winning row marked;

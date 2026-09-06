@@ -25,6 +25,7 @@ pub struct Stencil<'a> {
     pub glyph: &'a Glyph,
     pub cell: Cell,
     pub colour: Color32,
+    pub outline: Color32,
     pub fill: Fill,
     pub alpha: f32,
     pub starved: Option<Material>,
@@ -78,7 +79,7 @@ impl Stencil<'_> {
         let points = self.frame_points();
         let outline = Stroke::new(
             self.cell.length(glyph::OUTLINE_WIDTH),
-            self.faded(Color32::WHITE),
+            self.faded(self.outline),
         );
         let fill = self.faded(self.colour);
 
