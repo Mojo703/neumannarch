@@ -9,31 +9,18 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Nothing is in flight. One unit at a time on plain subagents; teammate
-mode is off from the next session.
+Nothing is in flight.
 
-Owner notes 2026-09-06, placed: ship trajectory lines follow the
-schedule's predicted path (DISPLAY Flights, written) and the small
-state of the resource bars is bars alone, tight to the asteroid, the
-icons only on the full state (DISPLAY Resources, written); both into
-the extractor-coming display unit below. Ships should move faster: the
-movement limit is a belt number and is set in the belt unit with the
-spacing and the schedule bound.
-
-Next, before the belt:
-and the hover preview asked of the sim (a sim and display unit), which
-also draws the preview's cost on the stockpile bars (DISPLAY The
-stockpile, ruled 2026-09-06: segments only, never a numeral). Then a
-small view and display unit: an extractor wanted or building at an asteroid
-shows its coming yield on the asteroid's bar (DISPLAY Resources, ruled
-2026-09-06, frames and wants both, to help the player schedule
-construction). Then
-the belt, plan item 3, scope ruled 2026-09-06: generation from the
-seed with regional caps, the fixed table deleted, the lobby preview
-from the seed; the star in the middle of the system, not distant, as
-the central mass drawn; a starfield skybox. The skybox and the star's
-disc are engine questions first (the engine deleted its sky with the
-atmosphere systems); reported as engine items if absent.
+Next, in order: the hover preview asked of the sim (a sim and display
+unit), which also draws the preview's cost on the stockpile bars
+(DISPLAY The stockpile: segments only, never a numeral); then a small
+view and display unit for the asteroid's bars and the flight line (an
+extractor wanted or building shows its coming yield on the asteroid's
+bar; the small state is bars alone, tight to the asteroid; the line
+ahead of a ship follows its schedule's path; all three DISPLAY
+sentences written, on the ledger below); then the belt, plan item 3.
+Ships should move faster: the movement limit is a belt number and is
+set in the belt unit with the spacing and the schedule bound.
 
 Open from the time split: extraction, construction and fulfilment act
 per tick with a fixed second's worth of work rather than integrating
@@ -42,10 +29,6 @@ draft. The complete shape is every phase taking the step's match-time
 span, zero in the draft, and no early return. Contraction audit.
 
 Open from the draft unit:
-- A bot's second drafted asteroid holds only its constructor, so the seat
-  holds one asteroid by the standings and the pick is nearly wasted; the
-  bots' economy should claim a drafted asteroid so a mason develops it. A
-  few lines in agents/plan.rs, not yet ruled.
 - `harness draft` on the fixed belt: the first picker lost 8 of 8
   mirrors. Caps are even (both seats' two asteroids sum to 17); position
   is not: the first picker's asteroids lie at the belt's ends, the
@@ -62,12 +45,6 @@ Open from the draft unit:
   apply on a copy of the state that answers placement and cost, and the
   display draws that answer; the client keeps no rule. A sim and
   display unit.
-- A drag that sends a unit while a frame of the same row builds at the
-  source destroys the frame: fulfilment's unwanted-frames check runs
-  against the count before the sent unit leaves. Fix in fulfilment:
-  decide unwanted frames after the tick's sends are known, counting the
-  units leaving as gone. Test from the guarantee: a send never cancels
-  a frame the want still covers. Unscheduled.
 - Ship glyphs stairstep: the quads use an alpha-test cutout MSAA cannot
   soften. Ruled: a coverage-sampled glyph rasteriser, edge coverage in
   the sheet's alpha, no material change. A small display unit.
@@ -103,47 +80,17 @@ Open from the draft unit:
   distant): every panic path becomes error propagation and handling;
   with the id-minting stores above and the raw-index item. A crate-wide
   audit, after the belt.
-- Two easing spans and no other (owner, 2026-09-06): an enum of Fast
-  and Slow whose duration is 20 ms or 100 ms; fast for what the pointer
-  causes, slow for the camera and the screens (DISPLAY The wheel). Built
-  in the draft visual unit; a rule for every display brief after.
-- Engine friction 2026-09-06: the engine's `headless::Session` changed
-  signature (a generic and an init closure, no `state`) under the game
-  mid-session and broke the look binary until the visual agent fixed
-  it; the engine is under the owner's parallel work, so a game unit
-  must expect the engine to move and report each break.
 - Camera controls are poor (owner, 2026-09-06); future work, no unit
   yet. Kept beside the hotkeys item since both are input.
 - Hotkeys: the wheel's bands take the pointer only, and strategy players
   require hotkey play; the wheel's shape makes a binding per row and per
   step hard to add. Kept in mind for every wheel change; no unit yet.
-- The placement draft (DESIGN Start, written 2026-09-06; owner's
-  ruling: fairness by choosing, as Catan, not by a symmetric belt). A
-  sim unit after the compaction, on the compaction agent (owner:
-  reuse it): the draft rules in the sim, the pick order from the seed,
-  the turn span, the refusals by name; the bots' pick by the intended
-  mix against the free asteroids, weighed against nearness to taken asteroids,
-  deleting the opening by seat index; the harness pins that pick order
-  does not decide a mirror beyond the id tie-breaks. Display after the
-  visual unit, a design conversation first: whose turn, the order, and
-  the owner's arrival scene, the probes flying into the system during
-  the draft, which serves the fantasy.
 - Whether a flying unit can be re-sent, its schedule solved from its own
   body mid-flight, when its destination's want falls, or whether a send
   is a commitment. A design ruling.
 - Standings in a match: a page over the match toggled by a key with
   per-team standings, shaped as Beyond All Reason's stats page. A design
   conversation on its content before DISPLAY.md gains it.
-- Ruled 2026-09-06, next after the logic unit commits and before the
-  Fable visual unit: one extractor row per material (DESIGN Extract,
-  DISPLAY Glyph Extract mark, both written). An Opus unit: the Extract
-  weapon names its material; extraction splits an asteroid's cap per
-  material over that material's extractors; three roster rows; the
-  bots' economy decides which extractor to build where by a real rule
-  from demand against income, not a patch on `extractors_per_asteroid`; the
-  survey's predicted income is deleted for the view's measured income.
-  The agent states the bot rule as mechanism and stops for the owner's
-  ruling before building it.
 - Fable's wheel proposals, not built, for the owner: asteroid names in
   phrases; total HP on the fight bar's hover; a live send line from
   wheel to pointer; the hint phrase advancing.
@@ -192,8 +139,9 @@ contraction, then the belt since its asteroid and ship counts set every
 other number, then measurement before any store rewrite, then the
 screens, then the programme.
 
-1. The draft's stage rule and screen (In flight, above), then the belt
-   (item 3) before the contraction audit, by the owner's word.
+1. The hover preview asked of the sim with the cost on the stockpile
+   bars, then the asteroid bars and flight line unit (In flight,
+   above), then the belt (item 3), before the contraction audit.
 1e. Contraction audit, read-only then units: the codebase is much
    larger than it has any right to be for this amount of game. Survey
    for types whose fields copy another type's, parallel indexes over
@@ -212,8 +160,9 @@ screens, then the programme.
 3. The belt and the star, Opus: map generation from seed with regional
    caps; one to two hundred asteroids in an annulus from the seed with
    regional cap triples; neighbour spacing near two kilometres, the
-   extent growing with the count; the star as a distant light and a
-   disc; the lobby's seed changes the belt and its preview is the seed's
+   extent growing with the count; the star in the middle of the system as the
+   central mass drawn, and a starfield skybox, both engine questions
+   first since the engine deleted its sky; the lobby's seed changes the belt and its preview is the seed's
    belt at whole-belt zoom. The zone radius tens of metres, from the
    largest force an asteroid holds at the holding rule's spacing. Settles
    the asteroid count, the belt's spread against the schedule search bound,
@@ -281,6 +230,10 @@ screens, then the programme.
 - The engine is a path dependency at `../../mirage-engine`; its wgpu 29
   and egui 0.35 pin is its own concern. Its verification recipes are in
   `docs/verifying.md` there.
+- The browser: `game/tools/serve-web.sh` builds the game for wasm32,
+  binds it with the wasm-bindgen CLI pinned by the lockfile, serves
+  `dist/` with the engine's page; a WebGPU browser is required. No
+  browser run has been made yet; the first is the owner's.
 - Linear is not set up and is ignored.
 - Crate downloads are blocked in the agents' environment, so a new
   dependency must already be in the cargo cache. In it: resvg and usvg
@@ -319,6 +272,12 @@ screens, then the programme.
   takes no command-line arguments.
 - Visuals: a Fable agent under the owner's direct steering through the
   overseer chat; a fresh-eyes judge on screenshots after.
+- Easing: two spans and no other, `ease::Span { Fast, Slow }`, 20 ms
+  for what the pointer causes and 100 ms for the camera and the
+  screens (DISPLAY The wheel); no other easing constant is added.
+- The engine moves under the owner's parallel work; a game unit
+  expects its signatures to change mid-unit and reports each break as
+  engine friction rather than working around it.
 
 ## Engine gaps, verified open 2026-09-06
 
