@@ -10,7 +10,7 @@ path = "src/bin/look.rs"
 required-features = ["look"]
 
 [dependencies]
-mirage-engine = { path = "../../../mirage-renderer" }
+mirage-engine = { path = "../../../mirage-engine" }
 neumannarch-agents = { path = "../agents" }
 neumannarch-protocol = { path = "../protocol" }
 neumannarch-sim = { path = "../sim" }

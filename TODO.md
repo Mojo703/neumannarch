@@ -462,7 +462,7 @@ step/mod.rs and history/session.rs move.
 
 ## Operational
 
-- The engine is a path dependency at `../../mirage-renderer`; its wgpu 29
+- The engine is a path dependency at `../../mirage-engine`; its wgpu 29
   and egui 0.35 pin is its own concern. Its verification recipes are in
   `docs/verifying.md` there.
 - The prototype from the web sessions sits at `/tmp/neumannarch-game-previous-work`

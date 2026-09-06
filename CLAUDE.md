@@ -4,7 +4,7 @@ The overseer reads OVERSEER.md before anything else. Implementation agents do no
 
 Neumannarch is a two-to-four-player space RTS: a deterministic lockstep
 simulation of ships, structures and asteroids, played through one verb, on
-the Mirage engine (a path dependency at `../../mirage-renderer`) for desktop
+the Mirage engine (a path dependency at `../../mirage-engine`) for desktop
 and the browser. **Read DESIGN.md before writing sim code and DISPLAY.md
 before writing display code.** They describe the target only and are the
 authority on the rules of the game and on what the player sees. If
@@ -126,7 +126,7 @@ off on without comments.
   in the milestone report as its own item, never worked around in the game.
 - Never open a window on the owner's desktop. Verify headlessly: xvfb-run,
   or the engine's offscreen Session; the recipes are in
-  `../../mirage-renderer/docs/verifying.md`.
+  `../../mirage-engine/docs/verifying.md`.
 - Complete the milestone, verify on both targets, then stop for owner
   review; never start the next unprompted.
 - Owner questions go through the question tool the moment they exist; a
