@@ -9,11 +9,12 @@ document.
 
 ## Principles
 
-1. **Invalid states are unrepresentable.** A structure has no velocity, a
-   burn cannot exceed its row's limit or last no ticks, a composition with nothing in it
-   does not exist, a command names an asteroid and a row and nothing else. Where the
-   type system cannot say it, one runtime check says it, with a comment
-   naming the shape change that would delete the check.
+1. **Invalid states are unrepresentable.** A structure has no velocity,
+   a burn cannot exceed its row's limit or last no ticks, a composition
+   with nothing in it does not exist, a command names an asteroid and a
+   row and nothing else. Where the type system cannot say it, one
+   runtime check says it, with a comment naming the shape change that
+   would delete the check.
 2. **The step is a pure function.** `State::step(&self, ..) -> State`.
    Every phase reads the tick-start snapshot and returns an effect value;
    the next state is built from the snapshot and the effects. No phase
@@ -172,40 +173,42 @@ send is still forming.
 
 - The draft is a fact of the state and the clock hangs off it. It is a
   sequence of stages, one per reserve row a seat holds, capped at
-  `STAGES_PER_SEAT`: the first round in an order `Draft::of` draws from the
-  seed through `hash::digest(&(seed, seat))`, ties by seat id, so no dice
-  type and no platform call decides it, and the second round in that order
-  reversed, so the seat that went first goes last. A seat's own rows go
-  down in order of Build rate, the greatest first, ties by row id, so the
-  shipyard takes the seat's first asteroid and its economy's home is the asteroid
-  it chose first. One stage runs at a time. `Draft::place` ends the running
-  stage the moment its seat places and begins the next at that tick;
-  `Draft::pass` ends it at `STAGE_SPAN` after it began and begins the next.
-  A seat whose stage ran out keeps its unplaced stage and may place at any
-  later tick, alongside the running one, which is why `Draft::awaits`
-  answers by the stage's place in the sequence and not by whose turn it is:
+  `STAGES_PER_SEAT`: the first round in an order `Draft::of` draws from
+  the seed through `hash::digest(&(seed, seat))`, ties by seat id, so no
+  dice type and no platform call decides it, and the second round in
+  that order reversed, so the seat that went first goes last. A seat's
+  own rows go down in order of Build rate, the greatest first, ties by
+  row id, so the shipyard takes the seat's first asteroid and its
+  economy's home is the asteroid it chose first. One stage runs at a
+  time. `Draft::place` ends the running stage the moment its seat places
+  and begins the next at that tick; `Draft::pass` ends it at
+  `STAGE_SPAN` after it began and begins the next. A seat whose stage
+  ran out keeps its unplaced stage and may place at any later tick,
+  alongside the running one, which is why `Draft::awaits` answers by the
+  stage's place in the sequence and not by whose turn it is:
   `Some(true)` where the seat's unplaced stage has begun, `Some(false)`
   where it has not, `None` where the want is no pick at all. A `Stage`
-  carries the seat, the row and the asteroid it placed at, so the draft alone
-  answers what is free, what a seat has placed and which stages ran out
-  unplaced, and the panel is drawn from it with nothing derived; nothing
-  counts the reserve, which no placement spends until the clock starts.
-  `State::apply` treats a want of one as a pick: `Rejected::NotYet` before
-  the stage, `Rejected::AsteroidTaken` at an asteroid a placement took, otherwise
-  the asteroid is taken there and then, so two picks in one tick are first come
-  first served in the batch's own order. `State::close_draft` passes a
-  stage that has run out and ends the draft on the tick every stage has
-  placed, or at `GRACE` after the last stage ended. While it runs,
-  `State::step` applies commands and advances the tick and does nothing
-  else: no phase runs, so no body moves, nothing is extracted, nothing is
-  built and no want is filled, and a want accepted during the draft stands
-  until the clock starts. The skipped phases are not redundant with match
-  time standing still: fulfilment, extraction and construction act on a
-  tick, not on a span, and would fill, credit and build at time zero. The
-  draft's end is the clock's start, so `State::time` counts from it and is
-  zero throughout the draft, and the match is over when `State::time`
-  reaches `length`. Standings, the win, the view's countdown and the bots'
-  payback all read match time and need no rule of their own.
+  carries the seat, the row and the asteroid it placed at, so the draft
+  alone answers what is free, what a seat has placed and which stages
+  ran out unplaced, and the panel is drawn from it with nothing derived;
+  nothing counts the reserve, which no placement spends until the clock
+  starts. `State::apply` treats a want of one as a pick:
+  `Rejected::NotYet` before the stage, `Rejected::AsteroidTaken` at an
+  asteroid a placement took, otherwise the asteroid is taken there and
+  then, so two picks in one tick are first come first served in the
+  batch's own order. `State::close_draft` passes a stage that has run
+  out and ends the draft on the tick every stage has placed, or at
+  `GRACE` after the last stage ended. While it runs, `State::step`
+  applies commands and advances the tick and does nothing else: no phase
+  runs, so no body moves, nothing is extracted, nothing is built and no
+  want is filled, and a want accepted during the draft stands until the
+  clock starts. The skipped phases are not redundant with match time
+  standing still: fulfilment, extraction and construction act on a tick,
+  not on a span, and would fill, credit and build at time zero. The
+  draft's end is the clock's start, so `State::time` counts from it and
+  is zero throughout the draft, and the match is over when `State::time`
+  reaches `length`. Standings, the win, the view's countdown and the
+  bots' payback all read match time and need no rule of their own.
 - Ids are newtypes over the index into their store: `AsteroidId(u32)`,
   `EntityId(u32)`, `RowId(u16)`, `SeatId(u8)`. `State` implements `Index`
   for each, so a rule reads `state[id]`, and `IndexMut` for `SeatId` and
@@ -217,20 +220,22 @@ send is still forming.
 - `Wants` is a `BTreeMap<RowId, u32>` with no zero entries. A post whose
   wants are empty, whose entities are gone and whose frames are closed is
   removed at the end of the step; that is the whole existence rule.
-- A `PerSecond` accumulates one `Materials` fact over one second: each tick
-  fills it, and `State::advance` closes every seat's and every asteroid's when
-  the tick it reaches is a multiple of `TICKS_PER_SECOND`, which is where
-  a second is defined and the only place it is. What it reports is the last completed
-  second's total, zero until the first second closes, and it stands until
-  the next closes. A seat's `income` is what its extractors pulled, gross,
-  so the display can draw what capacity lost; its `spend` is what its
-  frames drained; an asteroid's `pull` is what every extractor there took, of
+- A `PerSecond` accumulates one `Materials` fact over one second: each
+  tick fills it, and `State::advance` closes every seat's and every
+  asteroid's when the tick it reaches is a multiple of
+  `TICKS_PER_SECOND`, which is where a second is defined and the only
+  place it is. What it reports is the last completed second's total,
+  zero until the first second closes, and it stands until the next
+  closes. A seat's `income` is what its extractors pulled, gross, so the
+  display can draw what capacity lost; its `spend` is what its frames
+  drained; an asteroid's `pull` is what every extractor there took, of
   any seat. Three methods fill one and no other code does: `Seat::earn`
-  fills a seat's income, `Seat::drain` its spend, and `Asteroid::extract` a
-  asteroid's pull. `Seat::refund` returns a cancelled frame's materials and
-  fills none of the three, since a refund is neither income nor spend.
-  They are fields of the state, so a restored snapshot replays them
-  exactly and they hash with everything else.
+  fills a seat's income, `Seat::drain` its spend, and
+  `Asteroid::extract` a asteroid's pull. `Seat::refund` returns a
+  cancelled frame's materials and fills none of the three, since a
+  refund is neither income nor spend. They are fields of the state, so a
+  restored snapshot replays them exactly and they hash with everything
+  else.
 - `Seat::new` takes the stock the seat starts with, which is also its base
   capacity; every tick the capacity is that base plus the capacity of its
   living entities, so nothing a seat starts with is lost.
@@ -247,19 +252,20 @@ send is still forming.
   above the asteroid's own radius, the floor holding keeps them off. One test
   holds every shipped asteroid's floor inside its zone, so the zone is always a
   shell.
-- `Roster` owns the movement limit and the rows. The shipped nine are built
-  by `Roster::shipped()` from `roster/shipped.rs`, one extractor row per
-  material among them, alike in every stat but the material their
-  `Weapon::Extract` names; `Roster::add(Row) -> RowId`,
-  `Roster::moving_at(Real) -> Roster` and `Roster::units_by(impl Fn(Row) -> Row)
-  -> Roster`, which rewrites every unit row and leaves the structures alone,
-  build the variants a test or `harness sweep` plays. `Roster::movement_limit()` is the one acceleration
-  every unit transfers at, so it hashes with the state and a faction can skew
-  it. A row's kind is `Row::kind()`: `Structure` when its manoeuvring limit is
-  zero, else `Unit`; `Row::steering` is its `Weights`, one per term of the
-  holding rule, and `Row::standoff()` is half its longest weapon range, `None`
-  where it has no damage weapon, so an unarmed row cannot chase.
-  No `Copy` of a row lives anywhere but the roster.
+- `Roster` owns the movement limit and the rows. The shipped nine are
+  built by `Roster::shipped()` from `roster/shipped.rs`, one extractor
+  row per material among them, alike in every stat but the material
+  their `Weapon::Extract` names; `Roster::add(Row) -> RowId`,
+  `Roster::moving_at(Real) -> Roster` and `Roster::units_by(impl Fn(Row)
+  -> Row) -> Roster`, which rewrites every unit row and leaves the
+  structures alone, build the variants a test or `harness sweep` plays.
+  `Roster::movement_limit()` is the one acceleration every unit
+  transfers at, so it hashes with the state and a faction can skew it. A
+  row's kind is `Row::kind()`: `Structure` when its manoeuvring limit is
+  zero, else `Unit`; `Row::steering` is its `Weights`, one per term of
+  the holding rule, and `Row::standoff()` is half its longest weapon
+  range, `None` where it has no damage weapon, so an unarmed row cannot
+  chase. No `Copy` of a row lives anywhere but the roster.
 - A `Frame`'s progress is the work done so far, in cost units. Nothing
   complete is ever scrapped, so no entity carries work of its own; surplus
   is `count` above `want` and is read where it is needed, never stored.
@@ -412,24 +418,25 @@ since a read-only index of the snapshot is not an effect.
 
 ## Sim: motion
 
-- **Propagation.** `orbit::universal::propagate(body, gravity, dt) -> Body`
-  is the two-body solution in universal variables with Stumpff functions,
-  exact for every conic. `Body::after_tick(thrust, gravity) -> Body` adds the
-  thrust's delta-v over one tick and propagates one tick; every ship advances
-  by it once per tick. Asteroids are not stored as bodies; `State::asteroid_body(asteroid)`
-  reads the asteroid's orbit at the current tick, which costs one Kepler solve
+- **Propagation.** `orbit::universal::propagate(body, gravity, dt) ->
+  Body` is the two-body solution in universal variables with Stumpff
+  functions, exact for every conic. `Body::after_tick(thrust, gravity)
+  -> Body` adds the thrust's delta-v over one tick and propagates one
+  tick; every ship advances by it once per tick. Asteroids are not
+  stored as bodies; `State::asteroid_body(asteroid)` reads the
+  asteroid's orbit at the current tick, which costs one Kepler solve
   however old the tick is. `State::body_of(&Entity) -> Body` is the one
-  query for where an entity is: its asteroid's body when `Fixed`, its stored
-  body when `Steered`.
-- **The zone.** Every asteroid's zone is `Belt::ZONE_RADIUS_METERS` about its
-  own body, so a force at an asteroid is read off the asteroid's orbit and nothing
-  else: `State::asteroid_body` is the whole of "where a force here is". The
-  zone is the chase's extent in the holding rule and the circle
-  `View::zone` carries out for the display. Construction and `Fire` gate by the asteroid
-  a unit stands at rather than by a distance, which the zone is what
-  justifies: holding keeps a unit inside its own asteroid's zone and no two
-  zones overlap, so the set is the same one and no rule pays for a
-  distance test.
+  query for where an entity is: its asteroid's body when `Fixed`, its
+  stored body when `Steered`.
+- **The zone.** Every asteroid's zone is `Belt::ZONE_RADIUS_METERS`
+  about its own body, so a force at an asteroid is read off the
+  asteroid's orbit and nothing else: `State::asteroid_body` is the whole
+  of "where a force here is". The zone is the chase's extent in the
+  holding rule and the circle `View::zone` carries out for the display.
+  Construction and `Fire` gate by the asteroid a unit stands at rather
+  than by a distance, which the zone is what justifies: holding keeps a
+  unit inside its own asteroid's zone and no two zones overlap, so the
+  set is the same one and no rule pays for a distance test.
 - **Schedules.** A `Schedule` is one send's thrust: two `Burn`s
   and the arrival tick, a burn being an acceleration held over whole ticks.
   A burn is built only from a delta-v and the roster's movement limit, so its
@@ -565,38 +572,39 @@ fn chase(Body, &Row, target: Body) -> Vec3;
 
 ## Sim: the rules as code
 
-- **Fulfilment** walks every post in key order. For each row: the reserve
-  first, then the nearest post holding a surplus of that row (distance
-  between asteroid bodies now, ties by lower asteroid id, the highest-id units
-  first), then one frame at the post if anything is still missing and
-  none is open there for that row, so a row builds one at a time and the
-  next opens the tick after the last completes; rows are separate keys,
-  so they open beside each other. A row wanting nothing more cancels its
-  open frames, least-progressed first, and each refunds what it consumed.
-  A post's open frames of a row cover its want before its units do, so a
-  unit at a post whose frames already cover the want is surplus; and the
-  cancelling runs after the tick's sends and counts every unit leaving as
-  gone, so a frame is cancelled only where the units that stay cover the
-  want. Lowering a want a shortfall elsewhere wants sends the unit and
-  keeps the frame building; lowering a want nothing else wants cancels
-  the frame and keeps the unit.
-  Units re-homed from one asteroid to one asteroid join the send forming between
-  that pair for that seat, or open one, solved before they are counted as
-  filling anything; a send with no schedule leaves its units home this
-  tick and its share of the shortfall opens a frame like any other.
-  Surplus with nowhere to go stays where it stands, complete: nothing
-  marks it and nothing scraps it. `Assigned` carries the placements, the
-  sends, the openings and the cancellations.
-- **Extraction** groups extract weapons by the asteroid their entity stands
-  at. A weapon names one material, so an asteroid's cap for a material is
-  split among the extractors of that material alone and an extractor of
-  another material is not in that split: each takes its rate, the cap is
-  split equally among them when the sum exceeds it, and unused shares
-  redistribute until none is left or the cap is met. `Income::extracted`
-  reads the tick's extraction off the snapshot into a
-  `BTreeMap<(AsteroidId, SeatId), Materials>`, so asteroid then seat order is the
-  key's and no code sorts it, and `Income::apply` credits every seat and
-  every asteroid from it. Nothing else reads an `Income` or takes one apart.
+- **Fulfilment** walks every post in key order. For each row: the
+  reserve first, then the nearest post holding a surplus of that row
+  (distance between asteroid bodies now, ties by lower asteroid id, the
+  highest-id units first), then one frame at the post if anything is
+  still missing and none is open there for that row, so a row builds one
+  at a time and the next opens the tick after the last completes; rows
+  are separate keys, so they open beside each other. A row wanting
+  nothing more cancels its open frames, least-progressed first, and each
+  refunds what it consumed. A post's open frames of a row cover its want
+  before its units do, so a unit at a post whose frames already cover
+  the want is surplus; and the cancelling runs after the tick's sends
+  and counts every unit leaving as gone, so a frame is cancelled only
+  where the units that stay cover the want. Lowering a want a shortfall
+  elsewhere wants sends the unit and keeps the frame building; lowering
+  a want nothing else wants cancels the frame and keeps the unit. Units
+  re-homed from one asteroid to one asteroid join the send forming
+  between that pair for that seat, or open one, solved before they are
+  counted as filling anything; a send with no schedule leaves its units
+  home this tick and its share of the shortfall opens a frame like any
+  other. Surplus with nowhere to go stays where it stands, complete:
+  nothing marks it and nothing scraps it. `Assigned` carries the
+  placements, the sends, the openings and the cancellations.
+- **Extraction** groups extract weapons by the asteroid their entity
+  stands at. A weapon names one material, so an asteroid's cap for a
+  material is split among the extractors of that material alone and an
+  extractor of another material is not in that split: each takes its
+  rate, the cap is split equally among them when the sum exceeds it, and
+  unused shares redistribute until none is left or the cap is met.
+  `Income::extracted` reads the tick's extraction off the snapshot into
+  a `BTreeMap<(AsteroidId, SeatId), Materials>`, so asteroid then seat
+  order is the key's and no code sorts it, and `Income::apply` credits
+  every seat and every asteroid from it. Nothing else reads an `Income`
+  or takes one apart.
 - **Construction** works one seat's asteroids in turn over one copy of its
   stockpile. At each asteroid it assigns the builders' combined rate evenly
   across that seat's frames there, computes the per-material ratio of
@@ -613,19 +621,19 @@ fn chase(Body, &Row, target: Body) -> Vec3;
   serves rather than inside the rule that steers afterwards.
 - **Fire** collects every ready damage weapon of an entity that is not
   flying, sorts by `(Moment, EntityId, weapon)`, and resolves each in
-  order against the snapshot plus an `Assigned` of the damage dealt so far
-  this tick, skipping targets whose assigned damage is
-  lethal. Target choice is `state::Threat`, DESIGN.md's threat rule, over the
-  enemies standing at the shooter's own asteroid inside the weapon's range; range
-  is the only gate, since everything is visible. Holding asks the same type,
-  so a ship goes where it shoots. Standing at one asteroid is the
-  zone by another name, as no two zones overlap, and a flying entity
-  stands nowhere and so is neither shooter nor target. Damage is the
-  weapon's damage cut by its falloff over the range, less the target's
-  plating, floored at zero. A weapon that fires is next ready one interval
-  on, never before this tick; a weapon with nothing to shoot keeps the
-  moment it has, so it fires the instant a target arrives. `Shots` is the
-  list of hits and the new ready moments.
+  order against the snapshot plus an `Assigned` of the damage dealt so
+  far this tick, skipping targets whose assigned damage is lethal.
+  Target choice is `state::Threat`, DESIGN.md's threat rule, over the
+  enemies standing at the shooter's own asteroid inside the weapon's
+  range; range is the only gate, since everything is visible. Holding
+  asks the same type, so a ship goes where it shoots. Standing at one
+  asteroid is the zone by another name, as no two zones overlap, and a
+  flying entity stands nowhere and so is neither shooter nor target.
+  Damage is the weapon's damage cut by its falloff over the range, less
+  the target's plating, floored at zero. A weapon that fires is next
+  ready one interval on, never before this tick; a weapon with nothing
+  to shoot keeps the moment it has, so it fires the instant a target
+  arrives. `Shots` is the list of hits and the new ready moments.
 - **The sweep** is the tick's one spatial index: entities sorted by their
   belt-plane `x` then their id, with range queries by window. `within`
   yields its window in that order and allocates nothing, so a sum over it
@@ -722,12 +730,13 @@ impl View {
 - `State::hash() -> u64`: FNV-1a over `Hash` of the whole state. The hasher
   widens every `usize` to `u64` and writes integers little-endian, so a
   `Vec` length prefix hashes the same on wasm32 and native.
-- `State::standings() -> Standings`: per team, the asteroids where it has a
-  structure, the cost total of its living entities, and whether any of its
-  seats is still in. `over()` says the clock has run out and `leaders()`
-  applies DESIGN.md's tie-break, comparing the state's match time against
-  its length, so the end is a query. `Standings::new` builds one from those parts, which is
-  what a hand-built view in `look` and in tests needs.
+- `State::standings() -> Standings`: per team, the asteroids where it
+  has a structure, the cost total of its living entities, and whether
+  any of its seats is still in. `over()` says the clock has run out and
+  `leaders()` applies DESIGN.md's tie-break, comparing the state's match
+  time against its length, so the end is a query. `Standings::new`
+  builds one from those parts, which is what a hand-built view in `look`
+  and in tests needs.
 
 ## Game: the display library
 
@@ -776,17 +785,18 @@ impl Entry {
 - `of_belt` is what the lobby and loading screens draw before a match
   exists to have a view of; `look` builds scenes by hand. `centre` is the
   middle of the asteroids, which a camera frames the map from.
-- A scene carries a wheel for every asteroid a seat holds a composition at,
-  and for the selection and the asteroid under the pointer, whose own sector
-  stands empty until it wants something: without it no first want could
-  be placed, and a bare asteroid could not grow before its click. A sector holds only
-  the rows that have an entry; another seat's sector never carries a
-  wanted or a building entry, since wants and frames are its own. The
-  one exception is the draft: while it runs, every placed stage of
-  `View::draft` stands on its asteroid as `Entry::Placed` in the placing
-  seat's sector, in place of the viewer's own wanted entry for that
-  row, and a small wheel shows that line, the one wanted line it ever
-  shows, so a taken asteroid reads as taken from the belt.
+- A scene carries a wheel for every asteroid a seat holds a composition
+  at, and for the selection and the asteroid under the pointer, whose
+  own sector stands empty until it wants something: without it no first
+  want could be placed, and a bare asteroid could not grow before its
+  click. A sector holds only the rows that have an entry; another seat's
+  sector never carries a wanted or a building entry, since wants and
+  frames are its own. The one exception is the draft: while it runs,
+  every placed stage of `View::draft` stands on its asteroid as
+  `Entry::Placed` in the placing seat's sector, in place of the viewer's
+  own wanted entry for that row, and a small wheel shows that line, the
+  one wanted line it ever shows, so a taken asteroid reads as taken from
+  the belt.
 - `Entry` is one fact about a row at an asteroid, and its variants are what
   DISPLAY.md's states are. `Shown::previewed` is what the pointer says
   would change, drawn at half alpha; `Entry::dim` is what is dim by its
@@ -837,20 +847,21 @@ impl Entry {
   clock's fill is the panel's dim ink so the elapsed numeral reads over
   it. `spoken_at` is the cell under the pointer and its one phrase, the
   capacity.
-- `bars::Bars`: every asteroid's resource bars, the mirror of its wheel: a
-  row per material with a cap, at the wheel strip's height, the icon at
-  the row's right end nearest the asteroid and the bar growing leftward from
-  it, the rows' right ends on the wheel's arc mirrored, the longest
-  band a wheel strip's width, and along the mirrored arc one spine per
-  asteroid in the panel's dim ink, drawn by the wheel's own `spine_points`
-  with `Side::Left`. The cap is a band of the count line's height in
-  the hue lerped toward the backdrop by `CAP_ALPHA`, the pull the full
-  hue laid over it from the right end; no scrim, no outline. One
-  drawing serves both states: small and faint at rest, full and whole
-  under the pointer or the selection, never a different shape, every
-  colour faded by the `Placed` alpha. `Bars::over` takes the frame's `Placed` list and
-  rests every asteroid without one at the small scale and the resting alpha,
-  which is what `at_rest` gives the lobby, loading and results screens.
+- `bars::Bars`: every asteroid's resource bars, the mirror of its wheel:
+  a row per material with a cap, at the wheel strip's height, the icon
+  at the row's right end nearest the asteroid and the bar growing
+  leftward from it, the rows' right ends on the wheel's arc mirrored,
+  the longest band a wheel strip's width, and along the mirrored arc one
+  spine per asteroid in the panel's dim ink, drawn by the wheel's own
+  `spine_points` with `Side::Left`. The cap is a band of the count
+  line's height in the hue lerped toward the backdrop by `CAP_ALPHA`,
+  the pull the full hue laid over it from the right end; no scrim, no
+  outline. One drawing serves both states: small and faint at rest, full
+  and whole under the pointer or the selection, never a different shape,
+  every colour faded by the `Placed` alpha. `Bars::over` takes the
+  frame's `Placed` list and rests every asteroid without one at the
+  small scale and the resting alpha, which is what `at_rest` gives the
+  lobby, loading and results screens.
 - `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
   state, its marks, the `alpha` it is drawn at, and the belt a starved
   frame carries in its material's `hue`. Every HUD glyph goes through it,
@@ -891,39 +902,41 @@ impl Entry {
 - `wheel::Footprint`: the rectangle an asteroid's wheel would take at each
   `Detail`, from the view alone, so the frame can lay wheels out and
   decide what the pointer is over before any wheel is built.
-- `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the frame's
-  layout and the frame's hit test in one pass. `Aim { viewer, pointer,
-  hovered, step, wants, draft }` is what the pointer and the keyboard say
-  and the draft the view carries, the wants keyed by asteroid and row so any
-  full wheel can carry its bands. `Aim::refusal(asteroid, row)` is the
-  draft's own rule and nothing else, `Draft::awaits` and `Draft::took`
-  read as the sim reads them: `NOT_YET` for a reserve band before the
-  seat's stage has begun, `ASTEROID_TAKEN` for a pick at an asteroid a placement
-  took, `None` once the draft has ended or where `draft` is `None`, as
-  in `look`'s hand-built scenes. A full wheel's `Bands { step, wants,
-  refused }` carries the reasons by row; a refused band is drawn spent,
+- `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the
+  frame's layout and the frame's hit test in one pass. `Aim { viewer,
+  pointer, hovered, step, wants, draft }` is what the pointer and the
+  keyboard say and the draft the view carries, the wants keyed by
+  asteroid and row so any full wheel can carry its bands.
+  `Aim::refusal(asteroid, row)` is the draft's own rule and nothing
+  else, `Draft::awaits` and `Draft::took` read as the sim reads them:
+  `NOT_YET` for a reserve band before the seat's stage has begun,
+  `ASTEROID_TAKEN` for a pick at an asteroid a placement took, `None`
+  once the draft has ended or where `draft` is `None`, as in `look`'s
+  hand-built scenes. A full wheel's `Bands { step, wants, refused }`
+  carries the reasons by row; a refused band is drawn spent,
   `Wheel::band_at` never returns it, so no click can edit it, and
   `spoken_at` answers `Spoken::Refused { why }` at the strip's right
-  edge, where a live band shows its step. `Ease` is
-  where a wheel's scale and alpha are eased toward their targets over
-  `Span::Fast`: `Motion`, a store the play screen owns and steps
-  once per frame by the engine's own `dt`, never egui's clock, in which
-  a wheel first drawn starts at rest so it grows rather than appears;
-  `Still` in tests and in `look`. Size and alpha are two axes: a wheel
-  is full where the pointer or the selection rests, so two may be full
-  at once, and whole only where the pointer is or, with nothing hovered,
-  at the selection; every other wheel is faint, a covered wheel no
-  fainter; wheels are painted faintest first. Which
-  wheel is hovered is decided against the footprints as they stood before
-  any wheel grew, the smallest footprint under the pointer winning so a
-  small wheel inside the full one's reach still takes the pointer, and a hovered wheel stays hovered until the pointer
-  leaves its full footprint by `HOVER_MARGIN`, so growing under the
-  pointer never changes what is hovered and an overshoot closes nothing. `at`, `band_at` and `spoken_at` are what a click, a
-  drag and the hover phrase read; `spoken_at` answers with a `Spoken`,
-  a wheel's row, an asteroid bar or a refused band, which composes its own
-  phrase from the roster. `Wheels` owns the frame's `Bars` too, laid
-  from the same eased `Placed` list, so an asteroid's bars grow and fade with
-  its wheel.
+  edge, where a live band shows its step. `Ease` is where a wheel's
+  scale and alpha are eased toward their targets over `Span::Fast`:
+  `Motion`, a store the play screen owns and steps once per frame by the
+  engine's own `dt`, never egui's clock, in which a wheel first drawn
+  starts at rest so it grows rather than appears; `Still` in tests and
+  in `look`. Size and alpha are two axes: a wheel is full where the
+  pointer or the selection rests, so two may be full at once, and whole
+  only where the pointer is or, with nothing hovered, at the selection;
+  every other wheel is faint, a covered wheel no fainter; wheels are
+  painted faintest first. Which wheel is hovered is decided against the
+  footprints as they stood before any wheel grew, the smallest footprint
+  under the pointer winning so a small wheel inside the full one's reach
+  still takes the pointer, and a hovered wheel stays hovered until the
+  pointer leaves its full footprint by `HOVER_MARGIN`, so growing under
+  the pointer never changes what is hovered and an overshoot closes
+  nothing. `at`, `band_at` and `spoken_at` are what a click, a drag and
+  the hover phrase read; `spoken_at` answers with a `Spoken`, a wheel's
+  row, an asteroid bar or a refused band, which composes its own phrase
+  from the roster. `Wheels` owns the frame's `Bars` too, laid from the
+  same eased `Placed` list, so an asteroid's bars grow and fade with its
+  wheel.
 - `ease`: `Span { Fast, Slow }`, the two spans every eased value on
   screen settles over and no other, `duration` 20 ms and 100 ms; `Fast`
   for what the pointer causes, a wheel's growth, hover and bands, `Slow`
@@ -1001,23 +1014,24 @@ impl Order {
   `Scene` and draws it — `belt` then `hud`, so the HUD is never occluded
   — over one full-window transparent egui layer that claims no widgets,
   and every other screen is drawn on that same layer. Input is keyboard
-  and mouse through the engine's action vocabularies, which `controls.rs`
-  declares: a click on a wheel or an asteroid selects and focuses it, a band
-  click edits one want and repeats after a third of a second and every
-  tenth after that, Shift raises the step from one to five, a left drag
-  from wheel to wheel is the send, the right or middle button and the pan
-  keys drag the belt, the zoom axis zooms or, during a send, sets how many
-  go, and Escape opens the pause screen and closes it again. The gamepad
-  bindings DISPLAY.md states are a later unit. Its own headless drive,
-  behind the `look` feature, plays a whole skirmish through the engine's
-  offscreen `Session` — title to lobby to a placement through a wheel's
-  band to the standings — picks a team out of an open list, removes a
-  guest from a room it serves, and clicks a disabled Quit; it writes
-  `game/look/title.png`, `title_quit_reason.png`, `lobby.png`,
-  `lobby_choice.png`, `wheel.png` and `results.png`. Every test of it holds one lock,
-  since each title serves a room on the protocol's one port. `check.sh`
-  runs it under `xvfb-run`, so the drive and its screenshots are verified
-  on every change.
+  and mouse through the engine's action vocabularies, which
+  `controls.rs` declares: a click on a wheel or an asteroid selects and
+  focuses it, a band click edits one want and repeats after a third of a
+  second and every tenth after that, Shift raises the step from one to
+  five, a left drag from wheel to wheel is the send, the right or middle
+  button and the pan keys drag the belt, the zoom axis zooms or, during
+  a send, sets how many go, and Escape opens the pause screen and closes
+  it again. The gamepad bindings DISPLAY.md states are a later unit. Its
+  own headless drive, behind the `look` feature, plays a whole skirmish
+  through the engine's offscreen `Session` — title to lobby to a
+  placement through a wheel's band to the standings — picks a team out
+  of an open list, removes a guest from a room it serves, and clicks a
+  disabled Quit; it writes `game/look/title.png`,
+  `title_quit_reason.png`, `lobby.png`, `lobby_choice.png`, `wheel.png`
+  and `results.png`. Every test of it holds one lock, since each title
+  serves a room on the protocol's one port. `check.sh` runs it under
+  `xvfb-run`, so the drive and its screenshots are verified on every
+  change.
 
 ## Look
 
@@ -1051,15 +1065,15 @@ the sequence, so no caller does. `Scripted` is the shipped opponent: a
 its `Commitments` and a `Dice`.
 
 - `Survey` is one decision's tally of one view and derives everything it
-  answers from that view alone, own and enemy alike: the asteroids a seat
-  holds, occupies and builds at, its army, the enemy's army
-  and the asteroids it holds, the threat at each asteroid, and the worst plating
-  and range the enemy fields. It does not derive income: the view carries
-  the seat's own, measured by the sim, and a plan reads `view.income`
-  rather than a second answer to one fact. An enemy is a seat the view
-  says is on another team, so a teammate is neither a threat nor a
-  target. Nothing is
-  remembered, since nothing is hidden (DESIGN.md, Visibility).
+  answers from that view alone, own and enemy alike: the asteroids a
+  seat holds, occupies and builds at, its army, the enemy's army and the
+  asteroids it holds, the threat at each asteroid, and the worst plating
+  and range the enemy fields. It does not derive income: the view
+  carries the seat's own, measured by the sim, and a plan reads
+  `view.income` rather than a second answer to one fact. An enemy is a
+  seat the view says is on another team, so a teammate is neither a
+  threat nor a target. Nothing is remembered, since nothing is hidden
+  (DESIGN.md, Visibility).
 - `Commitments` is what the agent has decided and the view cannot say: the
   asteroids it has claimed and how long it will wait for each, the asteroids a
   lapsed claim bars for a while, and the asteroid it has committed an attack
@@ -1069,42 +1083,45 @@ its `Commitments` and a `Dice`.
   `Want`s, in priority order: the opening, defence, economy, then army.
   An attack commits to the nearest enemy asteroid once the army it can see it
   needs is standing.
-- `Plan::draft` is the whole of a bot's opening; there is no rule by seat
-  index any more. While its stage runs it asks for one of that stage's row,
-  and only that; off its stage it asks for nothing, and
-  while the draft runs it re-asserts the placements the draft records for
-  it so its own standing want is never dropped. The asteroid is the free asteroid
-  with the greatest
-  `fit × away / (1 + near / REACH)`, ties by lowest asteroid id, where `fit` is
-  the asteroid's caps weighted by the shares of `Plan::intended`, the same cost
-  mix the extractor rule spends at; `away` is `gap / (gap + REACH)` over
-  the distance to the nearest asteroid an enemy seat has taken, one where none
-  has; and `near` is the distance to the nearest asteroid this seat has taken,
-  zero where it holds none. So a bot takes an asteroid rich in what it means to
-  build, away from its enemies and beside its own. Both the enemies' asteroids
-  and its own are read off `View::draft`, since nothing stands during the
-  draft for the survey to see. A seat's second pick weighs what its first
-  lacks: `Plan::wanted_shares` is `mix[m]/Σmix × (1 - held[m]/Σheld)` per
-  material, where `held` is the caps of the asteroids the seat has already
-  drafted, so the more of a material those asteroids supply the less it weighs
-  and a material they have none of keeps its whole share of the mix, and
-  `fit` is the asteroid's caps weighted by those shares. No share is ever
-  negative, so the rule carries no case of its own and the pair covers the
-  mix between them. A mix of one material that the first asteroid already
-  supplies scores every free asteroid at zero, which the tie-break by lowest
-  asteroid id settles.
-- The asteroid a bot's constructor drafts is its first expansion: `Plan::draft`
-  claims it in `Commitments` from the tick it lands, so `expand` keeps the
-  constructor there instead of counting it spare and pulling it home, and
-  the claim retires itself the moment a structure stands there. The asteroid is
-  in the survey's `developed` from the start, since a builder stands at it,
-  so the extractor rule wants extractors there by income and the yards rule
-  wants a yard there, in that order, and the constructor builds them.
-  `Commitments` keeps its claims and bars in match time, not in steps. `Seated::issue` breaks its own decision
-  cadence while the bot's stage runs, so a bot places on the first tick it
-  sees its stage running rather than waiting out the cadence; DESIGN.md
-  says it places on the stage's first tick, and a stage begins inside a
-  step, so the first tick a view can show it is the tick after.
+- `Plan::draft` is the whole of a bot's opening; there is no rule by
+  seat index any more. While its stage runs it asks for one of that
+  stage's row, and only that; off its stage it asks for nothing, and
+  while the draft runs it re-asserts the placements the draft records
+  for it so its own standing want is never dropped. The asteroid is the
+  free asteroid with the greatest `fit × away / (1 + near / REACH)`,
+  ties by lowest asteroid id, where `fit` is the asteroid's caps
+  weighted by the shares of `Plan::intended`, the same cost mix the
+  extractor rule spends at; `away` is `gap / (gap + REACH)` over the
+  distance to the nearest asteroid an enemy seat has taken, one where
+  none has; and `near` is the distance to the nearest asteroid this seat
+  has taken, zero where it holds none. So a bot takes an asteroid rich
+  in what it means to build, away from its enemies and beside its own.
+  Both the enemies' asteroids and its own are read off `View::draft`,
+  since nothing stands during the draft for the survey to see. A seat's
+  second pick weighs what its first lacks: `Plan::wanted_shares` is
+  `mix[m]/Σmix × (1 - held[m]/Σheld)` per material, where `held` is the
+  caps of the asteroids the seat has already drafted, so the more of a
+  material those asteroids supply the less it weighs and a material they
+  have none of keeps its whole share of the mix, and `fit` is the
+  asteroid's caps weighted by those shares. No share is ever negative,
+  so the rule carries no case of its own and the pair covers the mix
+  between them. A mix of one material that the first asteroid already
+  supplies scores every free asteroid at zero, which the tie-break by
+  lowest asteroid id settles.
+- The asteroid a bot's constructor drafts is its first expansion:
+  `Plan::draft` claims it in `Commitments` from the tick it lands, so
+  `expand` keeps the constructor there instead of counting it spare and
+  pulling it home, and the claim retires itself the moment a structure
+  stands there. The asteroid is in the survey's `developed` from the
+  start, since a builder stands at it, so the extractor rule wants
+  extractors there by income and the yards rule wants a yard there, in
+  that order, and the constructor builds them. `Commitments` keeps its
+  claims and bars in match time, not in steps. `Seated::issue` breaks
+  its own decision cadence while the bot's stage runs, so a bot places
+  on the first tick it sees its stage running rather than waiting out
+  the cadence; DESIGN.md says it places on the stage's first tick, and a
+  stage begins inside a step, so the first tick a view can show it is
+  the tick after.
 - `economy` runs in one order and the order is the rule: the structures
   already standing, `expand`'s masons, the extractors, then the yards, then
   the stores. Income comes before the buildings it pays for, so a second
@@ -1153,13 +1170,14 @@ impl Plan {
   smaller of the clock's remaining seconds and `PAYBACK_HORIZON` covers
   its cost's total, so a bot near the clock builds nothing that cannot
   repay before the match ends.
-- Placement walks the materials in the roster's order while a material is
-  short, taking the developed asteroid with the greatest spare, ties by
-  lowest asteroid id, and stops when no asteroid has spare left or the placement
-  cannot repay. Each placement lowers the shortfall by its yield. The want is what stands at the asteroid plus
-  the placements, through `Plan::want` like every other, so `affordable`
-  charges it against the budget; a material with nothing short still
-  wants what stands, since nothing complete is scrapped.
+- Placement walks the materials in the roster's order while a material
+  is short, taking the developed asteroid with the greatest spare, ties
+  by lowest asteroid id, and stops when no asteroid has spare left or
+  the placement cannot repay. Each placement lowers the shortfall by its
+  yield. The want is what stands at the asteroid plus the placements,
+  through `Plan::want` like every other, so `affordable` charges it
+  against the budget; a material with nothing short still wants what
+  stands, since nothing complete is scrapped.
 - The two personalities differ in this rule only through `demand`: the
   yards, masons and stores they want and the army value
   `Personality::army_value` gives them. Nothing here reads the dice.
@@ -1656,11 +1674,12 @@ it; a new one is added here in the unit that introduces it:
   no direction there. Their drift differs by id, so they part within a tick.
   A spacing that could not be zero would delete it, which no placement rule
   can promise once ships are free to move.
-- Holding's chase scans an asteroid's roll once per unit standing there, so one
-  asteroid holding a thousand units costs about 11.7 ms a tick against a budget
-  of 8.3; a hundred at one asteroid costs about 0.5 ms. Ranking the roll once per asteroid
-  and per plating, and breaking only the distance tie per unit, would delete
-  it, since the threat order depends on the unit through its plating alone.
+- Holding's chase scans an asteroid's roll once per unit standing there,
+  so one asteroid holding a thousand units costs about 11.7 ms a tick
+  against a budget of 8.3; a hundred at one asteroid costs about 0.5 ms.
+  Ranking the roll once per asteroid and per plating, and breaking only
+  the distance tie per unit, would delete it, since the threat order
+  depends on the unit through its plating alone.
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.

@@ -95,16 +95,17 @@ follows the crowd, and a wheel covered by another is no fainter and does
 not move. Every change between the two states, by hover or by selection
 alike, eases over the fast span, never a jump. Every eased change on
 screen uses one of two spans and no other, fast and slow, named
-constants of the game crate: fast for what the pointer causes, slow
-for what the camera and the screens do. A faded glyph is blended toward the backdrop, never drawn
-translucent, so its strokes do not double where they cross. Which wheel
-is hovered is decided against the wheels as they stood before any grew,
-and a hovered wheel stays hovered until the pointer leaves its full
-extent by a margin of a band's width or more, so growing under the
-pointer never changes which wheel is hovered, an overshoot past an edge
-closes nothing, and nothing jitters. A bare asteroid under the pointer
-carries the seat's own wheel as a selected one does, every row hollow,
-so what an asteroid could hold shows before it is clicked.
+constants of the game crate: fast for what the pointer causes, slow for
+what the camera and the screens do. A faded glyph is blended toward the
+backdrop, never drawn translucent, so its strokes do not double where
+they cross. Which wheel is hovered is decided against the wheels as they
+stood before any grew, and a hovered wheel stays hovered until the
+pointer leaves its full extent by a margin of a band's width or more, so
+growing under the pointer never changes which wheel is hovered, an
+overshoot past an edge closes nothing, and nothing jitters. A bare
+asteroid under the pointer carries the seat's own wheel as a selected
+one does, every row hollow, so what an asteroid could hold shows before
+it is clicked.
 
 The wheels' numerals, the stockpile's and the clock's are the only
 numerals on the HUD. Ownership is colour, and colour is the team's; a
@@ -145,33 +146,33 @@ Fill is the owner's colour; the outline is white.
 
 ## The stockpile and the clock
 
-One strip across the top centre, of the wheel strip's height: one
-box in the screens' style, a scrim with the screens' line around it,
-holding four cells packed the wheel's cell gap apart and no more,
-three one per material, metals then volatiles then energy, and a
-fourth for the clock. A material's cell, left to right: the
-material's icon (Icons, below) at the glyph's height; the stock as a
-numeral in ink; a bar of one fixed length, the same for every cell,
-filled from its left end to the stock over the capacity in the
-material's hue, so an empty bar is an empty bar and no numeral stands
-on it; after the bar's right end the net as a signed numeral in ink,
-"+3" or "-5", income less spend per second over the last second. Income is what the seat's extractors
-pulled, before the capacity clamp; spend is what its frames drained; a
-cancelled frame's refund is neither, and the stock's jump on a cancel
-is its own reading. Past the fill's tip a fainter segment of
-the hue extends by ten seconds of income, and inside the tip a darker
-segment of the hue marks ten seconds of spend, so which of the two is
-longer says which way the stock moves and how fast. At capacity the
-income segment runs past the bar's right end, and that overrun is the
-loss, at the fill's own alpha, never fainter; the net numeral sits
-after the overrun. An empty bar with a negative net is a stall and
-draws nothing more, since the frame's belt at the asteroid names the
-material. Hovering a cell shows one short phrase beneath it, the
-capacity, "of 300"; the two segments already carry the in and the out. While a wheel's plus band is hovered, each
+One strip across the top centre, of the wheel strip's height: one box in
+the screens' style, a scrim with the screens' line around it, holding
+four cells packed the wheel's cell gap apart and no more, three one per
+material, metals then volatiles then energy, and a fourth for the clock.
+A material's cell, left to right: the material's icon (Icons, below) at
+the glyph's height; the stock as a numeral in ink; a bar of one fixed
+length, the same for every cell, filled from its left end to the stock
+over the capacity in the material's hue, so an empty bar is an empty bar
+and no numeral stands on it; after the bar's right end the net as a
+signed numeral in ink, "+3" or "-5", income less spend per second over
+the last second. Income is what the seat's extractors pulled, before the
+capacity clamp; spend is what its frames drained; a cancelled frame's
+refund is neither, and the stock's jump on a cancel is its own reading.
+Past the fill's tip a fainter segment of the hue extends by ten seconds
+of income, and inside the tip a darker segment of the hue marks ten
+seconds of spend, so which of the two is longer says which way the stock
+moves and how fast. At capacity the income segment runs past the bar's
+right end, and that overrun is the loss, at the fill's own alpha, never
+fainter; the net numeral sits after the overrun. An empty bar with a
+negative net is a stall and draws nothing more, since the frame's belt
+at the asteroid names the material. Hovering a cell shows one short
+phrase beneath it, the capacity, "of 300"; the two segments already
+carry the in and the out. While a wheel's plus band is hovered, each
 material's bar marks the row's cost as the darker segment inside the
-fill's tip, in place of the spend projection, and a minus band marks
-the refund as the fainter segment past the tip, so what a want costs
-is read where it is paid and never as a numeral.
+fill's tip, in place of the spend projection, and a minus band marks the
+refund as the fainter segment past the tip, so what a want costs is read
+where it is paid and never as a numeral.
 
 The clock's cell is a bar of the same length in ink, full at the start,
 its fill shrinking from the right as the match runs, so the filled part

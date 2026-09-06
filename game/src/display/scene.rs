@@ -229,7 +229,8 @@ impl Entry {
         }
     }
 
-    pub fn dim(self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn dim(self) -> bool {
         matches!(self, Entry::Leaving { .. } | Entry::Arriving { .. })
     }
 

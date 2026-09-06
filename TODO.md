@@ -70,8 +70,8 @@ Open from the draft unit:
 - Dead `pub` items rustc cannot see: a `pub` item in a library crate is
   never flagged unused, so the sim's, agents' and protocol's surfaces
   hide dead code from the gate. Found by a name scan 2026-09-06, called
-  only from tests: `RIVAL` (display/local.rs) and `dim`
-  (display/scene.rs); `is_a_phrase` and `moving_at` are now test-only.
+  only from tests: `Entry::dim` (display/scene.rs); `is_a_phrase` and
+  `moving_at` are now test-only and `RIVAL` lives in a test module.
   The structural fix, into the contraction audit (1e):
   every `pub` outside ARCHITECTURE.md's stated surface becomes
   `pub(crate)`, after which rustc's own lint finds the rest for good;
@@ -160,13 +160,14 @@ screens, then the programme.
 3. The belt and the star, Opus: map generation from seed with regional
    caps; one to two hundred asteroids in an annulus from the seed with
    regional cap triples; neighbour spacing near two kilometres, the
-   extent growing with the count; the star in the middle of the system as the
-   central mass drawn, and a starfield skybox, both engine questions
-   first since the engine deleted its sky; the lobby's seed changes the belt and its preview is the seed's
-   belt at whole-belt zoom. The zone radius tens of metres, from the
-   largest force an asteroid holds at the holding rule's spacing. Settles
-   the asteroid count, the belt's spread against the schedule search bound,
-   and the ship count a match reaches, which items 4 and 5 answer to.
+   extent growing with the count; the star in the middle of the system
+   as the central mass drawn, and a starfield skybox, both engine
+   questions first since the engine deleted its sky; the lobby's seed
+   changes the belt and its preview is the seed's belt at whole-belt
+   zoom. The zone radius tens of metres, from the largest force an
+   asteroid holds at the holding rule's spacing. Settles the asteroid
+   count, the belt's spread against the schedule search bound, and the
+   ship count a match reaches, which items 4 and 5 answer to.
 4. The harness for scale and truth, Sonnet: a scale check playing a full
    bot match at two and five thousand ships on a release build printing
    milliseconds per tick; a per-tick invariant mode checking while a
@@ -200,9 +201,8 @@ screens, then the programme.
    planner memo by place pair and quantised phase. The overseer's view:
    right if a played match shows the solve in the tick's budget.
 8. The structural programme, each unit rewriting ARCHITECTURE.md: the
-   small collapses (Attractor is Body; View::want; Room folded into
-   Socket; one belt-drawing preamble; the sim test fixture module;
-   Materials::bottleneck as binding; Material::ALL); a frame on its
+   small collapses (View::want; Room folded into Socket; one
+   belt-drawing preamble); a frame on its
    post; one asteroid type from sim to pixel; one mark state replacing Fill
    and Reason; Layout yielding placed marks and one Dial; mark geometry
    as primitives painted once and rasterised once; one Log type; the

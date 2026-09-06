@@ -1,6 +1,7 @@
 # Neumannarch — rules for working in this repo
 
-The overseer reads OVERSEER.md before anything else. Implementation agents do not.
+The overseer reads OVERSEER.md before anything else. Implementation
+agents do not.
 
 Neumannarch is a two-to-four-player space RTS: a deterministic lockstep
 simulation of ships, structures and asteroids, played through one verb, on

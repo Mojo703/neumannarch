@@ -23,8 +23,8 @@ probe; the win is holding the system when the clock runs out.
 1. **Decisions are the player's; execution is the sim's.** The player states
    what they want and where. The sim fills it by fixed rules that contain no
    judgement. The player never references a unit.
-2. **One verb.** Set the count of a row at an asteroid. Everything else the player
-   does is a client gesture that issues that verb.
+2. **One verb.** Set the count of a row at an asteroid. Everything else
+   the player does is a client gesture that issues that verb.
 3. **Emergent, deterministic outcomes.** Counters and roles come from stats
    and geometry, never from tables of types. No randomness.
 4. **Short matches.** A match ends at the clock, minutes rather than hours.
@@ -33,9 +33,10 @@ probe; the win is holding the system when the clock runs out.
 
 ## Session
 
-- Win: at the clock, the side holding the most asteroids. An asteroid counts for a
-  player with a structure there; ties break by total army value. A side
-  with no entities and an empty reserve is out before the clock.
+- Win: at the clock, the side holding the most asteroids. An asteroid
+  counts for a player with a structure there; ties break by total army
+  value. A side with no entities and an empty reserve is out before the
+  clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
   count per row, of one shipyard and one constructor. A match opens in
   the placement draft, with time stopped: no body moves, nothing is
@@ -67,20 +68,20 @@ probe; the win is holding the system when the clock runs out.
 - Every machine runs the whole match. A command takes effect at the tick
   its player issued it. The issuer's machine applies it at once; every
   other machine applies it when it arrives, restoring that tick and
-  replaying from it, so all machines converge on one history. A tick is settled once every seat's commands up to it are
-  known; the settled history is the match's record and its replay, and
-  two machines whose settled histories differ have desynced, which ends
-  the match.
+  replaying from it, so all machines converge on one history. A tick is
+  settled once every seat's commands up to it are known; the settled
+  history is the match's record and its replay, and two machines whose
+  settled histories differ have desynced, which ends the match.
 - A match is set up in a lobby. The player who opens it is its host and
   owns its shape: the map's seed, the clock, the teams, and what holds
   each seat: a player, a bot with a personality, open, meaning a player
-  may still take it, or closed, meaning the seat is not in the match. A guest owns only their own seat's team, within the host's
-  shape, and their readiness. A seat a guest holds is the guest's until
-  the host removes them, which opens it. The host starts the match when
-  every player is ready, every seat is held or closed, and the host
-  holds a seat, its own or a bot's, so every machine in a match plays at
-  least one seat. A skirmish is a lobby whose seats are all on one
-  machine.
+  may still take it, or closed, meaning the seat is not in the match. A
+  guest owns only their own seat's team, within the host's shape, and
+  their readiness. A seat a guest holds is the guest's until the host
+  removes them, which opens it. The host starts the match when every
+  player is ready, every seat is held or closed, and the host holds a
+  seat, its own or a bot's, so every machine in a match plays at least
+  one seat. A skirmish is a lobby whose seats are all on one machine.
 
 ## World
 
@@ -94,10 +95,11 @@ probe; the win is holding the system when the clock runs out.
   because the same gravity moves them.
 - Units thrust with infinite fuel, under two constant limits: the
   movement limit, one value for every unit, spent only on a transfer
-  between asteroids, and a manoeuvring limit per row, far below it, spent
-  holding position, keeping apart and fighting, in flight as at home. Every send crosses the same distance in
-  the same time whatever is in it; rows differ in how they hold, chase
-  and give way. Movement and combat states how each is used.
+  between asteroids, and a manoeuvring limit per row, far below it,
+  spent holding position, keeping apart and fighting, in flight as at
+  home. Every send crosses the same distance in the same time whatever
+  is in it; rows differ in how they hold, chase and give way. Movement
+  and combat states how each is used.
 - No collisions. Entity size is visual. Arrival is the end of a schedule
   (Movement and combat), never a distance.
 
@@ -148,11 +150,11 @@ Every weapon has a kind, and each kind carries its own fields.
   repairs damaged friendlies there. Its reach is the asteroid's zone: a
   builder reaches everything inside it and nothing elsewhere.
 - **Extract.** Pulls up to `rate` of one material, the weapon's, from
-  its home asteroid. The asteroid's cap for that material is the ceiling: at the
-  cap, it is split equally among the extractors of that material there,
-  and any share an extractor cannot use is split among the rest. The
-  roster ships one extractor row per material, so what an asteroid yields is
-  a per-asteroid decision against its caps.
+  its home asteroid. The asteroid's cap for that material is the
+  ceiling: at the cap, it is split equally among the extractors of that
+  material there, and any share an extractor cannot use is split among
+  the rest. The roster ships one extractor row per material, so what an
+  asteroid yields is a per-asteroid decision against its caps.
 
 **Build is flow.** Every shortfall is a frame draining the stockpile
 continuously at the builders' combined rate. Effort combines across builders
@@ -191,18 +193,18 @@ sets one count.
 - **Reserve.** A shortfall is filled from the player's reserve before
   anything else: the entity appears at the place, complete, at once.
 - **Surplus.** When a place has more of a row than its want, the
-  highest-indexed units of that row there are surplus. Where a
-  shortfall of the row exists elsewhere, a place's complete units are
-  surplus before its frames of that row are unwanted, so lowering a
-  want to send a unit away sends the unit and keeps the frame
-  building; where no shortfall wants them, the frames are cancelled
-  and refunded and the units stay. Shortfalls are
-  filled in order of asteroid then player. Each is filled from the nearest
-  surplus, asteroid to asteroid as of that tick, ties by lowest asteroid. A surplus
-  unit sent to a shortfall cancels that place's least-progressed frame of
-  the same row and refunds it. Surplus with no shortfall anywhere stays
-  where it is, complete, until a shortfall wants it. Nothing complete is
-  ever scrapped or refunded; a structure stays until it is destroyed.
+  highest-indexed units of that row there are surplus. Where a shortfall
+  of the row exists elsewhere, a place's complete units are surplus
+  before its frames of that row are unwanted, so lowering a want to send
+  a unit away sends the unit and keeps the frame building; where no
+  shortfall wants them, the frames are cancelled and refunded and the
+  units stay. Shortfalls are filled in order of asteroid then player.
+  Each is filled from the nearest surplus, asteroid to asteroid as of
+  that tick, ties by lowest asteroid. A surplus unit sent to a shortfall
+  cancels that place's least-progressed frame of the same row and
+  refunds it. Surplus with no shortfall anywhere stays where it is,
+  complete, until a shortfall wants it. Nothing complete is ever
+  scrapped or refunded; a structure stays until it is destroyed.
 - **Shortfall.** When a place wants more of a row than it has, counting
   units there and in transit and never frames, and neither the reserve nor
   a surplus of that row anywhere can fill it, frames open at that place for
@@ -219,28 +221,30 @@ sets one count.
   everything inside it, a unit chases any enemy inside it, and the
   display draws it. Zones are small against the spacing of asteroids, so no
   two overlap.
-- **Sends.** Units re-homed in one tick from one place to another make one
-  send; units re-homed within a stated window of ticks join the send that
-  is forming. A send is one schedule of thrust, solved when the send
-  begins: a sequence of thrusts, one per tick, each within the movement
-  limit, whose integration by the sim's own propagation carries a ship
-  from the source asteroid's orbit to the destination asteroid's orbit at the
-  arrival tick, to within a stated tolerance in position and in speed. A
-  schedule exists at an arrival tick when its burns together take at most
-  a stated share of the span and its integration meets the tolerance. The arrival tick is the earliest at
-  which a schedule exists. A schedule departs on the tick after the send's
-  window closes, the first tick its ships thrust on. Every ship of the send
-  departs at once and flies the one schedule, so their offsets from each
-  other and from the asteroid at departure are carried to arrival: a force
-  that leaves spread through its zone arrives spread through the
+- **Sends.** Units re-homed in one tick from one place to another make
+  one send; units re-homed within a stated window of ticks join the send
+  that is forming. A send is one schedule of thrust, solved when the
+  send begins: a sequence of thrusts, one per tick, each within the
+  movement limit, whose integration by the sim's own propagation carries
+  a ship from the source asteroid's orbit to the destination asteroid's
+  orbit at the arrival tick, to within a stated tolerance in position
+  and in speed. A schedule exists at an arrival tick when its burns
+  together take at most a stated share of the span and its integration
+  meets the tolerance. The arrival tick is the earliest at which a
+  schedule exists. A schedule departs on the tick after the send's
+  window closes, the first tick its ships thrust on. Every ship of the
+  send departs at once and flies the one schedule, so their offsets from
+  each other and from the asteroid at departure are carried to arrival:
+  a force that leaves spread through its zone arrives spread through the
   destination's. While its send forms a unit stands at its asteroid, a
   shooter and a target there, and is counted toward its destination. A
-  unit is flying from the tick its schedule departs until it ends. The tolerance is the schedule's. Separation in flight
-  can push a ship in company off its schedule by arrival, and it holds
-  from wherever it ends.
+  unit is flying from the tick its schedule departs until it ends. The
+  tolerance is the schedule's. Separation in flight can push a ship in
+  company off its schedule by arrival, and it holds from wherever it
+  ends.
 - **Power.** Every unit has a power: its damage per second, through no
-  plating, times its remaining HP. It is the one number the fields below sum and it falls
-  as a unit is hurt.
+  plating, times its remaining HP. It is the one number the fields below
+  sum and it falls as a unit is hurt.
 - **The fields.** Each tick, at each asteroid, each side has a strength
   field: at any point, the sum over that side's units at the asteroid of
   the unit's power times a smooth kernel of its distance from the point,
@@ -282,12 +286,13 @@ sets one count.
 ## Visibility
 
 Everything is visible to every player always: every entity, its row, its
-seat, its position and velocity, every asteroid with its orbit, its caps and
-all its future positions, and the standings. Wants and frames are the
-one exception: a player sees their own and not another's. The standings at any tick
-are what the win rule would decide were the clock now: per side, the
-asteroids held, the army value and whether it is still in. Nothing is hidden
-and nothing is remembered, since there is nothing to remember.
+seat, its position and velocity, every asteroid with its orbit, its caps
+and all its future positions, and the standings. Wants and frames are
+the one exception: a player sees their own and not another's. The
+standings at any tick are what the win rule would decide were the clock
+now: per side, the asteroids held, the army value and whether it is
+still in. Nothing is hidden and nothing is remembered, since there is
+nothing to remember.
 
 ## Build order
 
