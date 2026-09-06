@@ -10,12 +10,12 @@ use neumannarch_sim::{RockId, RowId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
-use crate::display::ease::Clock;
+use crate::display::ease::{self, Clock};
 use crate::display::fights::Fights;
 use crate::display::glyph_quad::GlyphQuad;
-use crate::display::label::titled;
 use crate::display::scene::{Client, Hover, Scene, WheelBand};
 use crate::display::send::Sending;
+use crate::display::strip::Strip;
 use crate::display::viewport::Viewport;
 use crate::display::wheels::{Aim, Ease, Motion, Wheels};
 use crate::display::{belt, hud};
@@ -24,6 +24,8 @@ use crate::net::pace::Allowed;
 use crate::net::transport::Transport;
 use crate::screens::control;
 use crate::screens::held::{self, Held};
+use crate::screens::lobby::seat_names;
+use crate::screens::order::{self, Order};
 use crate::screens::panel::{self, Panel};
 use crate::screens::panning::Panning;
 use crate::screens::pause::{self, Pause};
@@ -76,6 +78,7 @@ enum Gesture {
 pub struct Play {
     lobby: Lobby,
     machine: Machine,
+    names: Vec<String>,
     view: View,
     fights: Fights,
     camera: BeltCamera,
@@ -86,6 +89,7 @@ pub struct Play {
     panning: Panning,
     motion: Motion,
     clock: Clock,
+    order_alpha: f64,
 }
 
 impl Play {
@@ -107,6 +111,7 @@ impl Play {
         );
         Play {
             lobby,
+            names: seat_names(machine.seating(), machine.player()),
             machine,
             view,
             fights: Fights::default(),
@@ -118,6 +123,7 @@ impl Play {
             panning: Panning::still(),
             motion: Motion::default(),
             clock: Clock::default(),
+            order_alpha: 1.0,
         }
     }
 
@@ -170,13 +176,14 @@ impl Play {
             .terrain
             .iter()
             .find(|terrain| terrain.rock == rock)
-            .map(|terrain| terrain.orbit.at(self.view.tick, self.view.gravity).pos)
+            .map(|terrain| terrain.orbit.at(self.view.time, self.view.gravity).pos)
     }
 
     pub fn tick(&mut self, transport: &mut dyn Transport) {
         if (self.paused() && self.machine.alone()) || self.over() {
             return;
         }
+        let was = self.view.time;
         let ticked = self.machine.tick(transport);
         if ticked.rewound {
             self.fights = Fights::default();
@@ -189,7 +196,7 @@ impl Play {
         }
         self.fights.observe(&self.view);
         self.camera
-            .advance(neumannarch_sim::TICK.as_secs_f64(), self.view.gravity);
+            .advance(self.view.time.since(was).seconds(), self.view.gravity);
         self.follow_the_first_placement();
     }
 
@@ -198,12 +205,16 @@ impl Play {
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
         let window = ctx.window_size();
-
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let points_per_pixel = 1.0 / ctx.pixels_per_point();
         let dt = self.clock.frame(ctx.elapsed());
         let mut motion = core::mem::take(&mut self.motion);
         motion.begin(dt);
+        self.order_alpha = ease::toward_over(
+            self.order_alpha,
+            self.order_target(),
+            dt,
+            order::FADE_SECONDS,
+        );
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
         let shifted = ctx.down(Button::Shift);
@@ -232,6 +243,8 @@ impl Play {
         let clicked = ctx.pressed(Button::Select);
         let over = panel::window_of(window, points_per_pixel);
         let phrase = self.phrase(&wheels, pointer);
+        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let order = self.order(over);
         let hover = self.hover().copied();
         let doing = &self.doing;
         let mut left = None;
@@ -239,6 +252,12 @@ impl Play {
         ctx.ui(|ui| {
             hud::paint(&scene, &viewport, ui.painter());
             wheels.paint(ui.painter(), hover.as_ref());
+            if let Some(strip) = &strip {
+                strip.paint(ui.painter(), Some(pointer));
+            }
+            if let Some(order) = &order {
+                order.paint(ui.painter());
+            }
             let panel = Panel::new(ui.painter(), over, pointer, clicked);
             if let Some((beside, phrase)) = phrase {
                 let mut controls = control::Controls::over(&panel);
@@ -282,6 +301,26 @@ impl Play {
         self.machine.session().state().roster()
     }
 
+    fn order_target(&self) -> f64 {
+        match self.view.draft.ended() {
+            None => 1.0,
+            Some(_) => 0.0,
+        }
+    }
+
+    pub fn order(&self, window: egui::Rect) -> Option<Order> {
+        (self.order_alpha > 0.0).then(|| {
+            Order::over(
+                window,
+                &self.view.draft,
+                self.view.tick,
+                self.roster(),
+                &self.names,
+                self.order_alpha as f32,
+            )
+        })
+    }
+
     pub fn wheels(
         &self,
         viewport: &Viewport,
@@ -298,7 +337,7 @@ impl Play {
         )
     }
 
-    fn aim(&self, pointer: Option<egui::Pos2>, shifted: bool) -> Aim {
+    fn aim(&self, pointer: Option<egui::Pos2>, shifted: bool) -> Aim<'_> {
         Aim {
             viewer: self.machine.seat(),
             pointer,
@@ -308,6 +347,7 @@ impl Play {
                 false => 1,
             },
             wants: self.wants(),
+            draft: Some(&self.view.draft),
         }
     }
 
@@ -320,15 +360,10 @@ impl Play {
     }
 
     fn phrase(&self, wheels: &Wheels, pointer: egui::Pos2) -> Option<(egui::Rect, String)> {
-        let (at, row, shown) = wheels.spoken_at(pointer)?;
+        let (at, spoken) = wheels.spoken_at(pointer)?;
         let beside =
             egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * crate::display::glyph::HALF));
-        let name = titled(self.roster()[row].name);
-        let phrase = match shown {
-            Some(shown) => shown.entry.phrase(&name),
-            None => name,
-        };
-        Some((beside, phrase))
+        Some((beside, spoken.phrase(self.roster())))
     }
 
     fn holds(&mut self, pace: Allowed) {

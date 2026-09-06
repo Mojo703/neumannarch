@@ -1,4 +1,7 @@
+use neumannarch_sim::Material;
 use neumannarch_sim::roster::{Kind, Row, Weapon};
+
+use crate::display::icon;
 
 pub const HALF: f32 = 11.0;
 
@@ -19,6 +22,16 @@ const REFERENCE_HALF: f32 = 22.0;
 pub const OUTLINE_WIDTH: f32 = 2.0;
 
 pub const MARK_WIDTH: f32 = 4.5;
+
+pub const EXTRACT_ICON_AT: (f32, f32) = (30.0, 26.0);
+
+pub const EXTRACT_ICON_WIDTH: f32 = 20.0;
+
+pub const CHEVRON_AT: (f32, f32) = (30.0, 44.0);
+
+pub const CHEVRON_HALF_WIDTH: f32 = 10.0;
+
+pub const CHEVRON_HALF_HEIGHT: f32 = 4.0;
 
 pub fn unit(point: (f32, f32)) -> (f32, f32) {
     (
@@ -49,7 +62,7 @@ pub enum GlyphMark {
     Dot,
     Bar,
     Plus,
-    Chevron,
+    Extract(Material),
     Belt,
     Ring,
 }
@@ -66,6 +79,7 @@ pub enum Primitive {
     Dot { at: (f32, f32), radius: f32 },
     Line(Vec<(f32, f32)>),
     Ring { at: (f32, f32), radius: f32 },
+    Path(Vec<Vec<(f32, f32)>>),
 }
 
 impl Frame {
@@ -111,7 +125,7 @@ impl GlyphMark {
             Weapon::Damage { range, .. } if range.0 < LONG_RANGE_FROM_METERS => GlyphMark::Dot,
             Weapon::Damage { .. } => GlyphMark::Bar,
             Weapon::Build { .. } => GlyphMark::Plus,
-            Weapon::Extract { .. } => GlyphMark::Chevron,
+            Weapon::Extract { material, .. } => GlyphMark::Extract(*material),
         }
     }
 }
@@ -138,7 +152,10 @@ fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primi
         GlyphMark::Bar => vec![Primitive::Line(vec![(30.0, 14.0), (30.0, 48.0)])],
         GlyphMark::Plus if paired => plus_lines((30.0, 30.0), 6.5),
         GlyphMark::Plus => plus_lines((30.0, 38.0), 8.5),
-        GlyphMark::Chevron => vec![chevron_line((30.0, 32.0), 15.0)],
+        GlyphMark::Extract(material) => vec![
+            chevron_down(CHEVRON_AT, CHEVRON_HALF_WIDTH, CHEVRON_HALF_HEIGHT),
+            icon::of(*material).placed(EXTRACT_ICON_AT, EXTRACT_ICON_WIDTH),
+        ],
         GlyphMark::Belt => vec![Primitive::Line(vec![(17.0, 45.0), (43.0, 45.0)])],
         GlyphMark::Ring => vec![Primitive::Ring {
             at: (30.0, 30.0),
@@ -147,19 +164,19 @@ fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primi
     }
 }
 
+fn chevron_down(at: (f32, f32), half_width: f32, half_height: f32) -> Primitive {
+    Primitive::Line(vec![
+        (at.0 - half_width, at.1 - half_height),
+        (at.0, at.1 + half_height),
+        (at.0 + half_width, at.1 - half_height),
+    ])
+}
+
 fn plus_lines(at: (f32, f32), arm: f32) -> Vec<Primitive> {
     vec![
         Primitive::Line(vec![(at.0 - arm, at.1), (at.0 + arm, at.1)]),
         Primitive::Line(vec![(at.0, at.1 - arm), (at.0, at.1 + arm)]),
     ]
-}
-
-fn chevron_line(at: (f32, f32), a: f32) -> Primitive {
-    Primitive::Line(vec![
-        (at.0 - a, at.1 - a * 0.7),
-        (at.0, at.1 + a * 0.7),
-        (at.0 + a, at.1 - a * 0.7),
-    ])
 }
 
 impl Size {
@@ -189,9 +206,14 @@ mod tests {
 
     use super::*;
 
-    const SHIPPED_MARKS: [(&str, &[GlyphMark]); 7] = [
+    const SHIPPED_MARKS: [(&str, &[GlyphMark]); 9] = [
         ("constructor", &[GlyphMark::Plus]),
-        ("extractor", &[GlyphMark::Chevron]),
+        ("metals extractor", &[GlyphMark::Extract(Material::Metals)]),
+        (
+            "volatiles extractor",
+            &[GlyphMark::Extract(Material::Volatiles)],
+        ),
+        ("energy extractor", &[GlyphMark::Extract(Material::Energy)]),
         ("storage", &[GlyphMark::Ring]),
         ("shipyard", &[GlyphMark::Plus, GlyphMark::Ring]),
         ("raider", &[GlyphMark::Dot]),
@@ -236,15 +258,61 @@ mod tests {
     }
 
     #[test]
-    fn build_marks_a_plus_and_extract_a_chevron_in_weapon_order() {
+    fn build_marks_a_plus_and_extract_its_materials_icon_in_weapon_order() {
         let weapons = vec![
             Weapon::Build { rate: Real(1.0) },
-            Weapon::Extract { rate: Real(1.0) },
+            Weapon::Extract {
+                material: Material::Metals,
+                rate: Real(1.0),
+            },
         ];
         assert_eq!(
             Glyph::of(&row(60.0, 0.0, weapons)).marks,
-            vec![GlyphMark::Plus, GlyphMark::Chevron]
+            vec![GlyphMark::Plus, GlyphMark::Extract(Material::Metals)]
         );
+    }
+
+    #[test]
+    fn an_extract_mark_is_a_chevron_pointing_down_under_its_materials_icon_inside_the_frame() {
+        let square = Frame::Square.points();
+        let inside = |(x, y): (f32, f32)| {
+            let inset = MARK_WIDTH / 2.0;
+            x >= square[0].0 + inset
+                && x <= square[2].0 - inset
+                && y >= square[0].1 + inset
+                && y <= square[2].1 - inset
+        };
+        for material in Material::EVERY {
+            let primitives = primitives_of(&[GlyphMark::Extract(material)]);
+            let [Primitive::Line(chevron), Primitive::Path(rings)] = primitives.as_slice() else {
+                panic!("{material:?} draws {primitives:?}");
+            };
+            assert_eq!(
+                chevron.as_slice(),
+                [(20.0, 40.0), (30.0, 48.0), (40.0, 40.0)],
+                "{material:?}: the chevron at (30,44), half-width 10, points down"
+            );
+            let xs = || rings.iter().flatten().map(|(x, _)| *x);
+            let ys = || rings.iter().flatten().map(|(_, y)| *y);
+            let (left, right) = (
+                xs().fold(f32::INFINITY, f32::min),
+                xs().fold(f32::NEG_INFINITY, f32::max),
+            );
+            let (top, bottom) = (
+                ys().fold(f32::INFINITY, f32::min),
+                ys().fold(f32::NEG_INFINITY, f32::max),
+            );
+            assert!((right - left - 20.0).abs() < 1e-3, "{material:?}");
+            assert!(((left + right) / 2.0 - 30.0).abs() < 1e-3, "{material:?}");
+            assert!(((top + bottom) / 2.0 - 26.0).abs() < 1e-3, "{material:?}");
+            assert!(
+                chevron
+                    .iter()
+                    .chain(rings.iter().flatten())
+                    .all(|point| inside(*point)),
+                "{material:?} clips the frame"
+            );
+        }
     }
 
     #[test]

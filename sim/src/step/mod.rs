@@ -6,12 +6,12 @@ use crate::post::Post;
 use crate::roster::Kind;
 use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
 use crate::step::construction::{Construction, Progress};
-use crate::step::extraction::{Extraction, Income};
+use crate::step::extraction::Income;
 use crate::step::fire::{Fire, Shots};
 use crate::step::fulfilment::{Assigned, Fulfilment};
 use crate::step::holding::Holding;
 use crate::step::propagation::{Moved, Propagation};
-use crate::time::Tick;
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,12 +27,23 @@ impl State {
             .iter()
             .filter_map(|issued| applied.apply(issued).err().map(|why| (issued, why)))
             .collect();
+        applied.close_draft();
+        if applied.drafting() {
+            applied.advance();
+            return (
+                applied,
+                Outcome {
+                    rejected,
+                    shots: Shots::default(),
+                },
+            );
+        }
         let snap = &applied;
         let sweep = snap.sweep();
         let thrusts = Holding::of(snap, &sweep).run();
         let moved = Propagation::of(snap, &thrusts).run();
         let filled = Fulfilment::of(snap).run();
-        let income = Extraction::of(snap).run();
+        let income = Income::extracted(snap);
         let work = Construction::of(snap).run();
         let shots = Fire::of(snap, &sweep).run();
         let next = State::next(snap, &moved, &filled, &income, &work, &shots);
@@ -51,7 +62,7 @@ impl State {
         let mut closing = Vec::new();
         move_bodies(&mut next, moved);
         fulfil(&mut next, snap, filled, &mut closing);
-        earn(&mut next, income);
+        income.apply(&mut next);
         build(&mut next, snap, work, &mut closing);
         resolve(&mut next, shots);
         next.close_frames(&closing);
@@ -90,7 +101,7 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
         }
     }
     for opening in &filled.openings {
-        next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.tick()));
+        next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.time()));
     }
     for cancellation in &filled.cancellations {
         let cost = snap[cancellation.row].cost;
@@ -99,21 +110,15 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
     }
 }
 
-fn earn(next: &mut State, income: &Income) {
-    for (seat, materials) in income.iter() {
-        refund(next, seat, materials);
-    }
-}
-
 fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usize>) {
     for spend in &work.spends {
         let frame = &snap.frames()[spend.frame];
         if let Some(seat) = next.seat_mut(frame.post().seat) {
-            seat.stockpile_mut().spend(spend.materials);
+            seat.drain(spend.materials);
         }
         if let Some(open) = next.frame_mut(spend.frame) {
             match spend.materials.total() > 0.0 {
-                true => open.build(spend.materials.total(), snap.tick()),
+                true => open.build(spend.materials.total(), snap.time()),
                 false => open.short_of(spend.short),
             }
         }
@@ -188,15 +193,15 @@ fn spawn(next: &mut State, post: Post, row: RowId) {
         Motion::Fixed
     } else {
         Motion::Steered {
-            body: spawn_body(next, post.rock, next.tick().next()),
+            body: spawn_body(next, post.rock, next.time().next()),
             flight: None,
         }
     };
     next.spawn(post.seat, row, post.rock, motion);
 }
 
-pub(crate) fn spawn_body(state: &State, rock: RockId, tick: Tick) -> Body {
-    let home = state[rock].orbit().at(tick, state.gravity());
+pub(crate) fn spawn_body(state: &State, rock: RockId, at: Time) -> Body {
+    let home = state[rock].orbit().at(at, state.gravity());
     let already = state
         .standing_at(rock)
         .filter(|entity| entity.motion() != Motion::Fixed)
@@ -224,9 +229,7 @@ fn join(next: &mut State, entity: EntityId, destination: RockId, flight: Flight)
 }
 
 fn refund(next: &mut State, seat: SeatId, materials: Materials) {
-    if let Some(seat) = next.seat_mut(seat) {
-        seat.stockpile_mut().add(materials);
-    }
+    next[seat].refund(materials);
 }
 
 fn share(cost: Materials, progress: f64) -> Materials {
@@ -256,9 +259,11 @@ mod tests {
     use crate::orbit::body::Gravity;
     use crate::real::Real;
     use crate::roster::Roster;
-    use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
+    use crate::roster::{
+        CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
+    };
     use crate::state::{Entity, MAX_WANT, Schedule, Seat, Send};
-    use crate::time::Tick;
+    use crate::time::Time;
     use crate::{Materials, TICKS_PER_SECOND};
 
     fn rock(at: u32) -> RockId {
@@ -368,14 +373,9 @@ mod tests {
 
     #[test]
     fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
-        let mut world = stocked(
-            Roster::shipped(),
-            BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
-        );
-        world.tick(&[
-            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
-            Issued::numbered(0, 1, rock(0), RAIDER, 1),
-        ]);
+        let mut world = stocked(Roster::shipped(), BTreeMap::from([(STORAGE, 1)]));
+        world.hold(0, CONSTRUCTOR, rock(0), 5.0);
+        world.hold(0, RAIDER, rock(0), 6.0);
         assert_eq!(world.count(0, rock(0), CONSTRUCTOR), 1);
         assert_eq!(world.count(0, rock(0), RAIDER), 1);
 
@@ -410,11 +410,11 @@ mod tests {
         ]);
 
         let flight = world.state[unit].flight().expect("a flight");
-        world.run(flight.departs().0 - world.state.tick().0);
+        world.run(flight.departs().0 - world.state.time().0);
         let left = world.off_rock(unit, rock(0));
-        world.run(flight.arrive().0 - world.state.tick().0);
+        world.run(flight.arrive().0 - world.state.time().0);
         assert!(
-            !world.state[unit].is_flying(world.state.tick()),
+            !world.state[unit].is_flying(world.state.time()),
             "it is still flying at its arrival tick"
         );
         let landed = world.off_rock(unit, rock(1));
@@ -434,14 +434,9 @@ mod tests {
 
     #[test]
     fn units_re_homed_within_the_window_fly_one_send() {
-        let mut world = stocked(
-            Roster::shipped(),
-            BTreeMap::from([(CONSTRUCTOR, 1), (RAIDER, 1)]),
-        );
-        world.tick(&[
-            Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 1),
-            Issued::numbered(0, 1, rock(0), RAIDER, 1),
-        ]);
+        let mut world = stocked(Roster::shipped(), BTreeMap::from([(STORAGE, 1)]));
+        world.hold(0, CONSTRUCTOR, rock(0), 5.0);
+        world.hold(0, RAIDER, rock(0), 6.0);
         let flight_of = |state: &State, row| {
             state
                 .entities()
@@ -465,12 +460,12 @@ mod tests {
             Some(first),
             "a unit re-homed inside the window opened a send of its own"
         );
-        assert_eq!(world.state.tick(), first.departs());
+        assert_eq!(world.state.time(), first.departs());
         assert!(
             world
                 .state
                 .entities()
-                .all(|entity| entity.is_flying(world.state.tick())),
+                .all(|entity| entity.is_flying(world.state.time())),
             "the window closed and the send did not depart"
         );
     }
@@ -529,7 +524,7 @@ mod tests {
             Issued::numbered(0, 3, rock(1), FRIGATE, 1),
         ]);
 
-        let now = world.state.tick();
+        let now = world.state.time();
         assert!(
             world.state[shooter].flight().is_some(),
             "its send is forming"
@@ -575,19 +570,10 @@ mod tests {
     #[test]
     fn a_surplus_unit_with_no_shortfall_is_never_scrapped() {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[
-            Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
-            Issued::numbered(0, 1, rock(0), CONSTRUCTOR, 1),
-        ]);
+        world.tick(&[Issued::want(0, rock(0), SHIPYARD, 1)]);
+        let unit = world.hold(0, CONSTRUCTOR, rock(0), 5.0);
         let stock = world.state[SeatId(0)].stockpile().stock();
-        let unit = world
-            .state
-            .entities()
-            .find(|entity| entity.row() == CONSTRUCTOR)
-            .expect("the constructor")
-            .id();
 
-        world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 0)]);
         world.run(8 * u64::from(TICKS_PER_SECOND));
 
         let state = &world.state;
@@ -608,12 +594,12 @@ mod tests {
 
         world.tick(&[
             Issued::numbered(0, 0, rock(0), STORAGE, 3),
-            Issued::numbered(0, 1, rock(0), EXTRACTOR, 2),
+            Issued::numbered(0, 1, rock(0), METALS_EXTRACTOR, 2),
         ]);
 
         let open = |world: &World, row| world.frames(0, rock(0), row);
         assert_eq!(open(&world, STORAGE), 1, "a shortfall of three opened more");
-        assert_eq!(open(&world, EXTRACTOR), 1, "rows build in parallel");
+        assert_eq!(open(&world, METALS_EXTRACTOR), 1, "rows build in parallel");
 
         for _ in 0..30 * u64::from(TICKS_PER_SECOND) {
             if world.count(0, rock(0), STORAGE) == 1 {
@@ -634,7 +620,7 @@ mod tests {
     fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
         let mut world = World::started(&[TeamId(0)]);
         world.tick(&[Issued::want(0, rock(0), CONSTRUCTOR, 1)]);
-        let depart = Tick(world.state.tick().0 + Send::FORMING_TICKS).next();
+        let depart = world.state.time().ahead(Send::FORMING_TICKS).next();
 
         world.tick(&[
             Issued::numbered(0, 0, rock(0), CONSTRUCTOR, 0),
@@ -652,7 +638,7 @@ mod tests {
         let second = u64::from(TICKS_PER_SECOND);
         assert!(arrive.0 - depart.0 > second, "the first candidate answered");
         for step in (second..arrive.0 - depart.0).step_by(second as usize) {
-            let earlier = Tick(depart.0 + step);
+            let earlier = depart.ahead(step);
             let target = state[rock(1)].orbit().at(earlier, gravity);
             assert_eq!(
                 Schedule::between(source, target, depart, earlier, limit, gravity),
@@ -724,16 +710,11 @@ mod tests {
         world.tick(&[
             Issued::numbered(0, 0, rock(0), SHIPYARD, 1),
             Issued::numbered(0, 1, rock(0), FRIGATE, 1),
-            Issued::want(1, rock(0), CONSTRUCTOR, 1),
         ]);
+        world.draft(1, rock(5));
+        let prey = world.hold(1, CONSTRUCTOR, rock(0), 5.0);
         let building = world.state[FRIGATE].cost.total() / 15.0;
         world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        let prey = world
-            .state
-            .entities()
-            .find(|entity| entity.seat() == SeatId(1))
-            .expect("the enemy constructor")
-            .id();
         let interval = u64::from(TICKS_PER_SECOND) / 2;
         assert!(
             world.shot_at(prey, interval + 1).is_some(),
@@ -746,7 +727,7 @@ mod tests {
         ]);
         world.run(Send::FORMING_TICKS + 1);
 
-        assert!(world.state[prey].is_flying(world.state.tick()));
+        assert!(world.state[prey].is_flying(world.state.time()));
         assert_eq!(
             world.shot_at(prey, interval + 1),
             None,
@@ -833,7 +814,7 @@ mod tests {
         let radial = home.pos.normalized().expect("a radius");
         let floor = world.state[rock(0)].radius() + Belt::SPACING_METERS;
         for already in 0..3 {
-            let spawn = spawn_body(&world.state, rock(0), world.state.tick());
+            let spawn = spawn_body(&world.state, rock(0), world.state.time());
             let out = floor + Belt::SPACING_METERS * f64::from(already);
             assert!(
                 spawn.pos.distance(home.pos + radial * out) < 1e-9,
@@ -851,7 +832,7 @@ mod tests {
         let home = world.state.rock_body(rock(0));
         let floor = world.state[rock(0)].radius() + Belt::SPACING_METERS;
 
-        let spawn = spawn_body(&world.state, rock(0), world.state.tick());
+        let spawn = spawn_body(&world.state, rock(0), world.state.time());
 
         assert!(spawn.pos.distance(home.pos) - floor < 1e-9);
     }
@@ -863,7 +844,7 @@ mod tests {
             let mut world = World::started(&[TeamId(0), TeamId(1)]);
             let home = rock(0);
             for at in 0..units {
-                let body = spawn_body(&world.state, home, world.state.tick());
+                let body = spawn_body(&world.state, home, world.state.time());
                 world.free((at % 2) as u8, FRIGATE, home, body);
             }
             let mut state = world.state;
@@ -884,7 +865,7 @@ mod tests {
             println!(
                 "{units} units at one rock: {:.3} ms a tick, against a budget of {:.3} ms",
                 each * 1e3,
-                Tick(1).seconds() * 1e3
+                Time(1).seconds() * 1e3
             );
         }
     }

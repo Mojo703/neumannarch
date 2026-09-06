@@ -1,15 +1,17 @@
 use super::row::{Row, Weapon, Weights};
 use crate::ids::RowId;
-use crate::materials::Materials;
+use crate::materials::{Material, Materials};
 use crate::real::Real;
 
 pub const CONSTRUCTOR: RowId = RowId(0);
-pub const EXTRACTOR: RowId = RowId(1);
-pub const STORAGE: RowId = RowId(2);
-pub const SHIPYARD: RowId = RowId(3);
-pub const RAIDER: RowId = RowId(4);
-pub const FRIGATE: RowId = RowId(5);
-pub const LANCER: RowId = RowId(6);
+pub const METALS_EXTRACTOR: RowId = RowId(1);
+pub const VOLATILES_EXTRACTOR: RowId = RowId(2);
+pub const ENERGY_EXTRACTOR: RowId = RowId(3);
+pub const STORAGE: RowId = RowId(4);
+pub const SHIPYARD: RowId = RowId(5);
+pub const RAIDER: RowId = RowId(6);
+pub const FRIGATE: RowId = RowId(7);
+pub const LANCER: RowId = RowId(8);
 
 const STORE: Materials = Materials::new(500.0, 500.0, 500.0);
 
@@ -37,14 +39,9 @@ pub(super) fn rows() -> Vec<Row> {
             },
             vec![Weapon::Build { rate: Real(3.0) }],
         ),
-        row(
-            "extractor",
-            Materials::new(40.0, 0.0, 10.0),
-            120.0,
-            0.0,
-            Weights::STILL,
-            vec![Weapon::Extract { rate: Real(2.0) }],
-        ),
+        extractor("metals extractor", Material::Metals),
+        extractor("volatiles extractor", Material::Volatiles),
+        extractor("energy extractor", Material::Energy),
         Row {
             capacity: STORE,
             ..row(
@@ -126,6 +123,20 @@ pub(super) fn rows() -> Vec<Row> {
     ]
 }
 
+fn extractor(name: &'static str, material: Material) -> Row {
+    row(
+        name,
+        Materials::new(20.0, 0.0, 5.0),
+        120.0,
+        0.0,
+        Weights::STILL,
+        vec![Weapon::Extract {
+            material,
+            rate: Real(2.0),
+        }],
+    )
+}
+
 fn row(
     name: &'static str,
     cost: Materials,
@@ -151,9 +162,11 @@ mod tests {
     use super::*;
     use crate::roster::{Kind, Roster};
 
-    const NAMED: [(RowId, &str); 7] = [
+    const NAMED: [(RowId, &str); 9] = [
         (CONSTRUCTOR, "constructor"),
-        (EXTRACTOR, "extractor"),
+        (METALS_EXTRACTOR, "metals extractor"),
+        (VOLATILES_EXTRACTOR, "volatiles extractor"),
+        (ENERGY_EXTRACTOR, "energy extractor"),
         (STORAGE, "storage"),
         (SHIPYARD, "shipyard"),
         (RAIDER, "raider"),
@@ -181,12 +194,37 @@ mod tests {
     #[test]
     fn the_shipped_structures_are_the_rows_with_no_manoeuvring() {
         for (id, row) in Roster::shipped().iter() {
-            let expected = if [EXTRACTOR, STORAGE, SHIPYARD].contains(&id) {
+            let structures = [
+                METALS_EXTRACTOR,
+                VOLATILES_EXTRACTOR,
+                ENERGY_EXTRACTOR,
+                STORAGE,
+                SHIPYARD,
+            ];
+            let expected = if structures.contains(&id) {
                 Kind::Structure
             } else {
                 Kind::Unit
             };
             assert_eq!(row.kind(), expected, "{}", row.name);
+        }
+    }
+
+    #[test]
+    fn one_shipped_row_extracts_each_material_and_none_extracts_another() {
+        let roster = Roster::shipped();
+        let extracting = |material| {
+            roster
+                .iter()
+                .filter(|(_, row)| row.extracts_of(material) > 0.0)
+                .map(|(id, _)| id)
+                .collect::<Vec<RowId>>()
+        };
+        assert_eq!(extracting(Material::Metals), [METALS_EXTRACTOR]);
+        assert_eq!(extracting(Material::Volatiles), [VOLATILES_EXTRACTOR]);
+        assert_eq!(extracting(Material::Energy), [ENERGY_EXTRACTOR]);
+        for (_, row) in roster.iter() {
+            assert!(row.extracts().count() <= 1, "{} pulls two", row.name);
         }
     }
 

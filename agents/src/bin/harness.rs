@@ -8,7 +8,7 @@ use neumannarch_sim::state::standings::Standings;
 use neumannarch_sim::state::{Batch, Command, Issued, Seat, State};
 use neumannarch_sim::{
     EntityId, Materials, Real, Retention, RockId, RowId, SeatId, Session, Setup, Stamped,
-    TICKS_PER_SECOND, TeamId, Tick, WINDOW_SECONDS,
+    TICKS_PER_SECOND, TeamId, Tick, Time, WINDOW_SECONDS,
 };
 
 const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
@@ -22,6 +22,10 @@ const TRACE_INTERVAL: u64 = 60;
 const SEATS: [SeatId; 2] = [SeatId(0), SeatId(1)];
 
 const SEED: u64 = 1;
+
+const MIRRORS: u64 = 8;
+
+const SETTLED: Time = Time(90 * TICKS_PER_SECOND as u64);
 
 const AXES: [(&str, Axis); 6] = [
     ("wander", |held, by| held.wander = Real(held.wander.0 * by)),
@@ -44,7 +48,7 @@ const FACTORS: [(&str, f64); 2] = [("x3", 3.0), ("/3", 1.0 / 3.0)];
 
 const FORCE: u32 = 40;
 
-const ENGAGEMENT: Tick = Tick(90 * TICKS_PER_SECOND as u64);
+const ENGAGEMENT: Time = Time(90 * TICKS_PER_SECOND as u64);
 
 const FIELD: RockId = RockId(0);
 
@@ -64,13 +68,17 @@ fn main() {
             matrix();
             true
         }
+        ["draft"] => {
+            drafts();
+            true
+        }
         ["sweep"] => {
             swept();
             true
         }
         _ => {
             println!(
-                "usage: harness match [turtle|expand|none] [turtle|expand|none]\n       harness replay\n       harness rollback\n       harness matrix\n       harness sweep"
+                "usage: harness match [turtle|expand|none] [turtle|expand|none]\n       harness replay\n       harness rollback\n       harness matrix\n       harness draft\n       harness sweep"
             );
             true
         }
@@ -161,7 +169,7 @@ fn rolled_back() -> bool {
         hashes[end.0 as usize]
     );
 
-    let mut late = Session::new(setup(CHECK_CLOCK), Retention::shipped(), &[])
+    let mut late = Session::new(setup(CHECK_CLOCK, SEED), Retention::shipped(), &[])
         .expect("a session owning no seat seats nothing to refuse");
     let mut deliveries = scrambled(&issued);
     let mut pending = issued.clone();
@@ -265,6 +273,80 @@ fn matrix() {
     }
 }
 
+fn drafts() {
+    println!(
+        "draft mirrors over {MIRRORS} seeds, {} minutes a match",
+        MATRIX_CLOCK.seconds() / 60.0
+    );
+    let mut won = 0;
+    let mut drawn = 0;
+    let mut spread = 0;
+    for seed in 0..MIRRORS {
+        let mirrored = |seat| {
+            Seated::new(
+                seat,
+                Box::new(Scripted::new(Personality::expand(), roster())),
+            )
+        };
+        let mut run = Match::seeded(MATRIX_CLOCK, seed, Vec::from(SEATS.map(mirrored)));
+        let mut settled = [0, 0];
+        while !run.over() {
+            run.tick();
+            if run.session.state().time() == SETTLED {
+                settled = held(run.session.state());
+            }
+        }
+        spread += usize::from(settled.iter().all(|rocks| *rocks >= 2));
+        let state = run.session.state();
+        let first = TeamId(state.draft().stages()[0].seat.0);
+        let leaders = state.standings().leaders();
+        let verdict = match leaders.as_slice() {
+            [leader] if *leader == first => {
+                won += 1;
+                "the first picker".to_string()
+            }
+            [leader] => format!("team {}", leader.0),
+            _ => {
+                drawn += 1;
+                "a draw".to_string()
+            }
+        };
+        println!(
+            "  seed {seed}: team {} picked first, {verdict} won; {} rocks at 90s {}-{}",
+            first.0,
+            drafted(state),
+            settled[0],
+            settled[1]
+        );
+    }
+    println!("  the first picker won {won} of {MIRRORS}, {drawn} drawn");
+    println!("  both teams held two rocks at ninety seconds in {spread} of {MIRRORS}");
+}
+
+fn held(state: &State) -> [u32; 2] {
+    let standings = state.standings();
+    let rocks = |at: usize| standings.teams().get(at).map_or(0, |team| team.rocks);
+    [rocks(0), rocks(1)]
+}
+
+fn drafted(state: &State) -> String {
+    let seats: Vec<String> = SEATS
+        .iter()
+        .map(|seat| {
+            let rocks: Vec<String> = state
+                .draft()
+                .placements(*seat)
+                .map(|(rock, _)| {
+                    let caps = state[rock].caps();
+                    format!("{} ({})", rock.0, caps.total() as u64)
+                })
+                .collect();
+            format!("seat {} took {}", seat.0, rocks.join(" and "))
+        })
+        .collect();
+    seats.join(", ")
+}
+
 fn compositions() -> Vec<(&'static str, Personality)> {
     let pinned = |name: &'static str, mix: Vec<(RowId, f64)>| {
         (
@@ -292,8 +374,12 @@ struct Match {
 
 impl Match {
     fn new(clock: Tick, seated: Vec<Seated>) -> Match {
+        Match::seeded(clock, SEED, seated)
+    }
+
+    fn seeded(clock: Tick, seed: u64, seated: Vec<Seated>) -> Match {
         Match {
-            session: Session::new(setup(clock), Retention::shipped(), &SEATS)
+            session: Session::new(setup(clock, seed), Retention::shipped(), &SEATS)
                 .expect("one seat per team seats both checks"),
             seated,
         }
@@ -322,9 +408,9 @@ impl Match {
     }
 }
 
-fn setup(clock: Tick) -> Setup {
+fn setup(clock: Tick, seed: u64) -> Setup {
     let teams = SEATS.iter().map(|seat| TeamId(seat.0)).collect();
-    Setup::new(teams, SEED, clock).expect("one seat per team is a match")
+    Setup::new(teams, seed, clock).expect("one seat per team is a match")
 }
 
 fn both() -> Vec<Seated> {
@@ -369,7 +455,7 @@ fn line(state: &State) -> String {
         .collect();
     let flying = state
         .entities()
-        .filter(|entity| entity.is_flying(state.tick()))
+        .filter(|entity| entity.is_flying(state.time()))
         .count();
     format!(
         "{:>4}s  {flying} flying, {} frames, {} posts  |  {}",
@@ -525,7 +611,7 @@ fn engage(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
         placing.insert(issued).expect("one want a seat");
     }
     let mut batch = placing;
-    while state.tick() < ENGAGEMENT && engagement.decided.is_none() {
+    while state.time() < ENGAGEMENT && engagement.decided.is_none() {
         let (next, _) = state.step(&batch);
         batch = Batch::default();
         state = next;

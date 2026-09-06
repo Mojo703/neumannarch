@@ -50,14 +50,17 @@ impl Agent for Scripted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neumannarch_sim::Post;
     use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, LANCER, SHIPYARD};
     use neumannarch_sim::state::{Batch, Command, Seat, State};
     use neumannarch_sim::state::{Rock, view::View};
     use neumannarch_sim::step::fire::Shots;
-    use neumannarch_sim::{Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Tick};
+    use neumannarch_sim::{
+        Material, Materials, RockId, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Time,
+    };
 
-    use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION};
+    use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION, Mix};
 
     const PLAYED: u64 = 420;
 
@@ -73,7 +76,7 @@ mod tests {
             .map(|team| Seat::new(team, STOCK, reserve.clone()))
             .to_vec();
         State::new(
-            Tick(clock * TICKS_PER_SECOND as u64),
+            Time(clock * TICKS_PER_SECOND as u64),
             0,
             Belt::GRAVITY,
             Roster::shipped(),
@@ -87,6 +90,19 @@ mod tests {
     }
 
     fn play(state: State, agents: Vec<(SeatId, Box<Scripted>)>) -> (State, f64) {
+        playing(state, agents, |state| state.standings().over())
+    }
+
+    fn drafted(agents: Vec<(SeatId, Box<Scripted>)>) -> State {
+        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        playing(state, agents, |state| !state.drafting()).0
+    }
+
+    fn playing(
+        state: State,
+        agents: Vec<(SeatId, Box<Scripted>)>,
+        done: impl Fn(&State) -> bool,
+    ) -> (State, f64) {
         let mut state = state;
         let mut playing: Vec<(Sequence, Box<Scripted>)> = agents
             .into_iter()
@@ -94,7 +110,7 @@ mod tests {
             .collect();
         let mut shots = Shots::default();
         let mut damage = 0.0;
-        while !state.standings().over() {
+        while !done(&state) {
             let mut batch = Batch::new();
             for (sequence, agent) in &mut playing {
                 let seat = sequence.seat();
@@ -117,39 +133,82 @@ mod tests {
         (state, damage)
     }
     #[test]
-    fn an_agent_opens_by_placing_its_reserve_at_one_rock() {
+    fn an_agent_asks_for_one_reserve_row_at_a_free_rock_only_once_its_window_is_open() {
         let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let picking = state.draft().stages()[0].seat;
         let mut agent = scripted(Personality::turtle());
 
-        let opening = agent.decide(&View::of(&state, SeatId(0), &Shots::default()));
+        let opening = agent.decide(&View::of(&state, picking, &Shots::default()));
+
+        assert_eq!(opening.len(), 1, "one structure, not the whole reserve");
+        let Command::Want { rock, row, count } = opening[0];
+        assert_eq!(count, 1);
+        assert!(
+            state[picking].reserved(row) > 0,
+            "a row it holds in reserve"
+        );
+        assert_eq!(state.draft().took(rock), None, "a rock no seat has taken");
+
+        let waiting = state.draft().stages()[1].seat;
+        let shut =
+            scripted(Personality::turtle()).decide(&View::of(&state, waiting, &Shots::default()));
 
         assert_eq!(
-            opening.len(),
-            state.seat(SeatId(0)).expect("a seat").reserve().len()
+            shut,
+            Vec::new(),
+            "the seat whose window is shut asks nothing"
         );
-        let rocks: Vec<_> = opening
-            .iter()
-            .map(|command| match command {
-                Command::Want { rock, count, .. } => {
-                    assert_eq!(*count, 1);
-                    *rock
-                }
-            })
-            .collect();
-        assert_eq!(rocks.first(), rocks.last(), "one rock, not several");
     }
 
     #[test]
-    fn two_agents_open_on_different_rocks() {
+    fn two_agents_draft_four_rocks_and_no_seat_takes_a_rock_another_took() {
+        let state = drafted(vec![
+            (SeatId(0), scripted(Personality::turtle())),
+            (SeatId(1), scripted(Personality::expand())),
+        ]);
+
+        let draft = state.draft();
+        let mine: Vec<RockId> = draft.placements(SeatId(0)).map(|(rock, _)| rock).collect();
+        let theirs: Vec<RockId> = draft.placements(SeatId(1)).map(|(rock, _)| rock).collect();
+
+        assert_eq!(mine.len(), 2, "a seat drafts one rock per reserve row");
+        assert_eq!(theirs.len(), 2);
+        assert!(
+            mine.iter().all(|rock| !theirs.contains(rock)),
+            "{mine:?} and {theirs:?} share a rock"
+        );
+        assert_eq!(draft.ended(), Some(state.tick().back(1)));
+    }
+
+    #[test]
+    fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
+        let opening = 8 * TICKS_PER_SECOND as u64;
         let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
-        let opening = |seat| {
-            scripted(Personality::turtle())
-                .decide(&View::of(&state, seat, &Shots::default()))
-                .first()
-                .copied()
+        let (state, _) = playing(
+            state,
+            vec![(SeatId(0), scripted(Personality::expand()))],
+            |state| state.time().0 >= opening,
+        );
+
+        let (rock, _) = state
+            .draft()
+            .placements(SeatId(0))
+            .find(|(_, row)| *row == CONSTRUCTOR)
+            .expect("it drafted its constructor somewhere");
+        let post = Post {
+            rock,
+            seat: SeatId(0),
         };
 
-        assert_ne!(opening(SeatId(0)), opening(SeatId(1)));
+        assert_eq!(
+            state.count(post, CONSTRUCTOR),
+            1,
+            "it stayed where it landed"
+        );
+        assert!(
+            state.frames_at(post).count() > 0,
+            "nothing built at {rock:?} in the opening eight seconds"
+        );
     }
 
     #[test]
@@ -201,21 +260,37 @@ mod tests {
     }
 
     #[test]
-    fn the_rock_an_agent_opens_on_is_one_of_the_richest() {
+    fn a_bot_drafts_the_rock_richest_in_what_the_mix_it_means_to_build_wants_most() {
         let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
-        let mut agent = scripted(Personality::turtle());
-        let view = View::of(&state, SeatId(0), &Shots::default());
+        let picking = state.draft().stages()[0].seat;
+        let view = View::of(&state, picking, &Shots::default());
+        let hungry_for = |row| {
+            let personality = Personality {
+                mix: Mix::Pinned(vec![(row, 1.0)]),
+                ..Personality::turtle()
+            };
+            let opening = scripted(personality).decide(&view);
+            let Command::Want { rock, .. } = *opening.first().expect("a pick");
+            view.terrain_of(rock).expect("a rock").caps
+        };
+        let richest = |material| {
+            view.terrain
+                .iter()
+                .map(|terrain| terrain.caps[material])
+                .fold(0.0, f64::max)
+        };
 
-        let opening = agent.decide(&view);
-        let Command::Want { rock, .. } = opening.first().copied().expect("an opening");
+        let metals = hungry_for(FRIGATE);
+        let energy = hungry_for(LANCER);
 
-        let best = view
-            .terrain
-            .iter()
-            .map(|terrain| terrain.caps.total())
-            .fold(0.0, f64::max);
-        let opened = view.terrain_of(rock).expect("a rock").caps.total();
-        assert!(opened >= 0.9 * best, "opened on {opened} against {best}");
-        assert_ne!(rock, RockId(20), "not the thinnest rock on the belt");
+        assert_eq!(
+            metals[Material::Metals],
+            richest(Material::Metals),
+            "the frigate's cost is metals before all else"
+        );
+        assert!(
+            energy[Material::Energy] >= metals[Material::Energy],
+            "the lancer wants energy more than the frigate does"
+        );
     }
 }

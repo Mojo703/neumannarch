@@ -2,9 +2,10 @@ use mirage_engine::egui::{Align2, Pos2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use neumannarch_protocol::{Crew, Lobby, Started};
-use neumannarch_sim::Tick;
+use neumannarch_sim::Time;
 use neumannarch_sim::belt::Belt;
 
+use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
 use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::Scene;
@@ -38,8 +39,7 @@ impl Loading {
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let points_per_pixel = 1.0 / ctx.pixels_per_point();
         let size = ctx.window_size();
         let viewport = Viewport::of(&self.camera, size, points_per_pixel);
         belt::draw(&self.scene, &viewport, ctx);
@@ -48,6 +48,7 @@ impl Loading {
         let scene = &self.scene;
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
+            Bars::at_rest(scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, Pos2::ZERO, false);
             panel.text(
                 BUILDING,
@@ -66,7 +67,7 @@ impl Loading {
         transport: &mut dyn Transport,
     ) -> Loading {
         let machine = Machine::of(started, crew, transport);
-        let scene = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO);
+        let scene = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO);
         let camera = BeltCamera::new(scene.centre(), lobby::PREVIEW_ZOOM);
         Loading {
             lobby,

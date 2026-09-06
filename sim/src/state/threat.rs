@@ -27,7 +27,7 @@ impl<'a> Threat<'a> {
         let plating = state[shooter.row()].plating.0;
         Some(Threat {
             state,
-            here: shooter.standing(state.tick())?,
+            here: shooter.standing(state.time())?,
             team: state[shooter.seat()].team(),
             from: state.body_of(shooter).pos,
             dealt: state
@@ -60,7 +60,7 @@ impl<'a> Threat<'a> {
 
     fn is_prey(&self, target: &Entity, assigned: &Assigned) -> bool {
         self.state[target.seat()].team() != self.team
-            && target.standing(self.state.tick()) == Some(self.here)
+            && target.standing(self.state.time()) == Some(self.here)
             && assigned.survived(target)
     }
 }

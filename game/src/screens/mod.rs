@@ -23,6 +23,7 @@ pub mod flow;
 pub mod held;
 pub mod loading;
 pub mod lobby;
+pub mod order;
 pub mod panel;
 pub mod panning;
 pub mod pause;

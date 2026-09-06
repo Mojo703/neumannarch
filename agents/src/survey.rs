@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use neumannarch_sim::roster::{Kind, Roster, Row};
 use neumannarch_sim::state::view::{Present, View};
-use neumannarch_sim::{Materials, RockId, RowId};
+use neumannarch_sim::{RockId, RowId};
 
 use crate::roles::Roles;
 
@@ -16,7 +16,6 @@ pub struct Survey<'a> {
     pub building: Vec<RockId>,
     pub developed: Vec<RockId>,
     pub home: Option<RockId>,
-    pub income: Materials,
     pub army: f64,
     pub enemy: f64,
     pub enemy_rocks: Vec<RockId>,
@@ -50,7 +49,6 @@ impl<'a> Survey<'a> {
             roster,
             roles,
             home: home(&mine, roster, &building),
-            income: income(view, roster, &mine),
             army: army(view, roster),
             enemy: threats.values().sum(),
             enemy_rocks: enemy_rocks(view, roster),
@@ -141,25 +139,6 @@ fn home(
         .iter()
         .copied()
         .max_by(|a, b| rate(*a).total_cmp(&rate(*b)).then(b.cmp(a)))
-}
-
-fn income(
-    view: &View,
-    roster: &Roster,
-    mine: &BTreeMap<RockId, BTreeMap<RowId, u32>>,
-) -> Materials {
-    let mut earned = Materials::ZERO;
-    for terrain in &view.terrain {
-        let rate: f64 = mine
-            .iter()
-            .filter(|(at, _)| **at == terrain.rock)
-            .flat_map(|(_, rows)| rows)
-            .filter_map(|(row, count)| roster.get(*row).map(|row| (row, *count)))
-            .map(|(row, count)| row.extracts().sum::<f64>() * count as f64)
-            .sum();
-        earned += terrain.caps.min(Materials::new(rate, rate, rate));
-    }
-    earned
 }
 
 fn army(view: &View, roster: &Roster) -> f64 {

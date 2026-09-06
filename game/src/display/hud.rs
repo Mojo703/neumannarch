@@ -3,7 +3,6 @@ use neumannarch_sim::Vec3;
 
 use crate::display::glyph_quad::seat_color32;
 use crate::display::scene::Scene;
-use crate::display::tint;
 use crate::display::viewport::Viewport;
 
 const FLIGHT_WIDTH: f32 = 1.5;
@@ -26,8 +25,6 @@ const CIRCLE_SEGMENTS: usize = 48;
 
 const ZONE_COLOUR: Color32 = Color32::from_gray(150);
 
-const ZONE_TINT: f32 = 0.6;
-
 const ZONE_ALPHA: f32 = 0.3;
 
 const RANGE_ALPHA: f32 = 0.22;
@@ -39,7 +36,7 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
             viewport,
             rock.pos,
             scene.zone,
-            tint::painted(ZONE_COLOUR, rock.caps, ZONE_TINT).gamma_multiply(ZONE_ALPHA),
+            ZONE_COLOUR.gamma_multiply(ZONE_ALPHA),
         );
     }
 

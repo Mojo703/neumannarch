@@ -2,11 +2,14 @@ use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use neumannarch_agents::Personality;
-use neumannarch_protocol::{Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, PlayerId, Refused};
+use neumannarch_protocol::{
+    Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, Occupant, PlayerId, Refused, Seating,
+};
 use neumannarch_sim::belt::Belt;
-use neumannarch_sim::{TICKS_PER_SECOND, TeamId, Tick};
+use neumannarch_sim::{TICKS_PER_SECOND, TeamId, Tick, Time};
 
 use crate::controls::Button;
+use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
 use crate::display::ease::Clock;
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
@@ -132,8 +135,7 @@ impl LobbyScreen {
             self.scene = belt_from(self.laid);
         }
 
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let points_per_pixel = 1.0 / ctx.pixels_per_point();
         let size = ctx.window_size();
         let window = panel::window_of(size, points_per_pixel);
         self.panning.drag(ctx, &mut self.camera, size, true);
@@ -146,6 +148,7 @@ impl LobbyScreen {
         let mut asked = Asked::default();
         ctx.ui(|ui| {
             hud::paint(&self.scene, &viewport, ui.painter());
+            Bars::at_rest(&self.scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             asked = self.paint(&panel, &Typed::this_frame(ui.ctx()));
         });
@@ -446,9 +449,8 @@ impl LobbyScreen {
         match holder {
             Holder::Open => "Open".to_string(),
             Holder::Closed => "Closed".to_string(),
-            Holder::Bot(bot) => titled(Personality::of(bot).name),
-            Holder::Player { player, .. } if player == self.me => "You".to_string(),
-            Holder::Player { player, .. } => player_name(player),
+            Holder::Bot(bot) => occupant_name(Occupant::Bot(bot), self.me),
+            Holder::Player { player, .. } => occupant_name(Occupant::Player(player), self.me),
         }
     }
 }
@@ -526,6 +528,21 @@ pub(crate) fn player_name(player: PlayerId) -> String {
     format!("Player {}", player.0 as u64 + 1)
 }
 
+pub fn occupant_name(occupant: Occupant, me: PlayerId) -> String {
+    match occupant {
+        Occupant::Bot(bot) => titled(Personality::of(bot).name),
+        Occupant::Player(player) if player == me => "You".to_string(),
+        Occupant::Player(player) => player_name(player),
+    }
+}
+
+pub fn seat_names(seating: &Seating, me: PlayerId) -> Vec<String> {
+    seating
+        .seats()
+        .map(|(_, occupant)| occupant_name(occupant, me))
+        .collect()
+}
+
 pub(crate) fn clock_name(clock: Tick) -> String {
     match clock.seconds() as u64 / 60 {
         1 => "1 minute".to_string(),
@@ -548,7 +565,7 @@ pub(crate) fn refusal_phrase(why: Refused) -> String {
 }
 
 fn belt_from(_seed: u64) -> Scene {
-    Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Tick::ZERO)
+    Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO)
 }
 
 #[cfg(test)]

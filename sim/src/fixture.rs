@@ -14,10 +14,10 @@ use crate::state::{Batch, Command, Flight, Issued, Motion, Rejected, Rock, Seat,
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
-use crate::time::Tick;
+use crate::time::{Tick, Time};
 use crate::vec3::Vec3;
 
-pub(crate) const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+pub(crate) const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
 const RING_RADIUS_METERS: f64 = 1.0e7;
 
@@ -36,8 +36,14 @@ impl World {
         World::timed(teams, CLOCK)
     }
 
-    pub fn timed(teams: &[TeamId], clock: Tick) -> World {
-        let setup = Setup::new(teams.to_vec(), 0, clock).expect("a match of these teams");
+    pub fn timed(teams: &[TeamId], clock: Time) -> World {
+        let mut world = World::drafting(teams, clock);
+        world.start_the_clock();
+        world
+    }
+
+    pub fn drafting(teams: &[TeamId], clock: Time) -> World {
+        let setup = Setup::new(teams.to_vec(), 0, Tick(clock.0)).expect("a match of these teams");
         World {
             state: State::start(&setup),
         }
@@ -48,7 +54,7 @@ impl World {
     }
 
     pub fn crewed(roster: Roster, seats: Vec<Seat>) -> World {
-        World {
+        let mut world = World {
             state: State::new(
                 CLOCK,
                 0,
@@ -57,6 +63,27 @@ impl World {
                 Belt::fixed(Belt::GRAVITY),
                 seats,
             ),
+        };
+        world.start_the_clock();
+        world
+    }
+
+    pub fn draft(&mut self, seat: u8, from: RockId) {
+        let picks: Vec<Issued> = self.state[SeatId(seat)]
+            .reserve()
+            .keys()
+            .enumerate()
+            .map(|(at, row)| {
+                let at = at as u32;
+                Issued::numbered(seat, at, RockId(from.0 + at), *row, 1)
+            })
+            .collect();
+        self.tick(&picks);
+    }
+
+    pub fn start_the_clock(&mut self) {
+        while !self.state.draft().over(self.state.tick()) {
+            self.tick(&[]);
         }
     }
 
@@ -65,7 +92,7 @@ impl World {
     }
 
     pub fn ring(gravity: Gravity, rocks: usize, teams: &[TeamId]) -> World {
-        World {
+        let mut world = World {
             state: State::new(
                 CLOCK,
                 0,
@@ -77,7 +104,9 @@ impl World {
                     .map(|team| Seat::new(*team, Materials::ZERO, BTreeMap::new()))
                     .collect(),
             ),
-        }
+        };
+        world.start_the_clock();
+        world
     }
 
     pub fn period(&self, rock: RockId) -> u64 {
@@ -255,6 +284,6 @@ fn ringed(at: usize, gravity: Gravity) -> Rock {
     let radius = RING_RADIUS_METERS + RING_SPACING_METERS * at as f64;
     let speed = (gravity.mu() / radius).sqrt();
     let body = Body::new(Vec3::new(radius, 0.0, 0.0), Vec3::new(0.0, 0.0, -speed));
-    let orbit = Orbit::from_body(body, Tick::ZERO, gravity).expect("a circular orbit");
+    let orbit = Orbit::from_body(body, Time::ZERO, gravity).expect("a circular orbit");
     Rock::new(orbit, RING_CAPS, ROCK_RADIUS_METERS)
 }

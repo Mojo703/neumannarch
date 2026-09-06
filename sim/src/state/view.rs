@@ -7,11 +7,12 @@ use crate::ids::{EntityId, RockId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
+use crate::state::draft::Draft;
 use crate::state::entity::Entity;
 use crate::state::standings::Standings;
 use crate::state::{Frame, Held};
 use crate::step::fire::{Exchange, Shots};
-use crate::time::Tick;
+use crate::time::{Tick, Time};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Berth {
@@ -36,6 +37,7 @@ pub struct Terrain {
     pub orbit: Orbit,
     pub caps: Materials,
     pub radius: f64,
+    pub pull: Materials,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,9 +66,13 @@ pub struct Plan {
 pub struct View {
     pub seat: SeatId,
     pub tick: Tick,
-    pub clock: Tick,
+    pub time: Time,
+    pub length: Time,
     pub gravity: Gravity,
+    pub draft: Draft,
     pub stockpile: Stockpile,
+    pub income: Materials,
+    pub spend: Materials,
     pub reserve: BTreeMap<RowId, u32>,
     pub compositions: Vec<Composition>,
     pub plans: Vec<Plan>,
@@ -80,17 +86,18 @@ pub struct View {
 
 impl View {
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View {
+        let seated = state.seat(seat);
         View {
             seat,
             tick: state.tick(),
-            clock: state.clock(),
+            time: state.time(),
+            length: state.length(),
             gravity: state.gravity(),
-            stockpile: state
-                .seat(seat)
-                .map_or_else(Stockpile::default, |seat| *seat.stockpile()),
-            reserve: state
-                .seat(seat)
-                .map_or_else(BTreeMap::new, |seat| seat.reserve().clone()),
+            draft: state.draft().clone(),
+            stockpile: seated.map_or_else(Stockpile::default, |seat| *seat.stockpile()),
+            income: seated.map_or(Materials::ZERO, Seat::income),
+            spend: seated.map_or(Materials::ZERO, Seat::spend),
+            reserve: seated.map_or_else(BTreeMap::new, |seat| seat.reserve().clone()),
             compositions: compositions(state, seat),
             plans: plans(state, seat),
             present: present(state),
@@ -119,7 +126,7 @@ impl View {
 
     pub fn rock_body(&self, id: RockId) -> Option<Body> {
         self.terrain_of(id)
-            .map(|terrain| terrain.orbit.at(self.tick, self.gravity))
+            .map(|terrain| terrain.orbit.at(self.time, self.gravity))
     }
 
     pub fn plan_of(&self, rock: RockId, row: RowId) -> Option<&Plan> {
@@ -130,7 +137,7 @@ impl View {
 }
 
 impl Berth {
-    fn of(entity: &Entity, now: Tick) -> Berth {
+    fn of(entity: &Entity, now: Time) -> Berth {
         match entity.flight() {
             Some(flight) if flight.has_departed(now) => Berth::Flying {
                 from: flight.source(),
@@ -210,7 +217,7 @@ fn planned(plans: &mut BTreeMap<(RockId, RowId), Plan>, rock: RockId, row: RowId
 fn building(state: &State, frame: &Frame) -> Building {
     Building {
         progress: frame.fraction(state[frame.row()].cost.total()),
-        starved_of: frame.starved_material(state.tick()),
+        starved_of: frame.starved_material(state.time()),
     }
 }
 
@@ -224,7 +231,7 @@ fn present(state: &State) -> Vec<Present> {
             body: state.body_of(entity),
             hp: entity.hp(),
             home: entity.home(),
-            at: Berth::of(entity, state.tick()),
+            at: Berth::of(entity, state.time()),
         })
         .collect()
 }
@@ -232,13 +239,12 @@ fn present(state: &State) -> Vec<Present> {
 fn terrain(state: &State) -> Vec<Terrain> {
     state
         .rocks()
-        .iter()
-        .enumerate()
-        .map(|(at, rock)| Terrain {
-            rock: RockId(at as u32),
+        .map(|(id, rock)| Terrain {
+            rock: id,
             orbit: *rock.orbit(),
             caps: rock.caps(),
             radius: rock.radius(),
+            pull: rock.pull(),
         })
         .collect()
 }
@@ -246,17 +252,30 @@ fn terrain(state: &State) -> Vec<Terrain> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TICKS_PER_SECOND;
     use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
+    use crate::roster::{
+        CONSTRUCTOR, FRIGATE, METALS_EXTRACTOR, SHIPYARD, STORAGE, VOLATILES_EXTRACTOR,
+    };
     use crate::state::{Issued, Send};
 
     const ROCK: RockId = RockId(0);
 
     const AWAY: RockId = RockId(1);
 
+    const SECOND: u64 = TICKS_PER_SECOND as u64;
+
     fn world() -> World {
         World::started(&[TeamId(0), TeamId(1)])
+    }
+
+    fn close(got: Materials, wanted: Materials) -> bool {
+        (got - wanted).map(f64::abs).total() < 1e-9
+    }
+
+    fn pulled(world: &World, seat: u8) -> Materials {
+        world.view(seat).terrain_of(ROCK).expect("every view").pull
     }
 
     fn holding(view: &View, rock: RockId, seat: u8, row: RowId) -> Held {
@@ -426,7 +445,7 @@ mod tests {
         assert_eq!(standings.teams()[0].rocks, 1, "team zero holds one rock");
         assert_eq!(standings.teams()[1].rocks, 0);
 
-        let ended = World::timed(&[TeamId(0), TeamId(1)], Tick::ZERO);
+        let ended = World::timed(&[TeamId(0), TeamId(1)], Time::ZERO);
 
         assert!(ended.view(0).standings.over());
     }
@@ -458,7 +477,7 @@ mod tests {
         assert_eq!(view.gravity, world.state.gravity());
         let rock = view.terrain[3];
         assert_eq!(
-            rock.orbit.at(view.tick, view.gravity),
+            rock.orbit.at(view.time, view.gravity),
             world.state.rock_body(rock.rock)
         );
     }
@@ -474,6 +493,88 @@ mod tests {
         assert_eq!(view.rock_body(at), Some(world.state.rock_body(at)));
         assert_eq!(view.terrain_of(RockId(99)), None);
         assert_eq!(view.rock_body(RockId(99)), None);
+    }
+
+    #[test]
+    fn a_seats_income_is_what_its_extractors_pulled_whether_the_store_kept_it_or_not() {
+        let mut world = world();
+        world.fix(0, METALS_EXTRACTOR, ROCK);
+        world.fix(0, VOLATILES_EXTRACTOR, ROCK);
+        let full = world.view(0).stockpile.stock();
+        world.run(SECOND);
+
+        let brimming = world.view(0);
+
+        assert_eq!(brimming.stockpile.stock(), full, "nothing was kept");
+        assert!(
+            close(brimming.income, Materials::new(2.0, 1.0, 0.0)),
+            "each extractor pulls its own material, gross"
+        );
+        assert_eq!(world.view(1).income, Materials::ZERO, "its own extractors");
+
+        world.fix(0, STORAGE, ROCK);
+        world.run(SECOND);
+        let before = world.view(0).stockpile.stock();
+        world.run(SECOND);
+
+        let growing = world.view(0);
+
+        assert!(
+            growing.stockpile.stock().total() < growing.stockpile.capacity().total(),
+            "the store left room to grow"
+        );
+        assert!(
+            close(growing.income, growing.stockpile.stock() - before),
+            "all of it kept"
+        );
+    }
+
+    #[test]
+    fn a_seats_spend_over_the_last_second_is_what_its_frames_drained() {
+        let mut world = world();
+        world.fix(0, CONSTRUCTOR, ROCK);
+        let before = world.view(0).stockpile.stock();
+        world.tick(&[Issued::want(0, ROCK, FRIGATE, 1)]);
+        world.run(SECOND - 1);
+
+        let view = world.view(0);
+
+        assert!(view.spend.total() > 0.0, "the frame drained something");
+        assert!(close(view.spend, before - view.stockpile.stock()));
+    }
+
+    #[test]
+    fn a_rocks_pull_over_the_last_second_sums_every_seat_and_stays_inside_its_cap() {
+        let mut world = world();
+        for seat in [0, 1] {
+            world.fix(seat, METALS_EXTRACTOR, ROCK);
+            world.fix(seat, VOLATILES_EXTRACTOR, ROCK);
+        }
+        world.run(SECOND);
+
+        let pull = pulled(&world, 1);
+
+        assert!(close(pull, Materials::new(4.0, 1.0, 0.0)), "{pull:?}");
+        assert_eq!(pull.min(world.state[ROCK].caps()), pull, "inside the caps");
+        assert_eq!(pull, pulled(&world, 0), "a pull is visible to every seat");
+    }
+
+    #[test]
+    fn the_view_reports_the_last_completed_second_and_holds_it_until_the_next_closes() {
+        let mut world = world();
+        world.fix(0, METALS_EXTRACTOR, ROCK);
+
+        assert_eq!(world.view(0).income, Materials::ZERO, "none completed");
+        world.run(SECOND - 1);
+        assert_eq!(world.view(0).income, Materials::ZERO, "still filling");
+        world.run(1);
+        let first = world.view(0).income;
+
+        world.run(SECOND - 1);
+
+        assert!(first.total() > 0.0);
+        assert_eq!(world.view(0).income, first, "it stands to the next");
+        assert_eq!(pulled(&world, 0), first, "the rock's pull with it");
     }
 
     #[test]

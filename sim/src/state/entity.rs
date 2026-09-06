@@ -2,7 +2,7 @@ use super::schedule::Flight;
 use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::orbit::body::Body;
 use crate::real::Real;
-use crate::time::Tick;
+use crate::time::Time;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Entity {
@@ -89,11 +89,11 @@ impl Entity {
         }
     }
 
-    pub fn is_flying(&self, now: Tick) -> bool {
+    pub fn is_flying(&self, now: Time) -> bool {
         self.flight().is_some_and(|flight| flight.has_departed(now))
     }
 
-    pub fn standing(&self, now: Tick) -> Option<RockId> {
+    pub fn standing(&self, now: Time) -> Option<RockId> {
         match self.flight() {
             None => Some(self.home),
             Some(flight) if flight.has_departed(now) => None,

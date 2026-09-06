@@ -1,0 +1,5 @@
+{
+  "env": {
+    "CLAUDE_CODE_DISABLE_IDE_MCP_SERVER": "1"
+  }
+}

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{RockId, SeatId, TICKS_PER_SECOND, Tick};
+use neumannarch_sim::{RockId, SeatId, TICKS_PER_SECOND, Time};
 
 use crate::display::scene::Arc;
 
@@ -18,8 +18,8 @@ pub struct Fights {
 struct Fight {
     started: f64,
     hp: f64,
-    recent: Vec<(Tick, f64)>,
-    last_shot: Tick,
+    recent: Vec<(Time, f64)>,
+    last_shot: Time,
 }
 
 impl Fights {
@@ -30,14 +30,14 @@ impl Fights {
             let key = (exchange.rock, exchange.seat);
             self.fights
                 .entry(key)
-                .or_insert_with(|| Fight::new(hp_at(&key), view.tick))
-                .last_shot = view.tick;
+                .or_insert_with(|| Fight::new(hp_at(&key), view.time))
+                .last_shot = view.time;
         }
         for (key, fight) in &mut self.fights {
-            fight.drain(hp_at(key), view.tick);
+            fight.drain(hp_at(key), view.time);
         }
         self.fights
-            .retain(|_, fight| view.tick.0.saturating_sub(fight.last_shot.0) <= FORGET);
+            .retain(|_, fight| view.time.0.saturating_sub(fight.last_shot.0) <= FORGET);
     }
 
     pub fn arcs(&self) -> impl Iterator<Item = (RockId, Arc)> + '_ {
@@ -48,7 +48,7 @@ impl Fights {
 }
 
 impl Fight {
-    fn new(hp: f64, tick: Tick) -> Fight {
+    fn new(hp: f64, tick: Time) -> Fight {
         Fight {
             started: hp,
             hp,
@@ -68,7 +68,7 @@ impl Fight {
         })
     }
 
-    fn drain(&mut self, hp: f64, tick: Tick) {
+    fn drain(&mut self, hp: f64, tick: Time) {
         let damage = self.hp - hp;
         if damage > 0.0 {
             self.recent.push((tick, damage));
@@ -95,8 +95,8 @@ fn totals(view: &View) -> BTreeMap<(RockId, SeatId), f64> {
 mod tests {
     use neumannarch_sim::belt::Belt;
     use neumannarch_sim::orbit::Body;
-    use neumannarch_sim::state::Standings;
     use neumannarch_sim::state::view::{Berth, Present};
+    use neumannarch_sim::state::{Draft, Standings};
     use neumannarch_sim::step::fire::Exchange;
     use neumannarch_sim::{EntityId, Materials, RockId, RowId, Stockpile, TeamId, Vec3};
 
@@ -109,10 +109,14 @@ mod tests {
     fn view(tick: u64, hp: f64, shooting: bool) -> View {
         View {
             seat: SEAT,
-            tick: Tick(tick),
-            clock: Tick(u64::MAX),
+            tick: neumannarch_sim::Tick(tick),
+            time: Time(tick),
+            length: Time(u64::MAX),
             gravity: Belt::GRAVITY,
+            draft: Draft::default(),
             stockpile: Stockpile::new(Materials::ZERO, Materials::ZERO),
+            income: Materials::ZERO,
+            spend: Materials::ZERO,
             reserve: BTreeMap::new(),
             compositions: Vec::new(),
             plans: Vec::new(),

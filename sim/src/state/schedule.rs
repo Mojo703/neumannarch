@@ -4,7 +4,7 @@ use crate::ids::RockId;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::lambert;
 use crate::orbit::universal::propagate;
-use crate::time::Tick;
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 const CORRECTIONS: u32 = 3;
@@ -20,12 +20,12 @@ pub struct Flight {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Schedule {
     burns: [Burn; 2],
-    arrive: Tick,
+    arrive: Time,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Burn {
-    from: Tick,
+    from: Time,
     ticks: NonZeroU32,
     accel: Vec3,
 }
@@ -43,19 +43,19 @@ impl Flight {
         self.schedule
     }
 
-    pub fn arrive(self) -> Tick {
+    pub fn arrive(self) -> Time {
         self.schedule.arrive
     }
 
-    pub fn departs(self) -> Tick {
+    pub fn departs(self) -> Time {
         self.schedule.departs()
     }
 
-    pub fn has_departed(self, now: Tick) -> bool {
+    pub fn has_departed(self, now: Time) -> bool {
         self.departs() <= now
     }
 
-    pub fn thrust(self, tick: Tick) -> Vec3 {
+    pub fn thrust(self, tick: Time) -> Vec3 {
         self.schedule.thrust(tick)
     }
 }
@@ -68,12 +68,12 @@ impl Schedule {
     pub(crate) fn between(
         source: Body,
         target: Body,
-        depart: Tick,
-        arrive: Tick,
+        depart: Time,
+        arrive: Time,
         limit: f64,
         gravity: Gravity,
     ) -> Option<Schedule> {
-        let span = Tick(arrive.0.checked_sub(depart.0)?).seconds();
+        let span = Time(arrive.0.checked_sub(depart.0)?).seconds();
         let mut aim = target;
         for _ in 0..=CORRECTIONS {
             let impulses = lambert::solve(source, aim, span, gravity)?;
@@ -90,22 +90,22 @@ impl Schedule {
         None
     }
 
-    pub fn arrive(self) -> Tick {
+    pub fn arrive(self) -> Time {
         self.arrive
     }
 
-    pub fn departs(self) -> Tick {
+    pub fn departs(self) -> Time {
         self.burns[0].from
     }
 
-    pub(crate) fn thrust(self, tick: Tick) -> Vec3 {
+    pub(crate) fn thrust(self, tick: Time) -> Vec3 {
         self.burns
             .iter()
             .find(|burn| burn.covers(tick))
             .map_or(Vec3::ZERO, |burn| burn.accel)
     }
 
-    fn coasting(impulses: [Vec3; 2], limit: f64, depart: Tick, arrive: Tick) -> Option<Schedule> {
+    fn coasting(impulses: [Vec3; 2], limit: f64, depart: Time, arrive: Time) -> Option<Schedule> {
         let first = Burn::starting(impulses[0], limit, depart)?;
         let last = Burn::ending(impulses[1], limit, arrive)?;
         let span = arrive.0.checked_sub(depart.0)?;
@@ -120,13 +120,13 @@ impl Schedule {
     fn flown(self, from: Body, gravity: Gravity) -> Body {
         let [first, last] = self.burns;
         let departed = first.flown(from, gravity);
-        let coast = Tick(last.from.0 - first.end().0).seconds();
+        let coast = Time(last.from.0 - first.end().0).seconds();
         last.flown(propagate(departed, gravity, coast), gravity)
     }
 }
 
 impl Burn {
-    fn starting(delta_v: Vec3, limit: f64, from: Tick) -> Option<Burn> {
+    fn starting(delta_v: Vec3, limit: f64, from: Time) -> Option<Burn> {
         let ticks = Burn::ticks(delta_v, limit)?;
         Some(Burn {
             from,
@@ -135,32 +135,32 @@ impl Burn {
         })
     }
 
-    fn ending(delta_v: Vec3, limit: f64, at: Tick) -> Option<Burn> {
+    fn ending(delta_v: Vec3, limit: f64, at: Time) -> Option<Burn> {
         let ticks = Burn::ticks(delta_v, limit)?;
         Some(Burn {
-            from: Tick(at.0.checked_sub(u64::from(ticks.get()))?),
+            from: Time(at.0.checked_sub(u64::from(ticks.get()))?),
             ticks,
             accel: Burn::held(delta_v, ticks),
         })
     }
 
     fn ticks(delta_v: Vec3, limit: f64) -> Option<NonZeroU32> {
-        NonZeroU32::new(libm::ceil(delta_v.length() / (limit * Tick(1).seconds())) as u32)
+        NonZeroU32::new(libm::ceil(delta_v.length() / (limit * Time(1).seconds())) as u32)
     }
 
     fn held(delta_v: Vec3, ticks: NonZeroU32) -> Vec3 {
-        delta_v * (1.0 / Tick(u64::from(ticks.get())).seconds())
+        delta_v * (1.0 / Time(u64::from(ticks.get())).seconds())
     }
 
     fn flown(self, from: Body, gravity: Gravity) -> Body {
         (0..self.ticks.get()).fold(from, |body, _| body.after_tick(self.accel, gravity))
     }
 
-    fn end(self) -> Tick {
-        Tick(self.from.0 + u64::from(self.ticks.get()))
+    fn end(self) -> Time {
+        Time(self.from.0 + u64::from(self.ticks.get()))
     }
 
-    fn covers(self, tick: Tick) -> bool {
+    fn covers(self, tick: Time) -> bool {
         self.from <= tick && tick < self.end()
     }
 }
@@ -175,7 +175,7 @@ mod tests {
 
     const RADIUS: f64 = 1.0e7;
 
-    const DEPART: Tick = Tick(120_000);
+    const DEPART: Time = Time(120_000);
 
     const LIMIT: f64 = 2.0;
 
@@ -187,11 +187,11 @@ mod tests {
             Vec3::new(RADIUS * cos, 0.0, -RADIUS * sin),
             Vec3::new(-speed * sin, 0.0, -speed * cos),
         );
-        Orbit::from_body(body, Tick::ZERO, MU).expect("a circular orbit")
+        Orbit::from_body(body, Time::ZERO, MU).expect("a circular orbit")
     }
 
     fn transfer(limit: f64, seconds: u64) -> Option<(Schedule, Body, Body)> {
-        let arrive = Tick(DEPART.0 + seconds * u64::from(TICKS_PER_SECOND));
+        let arrive = Time(DEPART.0 + seconds * u64::from(TICKS_PER_SECOND));
         let source = orbit(0.0).at(DEPART, MU);
         let target = orbit(2_000.0).at(arrive, MU);
         Schedule::between(source, target, DEPART, arrive, limit, MU)
@@ -210,7 +210,7 @@ mod tests {
 
         let mut body = source;
         for at in DEPART.0..schedule.arrive().0 {
-            body = body.after_tick(schedule.thrust(Tick(at)), MU);
+            body = body.after_tick(schedule.thrust(Time(at)), MU);
         }
 
         let off = body.pos.distance(target.pos);
@@ -227,11 +227,11 @@ mod tests {
         let (schedule, _, _) = solved();
 
         for at in DEPART.0..schedule.arrive().0 {
-            let thrust = schedule.thrust(Tick(at)).length();
+            let thrust = schedule.thrust(Time(at)).length();
             assert!(thrust <= LIMIT, "{thrust} at {at}");
         }
         assert!(
-            schedule.thrust(Tick(schedule.arrive().0)) == Vec3::ZERO,
+            schedule.thrust(Time(schedule.arrive().0)) == Vec3::ZERO,
             "a schedule thrusts past its arrival tick"
         );
     }

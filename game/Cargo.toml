@@ -17,6 +17,7 @@ neumannarch-sim = { path = "../sim" }
 image = { version = "0.25.10", optional = true, default-features = false, features = [
     "png",
 ] }
+usvg = { version = "0.45.1", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 neumannarch-server = { path = "../server", optional = true }

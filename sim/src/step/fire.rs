@@ -79,7 +79,7 @@ impl<'a> Fire<'a> {
     }
 
     fn ready(&self) -> Vec<Ready> {
-        let now = Moment::at(self.state.tick().next());
+        let now = Moment::at(self.state.time().next());
         let mut ready: Vec<Ready> = self
             .state
             .ready()
@@ -88,7 +88,7 @@ impl<'a> Fire<'a> {
             .filter(|ready| {
                 self.state
                     .entity(ready.entity())
-                    .is_some_and(|entity| !entity.is_flying(self.state.tick()))
+                    .is_some_and(|entity| !entity.is_flying(self.state.time()))
             })
             .cloned()
             .collect();
@@ -103,7 +103,7 @@ impl<'a> Fire<'a> {
 
     fn next_ready(&self, at: Moment, rate: f64) -> Moment {
         let interval = if rate > 0.0 { 1.0 / rate } else { f64::MAX };
-        at.after(interval).max(Moment::at(self.state.tick()))
+        at.after(interval).max(Moment::at(self.state.time()))
     }
 
     fn aim(&self, shooter: &Entity, range: f64, assigned: &Assigned) -> Option<Aim> {
@@ -132,7 +132,7 @@ impl Shots {
             let Some(entity) = state.entity(id) else {
                 return;
             };
-            let Some(rock) = entity.standing(state.tick()) else {
+            let Some(rock) = entity.standing(state.time()) else {
                 return;
             };
             let at = found.entry((rock, entity.seat())).or_insert((false, false));

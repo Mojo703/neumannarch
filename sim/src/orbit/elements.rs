@@ -2,7 +2,7 @@ use core::f64::consts::TAU;
 
 use crate::orbit::body::{Body, Gravity};
 use crate::real::Real;
-use crate::time::Tick;
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 const MAX_ITERATIONS: u32 = 40;
@@ -17,11 +17,11 @@ pub struct Orbit {
     p: Real,
     q: Real,
     lambda0: Real,
-    epoch: Tick,
+    epoch: Time,
 }
 
 impl Orbit {
-    pub fn new(a: f64, h: f64, k: f64, p: f64, q: f64, lambda0: f64, epoch: Tick) -> Option<Orbit> {
+    pub fn new(a: f64, h: f64, k: f64, p: f64, q: f64, lambda0: f64, epoch: Time) -> Option<Orbit> {
         let elliptic = a > 0.0 && h * h + k * k < 1.0;
         (elliptic && p.is_finite() && q.is_finite() && lambda0.is_finite()).then(|| Orbit {
             a: Real(a),
@@ -34,7 +34,7 @@ impl Orbit {
         })
     }
 
-    pub fn from_body(body: Body, tick: Tick, gravity: Gravity) -> Option<Orbit> {
+    pub fn from_body(body: Body, tick: Time, gravity: Gravity) -> Option<Orbit> {
         if body.specific_energy(gravity) >= 0.0 {
             return None;
         }
@@ -56,7 +56,7 @@ impl Orbit {
         Orbit::new(a, h, k, p, q, mean_longitude(longitude, h, k), tick)
     }
 
-    pub fn at(&self, tick: Tick, gravity: Gravity) -> Body {
+    pub fn at(&self, tick: Time, gravity: Gravity) -> Body {
         let (a, h, k) = (self.a.0, self.h.0, self.k.0);
         let mu = gravity.mu();
         let rate = (mu / (a * a * a)).sqrt();
@@ -91,7 +91,7 @@ impl Orbit {
         (h * h + k * k).sqrt()
     }
 
-    pub fn epoch(&self) -> Tick {
+    pub fn epoch(&self) -> Time {
         self.epoch
     }
 
@@ -151,7 +151,7 @@ mod tests {
 
     const RADIUS: f64 = 1.0e7;
 
-    const EPOCH: Tick = Tick(7_000);
+    const EPOCH: Time = Time(7_000);
 
     fn circular_speed() -> f64 {
         (MU.mu() / RADIUS).sqrt()
@@ -227,12 +227,12 @@ mod tests {
     fn an_orbit_at_one_period_is_back_at_its_start() {
         let period = 30_000.0;
         let gravity = Gravity::new(TAU * TAU * RADIUS * RADIUS * RADIUS / (period * period));
-        let orbit = Orbit::new(RADIUS, 0.1, -0.05, 0.02, 0.03, 1.0, Tick::ZERO)
+        let orbit = Orbit::new(RADIUS, 0.1, -0.05, 0.02, 0.03, 1.0, Time::ZERO)
             .expect("an eccentric inclined ellipse");
         assert!((orbit.period(gravity) - period).abs() < 1e-6 * period);
-        let start = orbit.at(Tick::ZERO, gravity);
+        let start = orbit.at(Time::ZERO, gravity);
         let ticks = period as u64 * u64::from(crate::TICKS_PER_SECOND);
-        let round = orbit.at(Tick(ticks), gravity);
+        let round = orbit.at(Time(ticks), gravity);
         assert_same_body(round, start, "one period on");
     }
 
@@ -244,12 +244,12 @@ mod tests {
             ("tilted circle", tilted_circle()),
         ] {
             let orbit = Orbit::from_body(body, EPOCH, MU).expect("a bound body");
-            for from in [Tick(0), EPOCH, Tick(500_000)] {
+            for from in [Time(0), EPOCH, Time(500_000)] {
                 let start = orbit.at(from, MU);
                 for ticks in [1, 1_000, 120_000, 1_200_000, 3_000_000] {
-                    let span = Tick(ticks).seconds();
+                    let span = Time(ticks).seconds();
                     let flown = propagate(start, MU, span);
-                    let read = orbit.at(Tick(from.0 + ticks), MU);
+                    let read = orbit.at(Time(from.0 + ticks), MU);
                     assert_same_body(read, flown, &format!("{name} from {from:?} for {ticks}"));
                 }
             }

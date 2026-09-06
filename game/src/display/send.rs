@@ -91,16 +91,23 @@ mod tests {
 
     fn placed() -> Local {
         let mut local = Local::start(1);
-        local.want(&[(rock(0), SHIPYARD, 1), (rock(0), CONSTRUCTOR, 1)]);
+        local.want(&[(rock(0), CONSTRUCTOR, 1)]);
+        local.want(&[(rock(2), SHIPYARD, 1)]);
         local
     }
     #[test]
     fn a_drag_starts_out_moving_every_unit_but_no_structure() {
         let local = placed();
+        let roster = local.session().state().roster();
 
         assert_eq!(
-            Sending::present(&local.view(), rock(0), local.session().state().roster()),
+            Sending::present(&local.view(), rock(0), roster),
             1,
+            "the constructor moves"
+        );
+        assert_eq!(
+            Sending::present(&local.view(), rock(2), roster),
+            0,
             "the shipyard never moves"
         );
     }

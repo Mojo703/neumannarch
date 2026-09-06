@@ -1,7 +1,10 @@
 use core::ops::Index;
 
 pub use row::{Kind, Row, Weapon, Weights};
-pub use shipped::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER, SHIPYARD, STORAGE};
+pub use shipped::{
+    CONSTRUCTOR, ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
+    VOLATILES_EXTRACTOR,
+};
 
 use crate::ids::RowId;
 use crate::real::Real;
@@ -139,7 +142,8 @@ mod tests {
     fn an_unknown_id_reads_nothing() {
         let roster = Roster::shipped();
         assert!(!roster.is_empty());
-        assert_eq!(roster.get(RowId(8)), None);
+        let past = u16::try_from(roster.len()).expect("a roster of at most 65536 rows");
+        assert_eq!(roster.get(RowId(past)), None);
         assert_eq!(roster.get(RowId(u16::MAX)), None);
     }
 }

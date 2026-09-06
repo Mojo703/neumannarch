@@ -162,6 +162,17 @@ fn primitive_covers(primitive: &Primitive, x: f32, y: f32) -> bool {
             let (ax, ay) = glyph::unit(*at);
             ((x - ax).hypot(y - ay) - glyph::unit_length(*radius)).abs() <= half_stroke
         }
+        Primitive::Path(rings) => {
+            let crossings = rings
+                .iter()
+                .flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)))
+                .map(|(&a, &b)| (glyph::unit(a), glyph::unit(b)))
+                .filter(|((ax, ay), (bx, by))| {
+                    (ay > &y) != (by > &y) && x < ax + (y - ay) * (bx - ax) / (by - ay)
+                })
+                .count();
+            crossings % 2 == 1
+        }
     }
 }
 
@@ -187,9 +198,11 @@ pub(crate) fn encode(colour: Color) -> [u8; 4] {
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::Material;
     use neumannarch_sim::roster::Roster;
 
     use super::*;
+    use crate::display::icon;
 
     const MAX_SHEET_DIFFERENCE: usize = 0;
 
@@ -213,13 +226,17 @@ mod tests {
                 Primitive::Line(vec![(at.0, at.1 - arm), (at.0, at.1 + arm)]),
             ]
         };
+        let extractor = |material| {
+            vec![
+                Primitive::Line(vec![(20.0, 40.0), (30.0, 48.0), (40.0, 40.0)]),
+                icon::of(material).placed((30.0, 26.0), 20.0),
+            ]
+        };
         match name {
             "constructor" => plus((30.0, 38.0), 8.5),
-            "extractor" => vec![Primitive::Line(vec![
-                (30.0 - 15.0, 32.0 - 15.0 * 0.7),
-                (30.0, 32.0 + 15.0 * 0.7),
-                (30.0 + 15.0, 32.0 - 15.0 * 0.7),
-            ])],
+            "metals extractor" => extractor(Material::Metals),
+            "volatiles extractor" => extractor(Material::Volatiles),
+            "energy extractor" => extractor(Material::Energy),
             "storage" => vec![Primitive::Ring {
                 at: (30.0, 30.0),
                 radius: 13.0,

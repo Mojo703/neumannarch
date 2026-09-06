@@ -257,7 +257,7 @@ mod tests {
         let rocks = neumannarch_sim::belt::Belt::fixed(neumannarch_sim::belt::Belt::GRAVITY);
         let body = |at: usize| {
             rocks[at].orbit().at(
-                neumannarch_sim::Tick::ZERO,
+                neumannarch_sim::Time::ZERO,
                 neumannarch_sim::belt::Belt::GRAVITY,
             )
         };

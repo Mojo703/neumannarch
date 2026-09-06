@@ -3,7 +3,7 @@ use crate::TICKS_PER_SECOND;
 use crate::fixture::World;
 use crate::ids::{SeatId, TeamId};
 use crate::orbit::body::Gravity;
-use crate::roster::{CONSTRUCTOR, EXTRACTOR, FRIGATE, LANCER, RAIDER};
+use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER};
 use crate::state::{Flight, Send};
 use crate::time::Tick;
 
@@ -56,7 +56,7 @@ fn a_force_held_for_a_rock_period_never_has_a_ship_inside_the_rock() {
     let mut world = world();
     let force: Vec<EntityId> = (0..12)
         .map(|_| {
-            let body = crate::step::spawn_body(&world.state, HOME, world.state.tick());
+            let body = crate::step::spawn_body(&world.state, HOME, world.state.time());
             world.free(0, FRIGATE, HOME, body)
         })
         .collect();
@@ -116,7 +116,7 @@ fn a_force_released_together_settles_inside_the_zone_at_the_spacing() {
 fn a_unit_chases_an_enemy_inside_the_zone_to_half_its_range() {
     let mut world = world();
     let hunter = world.hold(0, FRIGATE, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
-    let prey = world.fix(1, EXTRACTOR, HOME);
+    let prey = world.fix(1, METALS_EXTRACTOR, HOME);
 
     world.steers(seconds(60));
 
@@ -148,7 +148,7 @@ fn a_unit_leaves_an_enemy_outside_the_zone_alone() {
 fn an_unarmed_unit_never_closes_on_an_enemy_in_its_zone() {
     let mut world = world();
     let builder = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
-    let prey = world.fix(1, EXTRACTOR, HOME);
+    let prey = world.fix(1, METALS_EXTRACTOR, HOME);
     let before = world.body(builder).pos.distance(world.body(prey).pos);
     assert!(before > 20.0, "the builder starts on top of its enemy");
 
@@ -192,7 +192,7 @@ fn a_group_closes_on_its_fire_target_as_one_body() {
     let force: Vec<EntityId> = (0..8)
         .map(|at| world.hold(0, FRIGATE, HOME, 24.0 + f64::from(at) * 0.6))
         .collect();
-    let prey = world.fix(1, EXTRACTOR, HOME);
+    let prey = world.fix(1, METALS_EXTRACTOR, HOME);
     let range = world.state[FRIGATE].max_damage_range();
     let opening = spread(&world, &force);
 
@@ -226,7 +226,7 @@ fn a_flight_ends_at_the_tick_its_schedule_arrives() {
 
     world.steers(1);
     assert!(world.state[flier].flight().is_none(), "it is still flying");
-    assert_eq!(world.state.tick(), arrive);
+    assert_eq!(world.state.time(), arrive);
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn a_flying_unit_thrusts_by_its_schedule_and_by_separation_alone() {
     let send = Send::joining(&world.state, HOME, AWAY, SeatId(0), &[flier])
         .expect("a send across the ring");
     world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
-    while !world.state[flier].is_flying(world.state.tick()) {
+    while !world.state[flier].is_flying(world.state.time()) {
         world.state.advance();
     }
 

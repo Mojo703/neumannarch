@@ -6,15 +6,15 @@ use crate::ids::EntityId;
 use crate::orbit::body::Body;
 use crate::real::Real;
 use crate::roster::Row;
-use crate::time::Tick;
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 const DRIFT: [(f64, f64); 3] = [(0.037, 0.0), (0.053, 1.0), (0.071, 2.0)];
 
 const DRIFT_PHASES: u32 = 1024;
 
-pub fn wander(row: &Row, tick: Tick, id: EntityId) -> Vec3 {
-    drift(tick, id) * row.steering.wander.0
+pub fn wander(row: &Row, at: Time, id: EntityId) -> Vec3 {
+    drift(at, id) * row.steering.wander.0
 }
 
 pub fn separation(body: Body, row: &Row, neighbours: impl Iterator<Item = Vec3>) -> Vec3 {
@@ -61,7 +61,7 @@ fn toward(body: Body, row: &Row, weight: Real, place: Body, miss: f64) -> Vec3 {
     (place.vel + wanted - body.vel) * weight.0
 }
 
-fn drift(tick: Tick, id: EntityId) -> Vec3 {
+fn drift(tick: Time, id: EntityId) -> Vec3 {
     let spread = f64::from(id.0.wrapping_mul(2_654_435_761) % DRIFT_PHASES)
         * (TAU / f64::from(DRIFT_PHASES));
     let along =
@@ -257,10 +257,10 @@ mod tests {
     #[test]
     fn the_drift_is_a_bounded_smooth_function_of_the_tick_and_the_id() {
         let id = EntityId(7);
-        assert_eq!(drift(Tick(41), id), drift(Tick(41), id));
-        assert_ne!(drift(Tick(41), id), drift(Tick(41), EntityId(8)));
+        assert_eq!(drift(Time(41), id), drift(Time(41), id));
+        assert_ne!(drift(Time(41), id), drift(Time(41), EntityId(8)));
         for step in 0..2000 {
-            let tick = Tick(step * 13);
+            let tick = Time(step * 13);
             let here = drift(tick, id);
             assert!(here.length() <= 3.0_f64.sqrt(), "{here:?}");
             assert!(here.distance(drift(tick.next(), id)) < 0.01, "{here:?}");
@@ -270,10 +270,10 @@ mod tests {
     #[test]
     fn the_drift_turns_all_the_way_round_within_a_minute() {
         let id = EntityId(3);
-        let start = drift(Tick::ZERO, id);
+        let start = drift(Time::ZERO, id);
         let minute = 60 * u64::from(TICKS_PER_SECOND);
         let away = (0..minute)
-            .map(|at| drift(Tick(at), id).distance(start))
+            .map(|at| drift(Time(at), id).distance(start))
             .fold(0.0_f64, f64::max);
         assert!(
             away > 1.0,

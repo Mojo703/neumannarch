@@ -27,7 +27,7 @@ impl Fields {
             if entity.motion() == Motion::Fixed {
                 continue;
             }
-            if let Some(rock) = entity.standing(state.tick()) {
+            if let Some(rock) = entity.standing(state.time()) {
                 rolls.entry(rock).or_default().push(entity);
             }
         }
@@ -295,7 +295,7 @@ mod tests {
             "a unit whose send is forming stands where it is"
         );
 
-        while !world.state[flier].is_flying(world.state.tick()) {
+        while !world.state[flier].is_flying(world.state.time()) {
             world.state.advance();
         }
 

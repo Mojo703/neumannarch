@@ -7,7 +7,7 @@ use crate::orbit::elements::Orbit;
 use crate::roster::{CONSTRUCTOR, Roster, SHIPYARD};
 use crate::setup::Setup;
 use crate::state::{Rock, Seat, State};
-use crate::time::Tick;
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 const RADIUS: f64 = 1.0e7;
@@ -58,7 +58,7 @@ impl State {
             .map(|team| Seat::new(*team, STARTING_STOCK, reserve.clone()))
             .collect();
         State::new(
-            setup.clock(),
+            Time(setup.clock().0),
             setup.seed(),
             Belt::GRAVITY,
             Roster::shipped(),
@@ -81,7 +81,7 @@ fn rock(at: usize, gravity: Gravity) -> Rock {
         along * (speed * (1.0 + 0.5 * EXCURSION / radius * offset(at, 5)))
             + Vec3::new(0.0, speed * (THICKNESS / radius) * offset(at, 7), 0.0),
     );
-    let orbit = Orbit::from_body(body, Tick::ZERO, gravity)
+    let orbit = Orbit::from_body(body, Time::ZERO, gravity)
         .expect("a rock of the shipped belt is on a bound orbit");
     Rock::new(orbit, caps(at), ROCK_RADIUS)
 }
@@ -122,15 +122,15 @@ mod tests {
         let rocks = Belt::fixed(Belt::GRAVITY);
         let apart = 2.0 * Belt::ZONE_RADIUS_METERS;
         for minutes in 0..15 {
-            let tick = Tick(minutes * 60 * u64::from(TICKS_PER_SECOND));
+            let at = Time(minutes * 60 * u64::from(TICKS_PER_SECOND));
             let bodies: Vec<Body> = rocks
                 .iter()
-                .map(|rock| rock.orbit().at(tick, Belt::GRAVITY))
+                .map(|rock| rock.orbit().at(at, Belt::GRAVITY))
                 .collect();
             for (at, body) in bodies.iter().enumerate() {
                 for other in &bodies[at + 1..] {
                     let between = body.pos.distance(other.pos);
-                    assert!(between > apart, "{between} meters apart at {tick:?}");
+                    assert!(between > apart, "{between} meters apart at {at:?}");
                 }
             }
         }

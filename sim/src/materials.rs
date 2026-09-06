@@ -2,11 +2,7 @@ use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Materials {
-    pub metals: f64,
-    pub volatiles: f64,
-    pub energy: f64,
-}
+pub struct Materials([f64; 3]);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Material {
@@ -16,70 +12,60 @@ pub enum Material {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct PerSecond {
+    filling: Materials,
+    completed: Materials,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Stockpile {
     stock: Materials,
     capacity: Materials,
 }
 
+impl Material {
+    pub const EVERY: [Material; 3] = [Material::Metals, Material::Volatiles, Material::Energy];
+}
+
 impl Materials {
-    pub const ZERO: Materials = Materials::new(0.0, 0.0, 0.0);
+    pub const ZERO: Materials = Materials([0.0; 3]);
 
     pub const fn new(metals: f64, volatiles: f64, energy: f64) -> Materials {
-        Materials {
-            metals,
-            volatiles,
-            energy,
-        }
+        Materials([metals, volatiles, energy])
     }
 
     pub fn total(self) -> f64 {
-        self.metals + self.volatiles + self.energy
+        self.0.iter().sum()
     }
 
-    pub fn map(self, f: impl Fn(f64) -> f64) -> Materials {
-        Materials::new(f(self.metals), f(self.volatiles), f(self.energy))
+    pub(crate) fn map(self, f: impl Fn(f64) -> f64) -> Materials {
+        Materials(self.0.map(f))
     }
 
-    pub fn zip(self, other: Materials, f: impl Fn(f64, f64) -> f64) -> Materials {
-        Materials::new(
-            f(self.metals, other.metals),
-            f(self.volatiles, other.volatiles),
-            f(self.energy, other.energy),
-        )
+    fn zip(self, other: Materials, f: impl Fn(f64, f64) -> f64) -> Materials {
+        Materials(core::array::from_fn(|at| f(self.0[at], other.0[at])))
     }
 
     pub fn min(self, other: Materials) -> Materials {
         self.zip(other, f64::min)
     }
 
-    pub fn covers(self, demand: Materials) -> Materials {
-        self.zip(demand, |have, need| {
-            if need > 0.0 {
-                (have / need).min(1.0)
-            } else {
-                1.0
-            }
+    pub(crate) fn covers(self, demand: Materials) -> Materials {
+        self.zip(demand, |have, need| match need > 0.0 {
+            true => (have / need).min(1.0),
+            false => 1.0,
         })
     }
 
-    pub fn bottleneck(self, ratios: Materials) -> f64 {
+    pub(crate) fn binding(self, ratios: Materials) -> Option<(Material, f64)> {
         self.amounts()
             .filter(|(_, amount)| *amount > 0.0)
-            .map(|(material, _)| ratios[material])
-            .fold(1.0, f64::min)
+            .map(|(material, _)| (material, ratios[material]))
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
     }
 
-    pub fn binding_material(self, ratios: Materials) -> Option<Material> {
-        self.amounts()
-            .filter(|(_, amount)| *amount > 0.0)
-            .min_by(|(a, _), (b, _)| ratios[*a].total_cmp(&ratios[*b]))
-            .map(|(material, _)| material)
-    }
-
-    fn amounts(self) -> impl Iterator<Item = (Material, f64)> {
-        [Material::Metals, Material::Volatiles, Material::Energy]
-            .into_iter()
-            .map(move |material| (material, self[material]))
+    pub fn amounts(self) -> impl Iterator<Item = (Material, f64)> {
+        Material::EVERY.into_iter().zip(self.0)
     }
 }
 
@@ -101,19 +87,21 @@ impl Eq for Materials {}
 impl core::ops::Index<Material> for Materials {
     type Output = f64;
     fn index(&self, material: Material) -> &f64 {
-        match material {
-            Material::Metals => &self.metals,
-            Material::Volatiles => &self.volatiles,
-            Material::Energy => &self.energy,
-        }
+        &self.0[material as usize]
+    }
+}
+
+impl core::ops::IndexMut<Material> for Materials {
+    fn index_mut(&mut self, material: Material) -> &mut f64 {
+        &mut self.0[material as usize]
     }
 }
 
 impl Hash for Materials {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.metals.to_bits().hash(state);
-        self.volatiles.to_bits().hash(state);
-        self.energy.to_bits().hash(state);
+        for amount in self.0 {
+            amount.to_bits().hash(state);
+        }
     }
 }
 
@@ -126,9 +114,7 @@ impl Mul<f64> for Materials {
 
 impl PartialEq for Materials {
     fn eq(&self, other: &Self) -> bool {
-        self.metals.to_bits() == other.metals.to_bits()
-            && self.volatiles.to_bits() == other.volatiles.to_bits()
-            && self.energy.to_bits() == other.energy.to_bits()
+        self.0.map(f64::to_bits) == other.0.map(f64::to_bits)
     }
 }
 
@@ -142,6 +128,21 @@ impl Sub for Materials {
 impl SubAssign for Materials {
     fn sub_assign(&mut self, other: Materials) {
         *self = *self - other;
+    }
+}
+
+impl PerSecond {
+    pub(crate) fn completed(&self) -> Materials {
+        self.completed
+    }
+
+    pub(crate) fn fill(&mut self, materials: Materials) {
+        self.filling += materials;
+    }
+
+    pub(crate) fn close(&mut self) {
+        self.completed = self.filling;
+        self.filling = Materials::ZERO;
     }
 }
 
@@ -196,11 +197,11 @@ mod tests {
     }
 
     #[test]
-    fn the_bottleneck_ignores_materials_a_cost_does_not_use() {
+    fn the_binding_material_ignores_materials_a_cost_does_not_use() {
         let cost = Materials::new(40.0, 0.0, 10.0);
         let ratios = Materials::new(1.0, 0.0, 0.5);
-        assert_eq!(cost.bottleneck(ratios), 0.5);
-        assert_eq!(Materials::ZERO.bottleneck(ratios), 1.0);
+        assert_eq!(cost.binding(ratios), Some((Material::Energy, 0.5)));
+        assert_eq!(Materials::ZERO.binding(ratios), None);
     }
 
     #[test]

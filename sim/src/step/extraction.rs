@@ -1,75 +1,77 @@
 use std::collections::BTreeMap;
 
-use crate::ids::SeatId;
-use crate::materials::Materials;
+use crate::ids::{RockId, SeatId};
+use crate::materials::{Material, Materials};
 use crate::state::State;
 use crate::time::Tick;
 
-pub struct Extraction<'a> {
-    state: &'a State,
-}
-
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Income(Vec<(SeatId, Materials)>);
+pub struct Income(BTreeMap<(RockId, SeatId), Materials>);
 
-impl<'a> Extraction<'a> {
-    pub fn of(state: &'a State) -> Extraction<'a> {
-        Extraction { state }
-    }
-
-    pub fn run(self) -> Income {
-        let dt = Tick(1).seconds();
-        let mut income: BTreeMap<SeatId, Materials> = BTreeMap::new();
-        for (id, rock) in self.state.rocks().iter().enumerate() {
-            let rock_id = crate::RockId(id as u32);
-            let extractors: Vec<Extractor> = self
-                .state
-                .standing_at(rock_id)
-                .flat_map(|entity| {
-                    self.state[entity.row()]
-                        .extracts()
-                        .map(move |rate| Extractor {
-                            seat: entity.seat(),
-                            rate,
-                        })
-                        .collect::<Vec<Extractor>>()
-                })
-                .collect();
-            for (seat, taken) in extract(rock.caps(), &extractors, dt) {
-                *income.entry(seat).or_default() += taken;
-            }
-        }
-        Income(income.into_iter().collect())
-    }
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Extractor {
+    seat: SeatId,
+    material: Material,
+    rate: f64,
 }
 
 impl Income {
-    pub fn iter(&self) -> impl Iterator<Item = (SeatId, Materials)> + '_ {
-        self.0.iter().copied()
+    pub fn extracted(state: &State) -> Income {
+        let dt = Tick(1).seconds();
+        let mut taken = Income::default();
+        for (id, rock) in state.rocks() {
+            taken
+                .0
+                .extend(extract(id, rock.caps(), &Extractor::standing_at(state, id), dt).0);
+        }
+        taken
+    }
+
+    pub fn apply(&self, state: &mut State) {
+        for ((rock, seat), taken) in &self.0 {
+            state[*seat].earn(*taken);
+            state[*rock].extract(*taken);
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Extractor {
-    pub seat: SeatId,
-    pub rate: f64,
+impl Extractor {
+    fn standing_at(state: &State, rock: RockId) -> Vec<Extractor> {
+        let mut extractors = Vec::new();
+        for entity in state.standing_at(rock) {
+            let seat = entity.seat();
+            let pulls = state[entity.row()].extracts();
+            extractors.extend(pulls.map(|(material, rate)| Extractor {
+                seat,
+                material,
+                rate,
+            }));
+        }
+        extractors
+    }
 }
 
-pub fn extract(caps: Materials, extractors: &[Extractor], dt: f64) -> Vec<(SeatId, Materials)> {
-    let rates: Vec<f64> = extractors.iter().map(|e| e.rate).collect();
-    let metals = split(caps.metals, &rates);
-    let volatiles = split(caps.volatiles, &rates);
-    let energy = split(caps.energy, &rates);
+fn extract(rock: RockId, caps: Materials, extractors: &[Extractor], dt: f64) -> Income {
     let mut income: BTreeMap<SeatId, Materials> = BTreeMap::new();
-    for (((e, metals), volatiles), energy) in
-        extractors.iter().zip(metals).zip(volatiles).zip(energy)
-    {
-        *income.entry(e.seat).or_default() += Materials::new(metals, volatiles, energy) * dt;
+    for (material, cap) in caps.amounts() {
+        let pulling: Vec<&Extractor> = extractors
+            .iter()
+            .filter(|extractor| extractor.material == material)
+            .collect();
+        let rates: Vec<f64> = pulling.iter().map(|extractor| extractor.rate).collect();
+        for (extractor, share) in pulling.iter().zip(split(cap, &rates)) {
+            income.entry(extractor.seat).or_default()[material] += share * dt;
+        }
     }
-    income.into_iter().collect()
+    Income(
+        income
+            .into_iter()
+            .map(|(seat, taken)| ((rock, seat), taken))
+            .collect(),
+    )
 }
 
-pub fn split(cap: f64, rates: &[f64]) -> Vec<f64> {
+fn split(cap: f64, rates: &[f64]) -> Vec<f64> {
     if rates.iter().sum::<f64>() <= cap {
         return rates.to_vec();
     }
@@ -89,8 +91,22 @@ pub fn split(cap: f64, rates: &[f64]) -> Vec<f64> {
 mod tests {
     use super::*;
 
+    const ROCK: RockId = RockId(3);
+
     fn sum(shares: &[f64]) -> f64 {
         shares.iter().sum()
+    }
+
+    fn extractor(seat: u8, material: Material, rate: f64) -> Extractor {
+        Extractor {
+            seat: SeatId(seat),
+            material,
+            rate,
+        }
+    }
+
+    fn income(taken: [(SeatId, Materials); 2]) -> Income {
+        Income(taken.map(|(seat, taken)| ((ROCK, seat), taken)).into())
     }
 
     #[test]
@@ -146,33 +162,47 @@ mod tests {
     }
 
     #[test]
-    fn extract_sums_a_seats_extractors_and_orders_seats() {
+    fn a_materials_cap_is_split_among_the_extractors_of_that_material_alone() {
         let extractors = [
-            Extractor {
-                seat: SeatId(2),
-                rate: 1.0,
-            },
-            Extractor {
-                seat: SeatId(1),
-                rate: 2.0,
-            },
-            Extractor {
-                seat: SeatId(2),
-                rate: 3.0,
-            },
+            extractor(2, Material::Metals, 4.0),
+            extractor(1, Material::Volatiles, 4.0),
+            extractor(2, Material::Metals, 4.0),
         ];
-        let income = extract(Materials::new(100.0, 3.0, 0.0), &extractors, 0.5);
+
+        let taken = extract(ROCK, Materials::new(6.0, 1.0, 9.0), &extractors, 1.0);
+
         assert_eq!(
-            income,
-            vec![
-                (SeatId(1), Materials::new(1.0, 0.5, 0.0)),
-                (SeatId(2), Materials::new(2.0, 1.0, 0.0)),
-            ]
+            taken,
+            income([
+                (SeatId(1), Materials::new(0.0, 1.0, 0.0)),
+                (SeatId(2), Materials::new(6.0, 0.0, 0.0)),
+            ]),
+            "the metals pair split six, the lone volatiles took the cap, energy nobody"
+        );
+    }
+
+    #[test]
+    fn extract_sums_a_seats_extractors_at_the_rock_they_stand_at() {
+        let extractors = [
+            extractor(2, Material::Metals, 1.0),
+            extractor(1, Material::Metals, 2.0),
+            extractor(2, Material::Energy, 3.0),
+        ];
+
+        let taken = extract(ROCK, Materials::new(100.0, 3.0, 100.0), &extractors, 0.5);
+
+        assert_eq!(
+            taken,
+            income([
+                (SeatId(1), Materials::new(1.0, 0.0, 0.0)),
+                (SeatId(2), Materials::new(0.5, 0.0, 1.5)),
+            ])
         );
     }
 
     #[test]
     fn no_extractors_yield_no_income() {
-        assert!(extract(Materials::new(1.0, 1.0, 1.0), &[], 1.0).is_empty());
+        let bare = extract(ROCK, Materials::new(1.0, 1.0, 1.0), &[], 1.0);
+        assert_eq!(bare, Income::default());
     }
 }

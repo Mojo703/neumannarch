@@ -5,7 +5,6 @@ edition.workspace = true
 description = "The agent frontend of Neumannarch: scripted opponents and the harness"
 
 [dependencies]
-libm = "0.2"
 neumannarch-protocol = { path = "../protocol" }
 neumannarch-sim = { path = "../sim" }
 

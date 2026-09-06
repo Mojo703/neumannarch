@@ -3,7 +3,11 @@ use core::time::Duration;
 pub const SPAN_SECONDS: f64 = 0.02;
 
 pub fn toward(value: f64, target: f64, dt: f64) -> f64 {
-    let share = (dt / SPAN_SECONDS).clamp(0.0, 1.0);
+    toward_over(value, target, dt, SPAN_SECONDS)
+}
+
+pub fn toward_over(value: f64, target: f64, dt: f64, span: f64) -> f64 {
+    let share = (dt / span).clamp(0.0, 1.0);
     value + (target - value) * share
 }
 
@@ -47,5 +51,10 @@ mod tests {
         );
         assert_eq!(toward(1.0, 0.0, SPAN_SECONDS / 4.0), 0.75);
         assert_eq!(toward(3.0, 3.0, 0.016), 3.0, "a settled value holds");
+        assert_eq!(
+            toward_over(0.0, 1.0, 0.1, 0.4),
+            0.25,
+            "a longer span closes less"
+        );
     }
 }

@@ -189,9 +189,10 @@ mod tests {
     use super::*;
     use crate::TICKS_PER_SECOND;
     use crate::ids::{RockId, RowId, TeamId};
-    use crate::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD};
-    use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion};
+    use crate::roster::{FRIGATE, METALS_EXTRACTOR, SHIPYARD};
+    use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion, STAGE_SPAN, Stage};
     use crate::step::spawn_body;
+    use crate::time::Time;
 
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
@@ -199,12 +200,22 @@ mod tests {
 
     const UNTIL: Tick = Tick(40);
 
+    const LAST_STAGE: Tick = Tick(STAGE_SPAN.0 * (2 * BOTH.len() as u64 - 1));
+
+    const SECONDS_CLOSED: Tick = Tick(LAST_STAGE.0 + 5 * TICKS_PER_SECOND as u64);
+
+    const SPAN: u32 = SECONDS_CLOSED.0 as u32;
+
     fn setup() -> Setup {
         Setup::new(vec![TeamId(0), TeamId(1)], 11, CLOCK).expect("two seats are a match")
     }
 
     fn session(span: u32) -> Session {
         Session::new(setup(), window(span, 1), &BOTH).expect("both seats are seated")
+    }
+
+    fn kept(span: u32) -> Session {
+        Session::new(setup(), window(span, 8), &BOTH).expect("both seats are seated")
     }
 
     fn one_local() -> Session {
@@ -238,15 +249,36 @@ mod tests {
     }
 
     fn script() -> Vec<Stamped> {
-        vec![
-            stamped(3, want(0, 0, rock(0), SHIPYARD, 1)),
-            stamped(3, want(0, 1, rock(0), CONSTRUCTOR, 1)),
-            stamped(3, want(1, 0, rock(4), CONSTRUCTOR, 1)),
-            stamped(9, want(0, 2, rock(0), FRIGATE, 1)),
-            stamped(20, want(0, 3, rock(0), CONSTRUCTOR, 0)),
-            stamped(20, want(0, 4, rock(1), CONSTRUCTOR, 1)),
-            stamped(31, want(1, 1, rock(4), SHIPYARD, 1)),
-        ]
+        let mut script: Vec<Stamped> = stages()
+            .iter()
+            .enumerate()
+            .map(|(at, stage)| {
+                let seq = u32::try_from(at).expect("a stage a seat");
+                let placing = want(stage.seat.0, seq, rock(at as u32), stage.row, 1);
+                stamped(STAGE_SPAN.0 * at as u64, placing)
+            })
+            .collect();
+        script.push(stamped(3, want(0, 8, worked(), METALS_EXTRACTOR, 2)));
+        script.push(stamped(9, want(0, 9, worked(), FRIGATE, 1)));
+        script.sort_by_key(|stamped| (stamped.tick, stamped.issued.seat, stamped.issued.seq));
+        script
+    }
+
+    fn stages() -> Vec<Stage> {
+        State::start(&setup()).draft().stages().to_vec()
+    }
+
+    fn worked() -> RockId {
+        let mine = |stage: &&Stage| stage.seat == SeatId(0) && stage.row == SHIPYARD;
+        let at = stages().iter().position(|stage| mine(&stage));
+        rock(at.expect("seat zero drafts a shipyard") as u32)
+    }
+
+    fn early() -> Vec<Stamped> {
+        script()
+            .into_iter()
+            .filter(|stamped| stamped.tick < UNTIL)
+            .collect()
     }
 
     fn play(session: &mut Session, until: Tick) {
@@ -267,21 +299,36 @@ mod tests {
 
     #[test]
     fn commands_learned_late_and_out_of_order_reach_the_on_time_hash() {
-        let mut on_time = session(240);
-        play(&mut on_time, UNTIL);
+        let mut on_time = kept(SPAN);
+        play(&mut on_time, SECONDS_CLOSED);
+        assert_eq!(
+            on_time.state().draft().ended(),
+            Some(LAST_STAGE),
+            "the clock starts on the last placement"
+        );
+        let seat = &on_time.state()[SeatId(0)];
+        assert!(seat.income().total() > 0.0, "an extractor stands");
+        assert!(seat.spend().total() > 0.0, "a frame drains the stockpile");
+        assert!(
+            on_time.state()[worked()].pull().total() > 0.0,
+            "the rock is worked"
+        );
 
-        let mut late = session(240);
-        run(&mut late, UNTIL.0);
+        let mut late = kept(SPAN);
+        run(&mut late, SECONDS_CLOSED.0);
         assert_ne!(
-            late.hash_at(UNTIL),
-            on_time.hash_at(UNTIL),
+            late.hash_at(SECONDS_CLOSED),
+            on_time.hash_at(SECONDS_CLOSED),
             "the commands did nothing, so nothing is proven"
         );
         for stamped in script().into_iter().rev() {
             assert_eq!(late.insert(stamped), Ok(Rewound::From(stamped.tick)));
         }
 
-        assert_eq!(late.hash_at(UNTIL), on_time.hash_at(UNTIL));
+        assert_eq!(
+            late.hash_at(SECONDS_CLOSED),
+            on_time.hash_at(SECONDS_CLOSED)
+        );
         assert_eq!(late.state(), on_time.state());
     }
 
@@ -329,7 +376,7 @@ mod tests {
     #[test]
     fn the_commands_a_session_hands_out_are_those_stamped_before_its_settled_tick() {
         let mut session = one_local();
-        for stamped in script() {
+        for stamped in early() {
             assert!(session.insert(stamped).is_ok());
         }
         run(&mut session, UNTIL.0);
@@ -339,7 +386,7 @@ mod tests {
         assert_eq!(session.setup(), &setup());
         assert_eq!(
             session.commands(),
-            script()
+            early()
                 .into_iter()
                 .filter(|stamped| stamped.tick < settled)
                 .collect::<Vec<_>>()
@@ -422,7 +469,7 @@ mod tests {
             Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
             let place = rock(at % 21);
-            let body = spawn_body(&session.live, place, Tick::ZERO);
+            let body = spawn_body(&session.live, place, Time::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
                 FRIGATE,

@@ -1,13 +1,14 @@
 # Neumannarch — display language
 
-What the player sees, as the target. The only input is the sim's
-view. In the belt and on the HUD nothing is a numeral, a label or a
-panel except the wheels' counts and the stockpile's bars; every other
-fact is a shape, a position, a colour or a line. Screens are panels:
-every screen outside a match, and only pause and results inside one
-(Screens, below). Every control shows, while
-hovered, the change to a want it will make; what the sim does about that change is drawn in the next tick
-by the same rules as everything else, never predicted by the client.
+What the player sees, as the target. The only input is the sim's view.
+In the belt and on the HUD nothing is a numeral, a label or a panel
+except the wheels' counts, the stockpile's stock and net and the clock;
+every other fact is a shape, a position, a colour or a line. Screens are
+panels: every screen outside a match, and only pause and results inside
+one (Screens, below). Every control shows, while hovered, the change to
+a want it will make; what the sim does about that change is drawn in the
+next tick by the same rules as everything else, never predicted by the
+client.
 
 ## Ships are the truth
 
@@ -37,8 +38,8 @@ structures are drawn at their world positions and never on it.
 A wheel is a column of sections standing to the right of the rock,
 centred on the rock's height, their inner edges on an arc of a circle
 whose centre lies far to the rock's left, so the column bows toward the
-rock's right and the rock's left side stays clear for what a later
-section of this document puts there. A section is one upright strip for
+rock's right and the rock's left side carries the rock's resources
+(Resources, below). A section is one upright strip for
 one row, of the glyph's height, never a box: the row's glyph at its
 left, then its counted lines side by side along the strip, each a small
 mark and a numeral in the seat's colour, packed left to right so the
@@ -65,49 +66,49 @@ lines, left to right:
 
 Sections stand in a fixed order down the column, structures first and
 then units, each by cost. A section is drawn only where the row can be
-edited or stands here: the selected rock's own sector shows every row,
-a row with nothing here as its hollow glyph alone, dimmed, and every
-other sector shows only rows with a line to draw. When more than one
-seat holds a composition at a rock, the column stacks one sector per
-seat, seats in seat order from the top, each sector as tall as its own
-sections with a gap between sectors. A sector taller than a stated number of strips wraps into a
-second column beside the first, and a third past that, so a crowded
-rock stays within the screen's height; a column is as wide as its
-strips can grow, a digit and a signed step more than they show, so a
-count rising or a band's step appearing never runs under the next
-column. A sector carries a spine: a thin
-line in the seat's colour along its inner edge, on the arc.
+edited or stands here: the selected rock's own sector shows every row, a
+row with nothing here as its hollow glyph alone, dimmed, and every other
+sector shows only rows with a line to draw. When more than one seat
+holds a composition at a rock, the column stacks one sector per seat,
+seats in seat order from the top, each sector as tall as its own
+sections with a gap between sectors. A sector taller than a stated
+number of strips wraps into a second column beside the first, and a
+third past that, so a crowded rock stays within the screen's height; a
+column is as wide as its strips can grow, a digit and a signed step more
+than they show, so a count rising or a band's step appearing never runs
+under the next column. A sector carries a spine: a thin line in the
+seat's colour along its inner edge, on the arc.
 
 A wheel has two states and no third: full where the pointer or the
 selection rests, small elsewhere. Hover and selection are one state
 drawn one way, with the same scale, the same detail, the same bands and
 the same alpha; selection differs from hover only in that it outlasts
-the pointer and holds the camera's focus. While the pointer rests on another
-rock's wheel, the selected wheel keeps its full size and its bands and
-is drawn at the faint alpha of a small wheel, and is whole again when
-the pointer leaves; the hovered wheel is full and whole. Two wheels
-may be full at once, the hovered one whole and the selected one faint. A small wheel is drawn at a
-smaller scale and shows present and in transit, never wanted, and is
-drawn faint; a full wheel is drawn whole, and a faint wheel is painted
-before a whole one. Neither size follows the crowd, and a wheel covered
-by another is no fainter and does not move. Every change between the
-two states, by hover or by selection alike, eases over one short
-span, a constant of the display, never a jump. A faded glyph is blended toward the
-backdrop, never drawn translucent, so its strokes do not double where
-they cross. Which wheel is hovered is decided
-against the wheels as they stood before any grew, and a hovered wheel
-stays hovered until the pointer leaves its full extent by a margin of
-a band's width or more, so growing under the pointer never changes
-which wheel is hovered, an overshoot past an edge closes nothing, and
-nothing jitters. A bare rock under the pointer carries the seat's own wheel as
-a selected one does, every row hollow, so what a rock could hold shows
-before it is clicked.
+the pointer and holds the camera's focus. While the pointer rests on
+another rock's wheel, the selected wheel keeps its full size and its
+bands and is drawn at the faint alpha of a small wheel, and is whole
+again when the pointer leaves; the hovered wheel is full and whole. Two
+wheels may be full at once, the hovered one whole and the selected one
+faint. A small wheel is drawn at a smaller scale and shows present and
+in transit, never wanted, and is drawn faint; a full wheel is drawn
+whole, and a faint wheel is painted before a whole one. Neither size
+follows the crowd, and a wheel covered by another is no fainter and does
+not move. Every change between the two states, by hover or by selection
+alike, eases over one short span, a constant of the display, never a
+jump. A faded glyph is blended toward the backdrop, never drawn
+translucent, so its strokes do not double where they cross. Which wheel
+is hovered is decided against the wheels as they stood before any grew,
+and a hovered wheel stays hovered until the pointer leaves its full
+extent by a margin of a band's width or more, so growing under the
+pointer never changes which wheel is hovered, an overshoot past an edge
+closes nothing, and nothing jitters. A bare rock under the pointer
+carries the seat's own wheel as a selected one does, every row hollow,
+so what a rock could hold shows before it is clicked.
 
-The wheels' numerals and the stockpile's are the only numerals on the
-HUD. Ownership is colour, and colour is the team's; a team's seats share
-it. Hovering any line shows one short phrase beside it naming the row
-and saying what the line is and why: "Frigate here", "Frigate
-building", "Frigate short of metals", "No builder for Frigate",
+The wheels' numerals, the stockpile's and the clock's are the only
+numerals on the HUD. Ownership is colour, and colour is the team's; a
+team's seats share it. Hovering any line shows one short phrase beside
+it naming the row and saying what the line is and why: "Frigate here",
+"Frigate building", "Frigate short of metals", "No builder for Frigate",
 "Frigate wanted", "Frigate arriving from Rock 3", "Frigate leaving for
 Rock 5". Hovering a glyph shows the row's name alone.
 
@@ -123,7 +124,12 @@ Three rules produce every glyph from its row; no glyph is drawn by hand.
   them exactly, scaled to the glyph's size:
   - Build: a plus at (30,38) with arms of 8.5 on a triangle; at the
     centre with arms of 6.5 inside the ring on a square that also stores.
-  - Extract: a chevron at (30,32) with a half-width of 15, pointing down.
+  - Extract: a chevron centred at (30,44) with a half-width of 10 and a
+    half-height of 4, pointing down, and above it the weapon's
+    material's icon (Icons, below),
+    centred at (30,26) and 20 units wide, both wholly inside the
+    frame, so an extractor reads as one by its chevron and as which by
+    its icon.
   - Capacity: a ring at the centre, radius 13; radius 15 beside a plus.
   - Damage at short range: a dot at (30,34) of radius 8; at (30,29) of
     radius 7 when a belt sits below it.
@@ -135,18 +141,70 @@ Three rules produce every glyph from its row; no glyph is drawn by hand.
 
 Fill is the owner's colour; the outline is white.
 
-## The stockpile
+## The stockpile and the clock
 
-The match's one numeral exception on the HUD, shaped as Beyond All
-Reason shapes its resource bar. Across the top centre, one cell per
-material, metals then volatiles then energy. A cell is: the material's
-icon in its hue at the left; a bar filled to the stock over the capacity;
-two numerals stacked at the bar's right, the stock above the capacity;
-and after them the income and the spend per second as two signed
-numerals, "+3" and "-5", income above spend. A bar at capacity shows the
-loss as a faint overflow running off its right end. A wheel slot whose
-row the stock cannot fund one of dims, and its hover names the short
-material.
+One strip across the top centre, of the wheel strip's height: three
+cells, one per material, metals then volatiles then energy, and a
+fourth cell for the clock. A material's cell, left to right: the
+material's icon (Icons, below) at the glyph's height; a bar of one
+fixed length, the same for every cell, filled from its left end to the
+stock over the capacity in the material's hue; inside the bar at its
+left end the stock as a numeral in ink; after the bar's right end the
+net as a signed numeral in ink, "+3" or "-5", income less spend per
+second over the last second. Income is what the seat's extractors
+pulled, before the capacity clamp; spend is what its frames drained; a
+cancelled frame's refund is neither, and the stock's jump on a cancel
+is its own reading. Past the fill's tip a fainter segment of
+the hue extends by ten seconds of income, and inside the tip a darker
+segment of the hue marks ten seconds of spend, so which of the two is
+longer says which way the stock moves and how fast. At capacity the
+income segment runs past the bar's right end, and that overrun is the
+loss, at the fill's own alpha, never fainter; the net numeral sits
+after the overrun. An empty bar with a negative net is a stall and
+draws nothing more, since the frame's belt at the rock names the
+material. Hovering a cell shows two short phrases beneath it, one per
+line: "Metals 120 of 300" and "+12 in -9 out".
+
+The clock's cell is a bar of the same length in ink, full at the start,
+its fill shrinking from the right as the match runs, so the filled part
+is the time left; inside it at the left the elapsed minutes and seconds
+as a numeral. It has no icon, no hue and no hover.
+
+## Icons
+
+The three material icons are three SVG drawings in the game crate, one
+per material, each in the glyph's sixty-unit cell: metals a hex nut, a
+hexagon with a small hole; volatiles a drop; energy a bolt. Each is one
+closed path, no open stroke, no gradient and no text, parsed when the
+game starts into the same primitives the marks are made of, so it is
+stroked hollow or filled solid and tinted by whatever draws it, and it
+reads at the smallest glyph size, where thirty units are six pixels.
+An icon is drawn wherever a material is named: the Extract mark on an
+extractor's glyph, the stockpile's cells and the rock bars. They are
+the owner's drawings and the game reproduces them exactly, as it does
+the marks.
+
+## Resources
+
+Every rock carries three bars at its left, the mirror of the wheel at
+its right: one per material in the fixed order, stacked, each of one
+strip's height, their right ends on the same arc the wheel's sections
+stand on, mirrored, its centre far to the rock's right, and along that
+arc a spine in grey ink, the wheel's spine in no seat's colour. The
+icon stands at the bar's right end, nearest the rock, and the bar
+grows leftward from it. A bar's cap is a band of the material's hue
+dimmed toward the backdrop, its length the rock's cap for the material
+against the largest cap of any material on the belt, so a rich rock has
+long bands and a poor one short and the cap reads on any display; the
+pull over the last second by every extractor there of any seat is the
+same hue at full strength laid over the band from its right end, so
+fill against band is pull against cap. No outline carries the cap. A
+cap of zero draws no bar. The bars are drawn at every rock always and
+take the wheel's two states with it: full where the wheel is full,
+small elsewhere, easing between them as the wheel does, one drawing at
+two scales and two alphas, drawn at the wheel's pixel scale at every
+zoom, so a crowded belt overlaps them. Hovering a bar shows "Metals 12
+of 20".
 
 ## Fights
 
@@ -225,11 +283,11 @@ a cut.
 ## Ranges
 
 Every rock's zone is drawn as one faint circle at the zone's radius in
-the belt, always, in the rock's own tint from its caps. Every armed ship at a rock carries one faint circle at its longest
-weapon range in its owner's colour; a ship in flight carries none, since
-it is not a shooter. Both are painted on the HUD over the belt camera's
-projection, thin, at low alpha, and are never brighter than a wheel.
-Nothing else on the HUD states a distance.
+the belt, always, in one ink. Every armed ship at a rock carries one
+faint circle at its longest weapon range in its owner's colour; a ship
+in flight carries none, since it is not a shooter. Both are painted on
+the HUD over the belt camera's projection, thin, at low alpha, and are
+never brighter than a wheel. Nothing else on the HUD states a distance.
 
 ## Words on screen
 
@@ -303,8 +361,8 @@ follows Controls, above.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
-  zoom whose zone circles stand apart, each tinted by its rock's
-  caps; it redraws the instant the seed changes, and it pans and zooms
+  zoom whose zone circles stand apart, each rock wearing its resource
+  bars; it redraws the instant the seed changes, and it pans and zooms
   under the same controls as the match. Over it, at the left, the seats
   as a table of four rows, one per seat the match can hold, under column
   labels Holder, Team, Ready. Holder is a choice: You, Open, Closed, each
@@ -334,6 +392,37 @@ follows Controls, above.
   the room reports a settled tick whose hashes differ, the match holds,
   the HUD dims, the word Desynced and the tick are shown, and Leave
   returns to the title; it never resumes.
+- **The draft.** While the draft runs (DESIGN.md, Start), Play carries
+  one panel, the third inside a match, titled Draft: the order, drawn
+  as an initiative list at the screen's left edge over the belt, never
+  over the strip, in the screens' style, packed as tight as its rows
+  read. One row per stage in the order the stages run, the first round
+  then the second: the glyph of the structure that stage places,
+  filled in the seat's colour once placed and hollow in the seat's
+  colour before, so the glyph carries the seat; the seat's name (You,
+  the bot's name, a guest's name); and at the right a bar of one fixed
+  length: full before the stage begins, draining over the stage's span
+  while it runs, empty once it ran out unplaced and until its seat
+  places, and replaced by the rock's name, "Rock 3", once placed. After
+  the last stage ends, one last row, titled Clock, drains the grace.
+  The running stage's row is whole and every other row is faint, as a
+  small wheel is. The strip's clock cell reads 0:00 with its bar full.
+  A bot's name is drawn from a short list the bot's personality owns,
+  chosen by the seed and the seat, so a match's bots read as people
+  and two bots of one personality read apart; the lobby's Holder
+  choice still names the personality. A rock a draft placement stands
+  on shows the placed row on its small wheel as a wanted line in the
+  seat's colour, the one wanted line a small wheel ever shows, so a
+  taken rock reads as taken from the belt. Placing goes through the
+  wheel: a bare rock under the pointer shows the seat's own hollow
+  wheel. Every band is live during the draft, since a want accepted
+  then stands until the clock runs, except a reserve band before the
+  seat's first stage, disabled with "Not yet", and a reserve band at a
+  rock the draft has taken, disabled with "Rock taken", which are the
+  sim's own refusals and nothing more. Nothing is refused silently.
+  When the last placement lands or the grace runs out, the panel goes
+  over the one easing span every change on screen uses, and the
+  clock's numeral starts.
 - **Results.** At the clock: the final belt, held still, under a panel
   titled Results: one row per team in the match's colours, its rocks held
   as a count of rock glyphs and its army value, the winning row marked;

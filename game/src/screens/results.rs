@@ -6,11 +6,12 @@ use neumannarch_sim::state::State;
 use neumannarch_sim::state::standings::{Standings, Team};
 use neumannarch_sim::{SeatId, TeamId};
 
+use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
 use crate::display::glyph::{self, Frame, Glyph, Size};
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
 use crate::display::scene::{Fill, Scene};
-use crate::display::stencil::Stencil;
+use crate::display::stencil::{Cell, Stencil};
 use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::screens::control::{Controls, Rule};
@@ -65,8 +66,7 @@ impl Results {
     where
         G::Meshes: Holds<GlyphQuad> + Holds<Sphere>,
     {
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
+        let points_per_pixel = 1.0 / ctx.pixels_per_point();
         let size = ctx.window_size();
         let viewport = Viewport::of(&self.camera, size, points_per_pixel);
         belt::draw(&self.scene, &viewport, ctx);
@@ -80,6 +80,7 @@ impl Results {
         let mut picked = None;
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
+            Bars::at_rest(scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             picked = paint(&panel, standings, teams, rematch);
         });
@@ -113,11 +114,13 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
     for at in 0..team.rocks {
         Stencil {
             glyph: &ROCK_HELD,
-            centre: Pos2::new(
-                rect.left() + ROCKS_FROM + at as f32 * ROCK_STEP,
-                rect.center().y,
-            ),
-            half: glyph::HALF,
+            cell: Cell {
+                centre: Pos2::new(
+                    rect.left() + ROCKS_FROM + at as f32 * ROCK_STEP,
+                    rect.center().y,
+                ),
+                half: glyph::HALF,
+            },
             colour: seat_color32(colour),
             fill: Fill::Solid,
             alpha: 1.0,

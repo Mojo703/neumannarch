@@ -39,14 +39,14 @@ impl<'a> Holding<'a> {
         };
         let row = &self.state[entity.row()];
         let apart = terms::separation(body, row, self.neighbours(entity, body));
-        let Some(here) = entity.standing(self.state.tick()) else {
+        let Some(here) = entity.standing(self.state.time()) else {
             return Some(apart.capped(row.manoeuvring.0));
         };
         let sample = fields.at(entity.id());
         let rock = &self.state[here];
         let rock_body = self.state.rock_body(here);
         let sum = apart
-            + terms::wander(row, self.state.tick(), entity.id())
+            + terms::wander(row, self.state.time(), entity.id())
             + terms::returning(body, row, rock_body, rock.strayed(rock_body, body.pos))
             + terms::cohesion(row, sample)
             + terms::caution(row, sample)

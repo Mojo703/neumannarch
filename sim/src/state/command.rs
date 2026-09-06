@@ -55,6 +55,8 @@ pub enum Rejected {
     NoSuchRock,
     NoSuchRow,
     TooMany,
+    NotYet,
+    RockTaken,
 }
 
 impl Sequence {
@@ -120,8 +122,23 @@ impl State {
             seat: issued.seat,
         };
         self.validate(post, row, count)?;
+        if count == 1 {
+            self.pick(post, row)?;
+        }
         self.set_want(post, row, count);
         Ok(())
+    }
+
+    fn pick(&mut self, post: Post, row: RowId) -> Result<(), Rejected> {
+        match self.draft.awaits(post.seat, row) {
+            Some(true) if self.draft.took(post.rock).is_none() => {
+                self.draft.place(post.rock, post.seat, row, self.tick);
+                Ok(())
+            }
+            Some(true) => Err(Rejected::RockTaken),
+            Some(false) => Err(Rejected::NotYet),
+            None => Ok(()),
+        }
     }
 
     fn validate(&self, post: Post, row: RowId, count: u32) -> Result<(), Rejected> {

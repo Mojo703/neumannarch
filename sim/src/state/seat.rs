@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::ids::{RowId, TeamId};
-use crate::materials::{Materials, Stockpile};
+use crate::materials::{Materials, PerSecond, Stockpile};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Seat {
@@ -10,6 +10,8 @@ pub struct Seat {
     stockpile: Stockpile,
     base_capacity: Materials,
     reserve: BTreeMap<RowId, u32>,
+    income: PerSecond,
+    spend: PerSecond,
 }
 
 impl Seat {
@@ -20,6 +22,8 @@ impl Seat {
             stockpile: Stockpile::new(stock, stock),
             base_capacity: stock,
             reserve,
+            income: PerSecond::default(),
+            spend: PerSecond::default(),
         }
     }
 
@@ -39,6 +43,14 @@ impl Seat {
         self.base_capacity
     }
 
+    pub fn income(&self) -> Materials {
+        self.income.completed()
+    }
+
+    pub fn spend(&self) -> Materials {
+        self.spend.completed()
+    }
+
     pub fn reserve(&self) -> &BTreeMap<RowId, u32> {
         &self.reserve
     }
@@ -53,6 +65,25 @@ impl Seat {
 
     pub(crate) fn stockpile_mut(&mut self) -> &mut Stockpile {
         &mut self.stockpile
+    }
+
+    pub(crate) fn refund(&mut self, materials: Materials) {
+        self.stockpile.add(materials);
+    }
+
+    pub(crate) fn earn(&mut self, income: Materials) {
+        self.stockpile.add(income);
+        self.income.fill(income);
+    }
+
+    pub(crate) fn drain(&mut self, cost: Materials) {
+        let taken = self.stockpile.spend(cost);
+        self.spend.fill(taken);
+    }
+
+    pub(crate) fn close_second(&mut self) {
+        self.income.close();
+        self.spend.close();
     }
 
     pub(crate) fn take_reserved(&mut self, row: RowId) -> bool {

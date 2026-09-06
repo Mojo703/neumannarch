@@ -1,4 +1,4 @@
-use crate::materials::Materials;
+use crate::materials::{Material, Materials};
 use crate::real::Real;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +52,7 @@ pub enum Weapon {
         rate: Real,
     },
     Extract {
+        material: Material,
         rate: Real,
     },
 }
@@ -100,8 +101,15 @@ impl Row {
         self.weapons.iter().filter_map(Weapon::build_rate)
     }
 
-    pub fn extracts(&self) -> impl Iterator<Item = f64> + '_ {
-        self.weapons.iter().filter_map(Weapon::extract_rate)
+    pub fn extracts(&self) -> impl Iterator<Item = (Material, f64)> + '_ {
+        self.weapons.iter().filter_map(Weapon::extraction)
+    }
+
+    pub fn extracts_of(&self, material: Material) -> f64 {
+        self.extracts()
+            .filter(|(pulled, _)| *pulled == material)
+            .map(|(_, rate)| rate)
+            .sum()
     }
 }
 
@@ -127,9 +135,9 @@ impl Weapon {
         }
     }
 
-    fn extract_rate(&self) -> Option<f64> {
+    fn extraction(&self) -> Option<(Material, f64)> {
         match *self {
-            Weapon::Extract { rate } => Some(rate.0),
+            Weapon::Extract { material, rate } => Some((material, rate.0)),
             Weapon::Damage { .. } | Weapon::Build { .. } => None,
         }
     }
@@ -149,6 +157,13 @@ mod tests {
             plating: Real(0.0),
             capacity: Materials::ZERO,
             weapons,
+        }
+    }
+
+    fn extract(material: Material, rate: f64) -> Weapon {
+        Weapon::Extract {
+            material,
+            rate: Real(rate),
         }
     }
 
@@ -192,12 +207,18 @@ mod tests {
             0.0,
             vec![
                 Weapon::Build { rate: Real(3.0) },
-                Weapon::Extract { rate: Real(2.0) },
+                extract(Material::Volatiles, 2.0),
                 damage(1.0, 1.0, 1.0),
                 Weapon::Build { rate: Real(15.0) },
+                extract(Material::Volatiles, 0.5),
             ],
         );
         assert_eq!(mixed.builds().collect::<Vec<_>>(), [3.0, 15.0]);
-        assert_eq!(mixed.extracts().collect::<Vec<_>>(), [2.0]);
+        assert_eq!(
+            mixed.extracts().collect::<Vec<_>>(),
+            [(Material::Volatiles, 2.0), (Material::Volatiles, 0.5)]
+        );
+        assert_eq!(mixed.extracts_of(Material::Volatiles), 2.5);
+        assert_eq!(mixed.extracts_of(Material::Metals), 0.0);
     }
 }

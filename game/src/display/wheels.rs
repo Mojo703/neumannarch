@@ -2,28 +2,46 @@ use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Pos2};
 use neumannarch_sim::roster::Roster;
-use neumannarch_sim::{RockId, RowId, SeatId};
+use neumannarch_sim::state::Draft;
+use neumannarch_sim::{Material, RockId, RowId, SeatId};
 
+use crate::display::bars::Bars;
 use crate::display::ease;
+use crate::display::label::{self, titled};
 use crate::display::scene::{Hover, Scene, Shown, WheelBand};
 use crate::display::viewport::Viewport;
 use crate::display::wheel::{Bands, Detail, Footprint, Placed, Sizing, Wheel};
 
-const RESTING_ALPHA: f32 = 0.7;
+pub const RESTING_ALPHA: f32 = 0.7;
 
 const HOVER_MARGIN: f32 = 48.0;
 
+pub const NOT_YET: &str = "Not yet";
+
+pub const ROCK_TAKEN: &str = "Rock taken";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Aim {
+pub struct Aim<'a> {
     pub viewer: SeatId,
     pub pointer: Option<Pos2>,
     pub hovered: Option<RockId>,
     pub step: u32,
     pub wants: BTreeMap<(RockId, RowId), u32>,
+    pub draft: Option<&'a Draft>,
 }
 
-impl Aim {
-    fn bands_at(&self, rock: RockId) -> Bands {
+impl Aim<'_> {
+    pub fn refusal(&self, rock: RockId, row: RowId) -> Option<&'static str> {
+        let draft = self.draft.filter(|draft| draft.ended().is_none())?;
+        match draft.awaits(self.viewer, row) {
+            None => None,
+            Some(false) => Some(NOT_YET),
+            Some(true) if draft.took(rock).is_some() => Some(ROCK_TAKEN),
+            Some(true) => None,
+        }
+    }
+
+    fn bands_at(&self, rock: RockId, roster: &Roster) -> Bands {
         Bands {
             step: self.step,
             wants: self
@@ -31,6 +49,10 @@ impl Aim {
                 .iter()
                 .filter(|((at, _), _)| *at == rock)
                 .map(|((_, row), want)| (*row, *want))
+                .collect(),
+            refused: roster
+                .iter()
+                .filter_map(|(row, _)| Some((row, self.refusal(rock, row)?.to_string())))
                 .collect(),
         }
     }
@@ -99,8 +121,50 @@ impl Ease for Motion {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Spoken {
+    Row {
+        row: RowId,
+        shown: Option<Shown>,
+    },
+    Bar {
+        material: Material,
+        pull: f64,
+        cap: f64,
+    },
+    Refused {
+        why: String,
+    },
+}
+
+impl Spoken {
+    pub fn phrase(&self, roster: &Roster) -> String {
+        match self {
+            Spoken::Row { row, shown } => {
+                let name = titled(roster[*row].name);
+                match shown {
+                    Some(shown) => shown.entry.phrase(&name),
+                    None => name,
+                }
+            }
+            Spoken::Refused { why } => why.clone(),
+            Spoken::Bar {
+                material,
+                pull,
+                cap,
+            } => format!(
+                "{} {} of {}",
+                label::material(*material),
+                pull.round() as u64,
+                cap.round() as u64
+            ),
+        }
+    }
+}
+
 pub struct Wheels {
     wheels: Vec<Wheel>,
+    bars: Bars,
     hovered: Option<RockId>,
 }
 
@@ -109,28 +173,35 @@ impl Wheels {
         scene: &Scene,
         roster: &Roster,
         viewport: &Viewport,
-        aim: &Aim,
+        aim: &Aim<'_>,
         ease: &mut impl Ease,
     ) -> Wheels {
         let footprints = footprints(scene, roster, viewport, aim.viewer);
         let resting = laid(&footprints, None, scene.selection);
         let hovered = hovered(&footprints, &resting, aim);
-        let placed = match hovered {
+        let placed: Vec<Placed> = match hovered {
             None => resting,
             Some(_) => laid(&footprints, hovered, scene.selection),
-        };
+        }
+        .into_iter()
+        .map(|placed| placed.eased(ease))
+        .collect();
         let mut wheels: Vec<Wheel> = placed
             .iter()
             .filter_map(|placed| {
                 let view = scene.wheel_of(placed.rock)?;
-                let bands =
-                    (placed.sizing.detail == Detail::Full).then(|| aim.bands_at(placed.rock));
-                let wheel = Wheel::over(placed.eased(ease), view, roster, aim.viewer, bands);
+                let bands = (placed.sizing.detail == Detail::Full)
+                    .then(|| aim.bands_at(placed.rock, roster));
+                let wheel = Wheel::over(*placed, view, roster, aim.viewer, bands);
                 wheel.draws().then_some(wheel)
             })
             .collect();
         wheels.sort_by(|a, b| b.alpha().total_cmp(&a.alpha()));
-        Wheels { wheels, hovered }
+        Wheels {
+            wheels,
+            bars: Bars::over(scene, viewport, &placed),
+            hovered,
+        }
     }
 
     pub fn hovered(&self) -> Option<RockId> {
@@ -157,11 +228,28 @@ impl Wheels {
         })
     }
 
-    pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, RowId, Option<Shown>)> {
-        self.wheels.iter().find_map(|wheel| wheel.spoken_at(at))
+    pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
+        self.wheels
+            .iter()
+            .find_map(|wheel| wheel.spoken_at(at))
+            .or_else(|| {
+                self.bars
+                    .spoken_at(at)
+                    .map(|(beside, material, pull, cap)| {
+                        (
+                            beside,
+                            Spoken::Bar {
+                                material,
+                                pull,
+                                cap,
+                            },
+                        )
+                    })
+            })
     }
 
     pub fn paint(&self, painter: &egui::Painter, hover: Option<&Hover>) {
+        self.bars.paint(painter);
         for wheel in self.wheels.iter().rev() {
             wheel.paint(painter, band_of(hover, wheel.rock()));
         }
@@ -169,6 +257,15 @@ impl Wheels {
 }
 
 impl Placed {
+    pub fn resting(rock: RockId, centre: Pos2) -> Placed {
+        Placed {
+            rock,
+            centre,
+            sizing: Sizing::settled(Detail::Small),
+            alpha: RESTING_ALPHA,
+        }
+    }
+
     fn eased(self, ease: &mut impl Ease) -> Placed {
         Placed {
             sizing: Sizing {
@@ -233,13 +330,12 @@ fn laid(
                 false => Detail::Small,
             };
             Placed {
-                rock: footprint.rock,
-                centre: footprint.centre,
                 sizing: Sizing::settled(detail),
                 alpha: match rock == whole {
                     true => 1.0,
                     false => RESTING_ALPHA,
                 },
+                ..Placed::resting(footprint.rock, footprint.centre)
             }
         })
         .collect()
@@ -279,6 +375,8 @@ fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<Ro
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::roster::FRIGATE;
+    use neumannarch_sim::state::Command;
+    use neumannarch_sim::{Retention, Sequence, Session, Setup, TeamId, Tick};
 
     use super::*;
     use crate::display::scene::{Entry, RowView, SectorView, WheelView};
@@ -312,13 +410,14 @@ mod tests {
             .collect()
     }
 
-    fn aim(pointer: Pos2, hovered: Option<RockId>) -> Aim {
+    fn aim(pointer: Pos2, hovered: Option<RockId>) -> Aim<'static> {
         Aim {
             viewer: SeatId(0),
             pointer: Some(pointer),
             hovered,
             step: 1,
             wants: BTreeMap::new(),
+            draft: None,
         }
     }
 
@@ -342,6 +441,77 @@ mod tests {
 
     fn far() -> f32 {
         4.0 * footprints(0.0)[0].at(Detail::Full).width()
+    }
+
+    #[test]
+    fn a_band_during_the_draft_is_refused_by_the_drafts_own_rule_and_live_after_it() {
+        let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(600)).expect("two teams");
+        let mut session =
+            Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)]).expect("seated");
+        let stages = session.state().draft().stages().to_vec();
+        let (first, later) = (stages[0], stages[1]);
+        assert_ne!(
+            first.seat, later.seat,
+            "the second stage is the other seat's"
+        );
+        fn aim(seat: SeatId, draft: &Draft) -> Aim<'_> {
+            Aim {
+                viewer: seat,
+                pointer: None,
+                hovered: None,
+                step: 1,
+                wants: BTreeMap::new(),
+                draft: Some(draft),
+            }
+        }
+
+        let draft = session.state().draft().clone();
+        assert_eq!(aim(first.seat, &draft).refusal(A, first.row), None);
+        assert_eq!(
+            aim(later.seat, &draft).refusal(A, later.row),
+            Some(NOT_YET),
+            "its stage has not begun"
+        );
+        assert_eq!(
+            aim(first.seat, &draft).refusal(A, FRIGATE),
+            None,
+            "a frigate is no pick and its want stands as a ghost"
+        );
+
+        let stamped = Sequence::new(first.seat).stamp(
+            session.state().tick(),
+            Command::Want {
+                rock: A,
+                row: first.row,
+                count: 1,
+            },
+        );
+        session.insert(stamped).expect("the pick is taken");
+        assert!(session.advance().rejected.is_empty());
+        let draft = session.state().draft().clone();
+        let next = draft.running().expect("the next stage runs");
+        assert_eq!(
+            aim(next.seat, &draft).refusal(A, next.row),
+            Some(ROCK_TAKEN)
+        );
+        assert_eq!(aim(next.seat, &draft).refusal(B, next.row), None);
+        assert_eq!(
+            aim(first.seat, &draft).refusal(B, first.row),
+            None,
+            "a placed row is no pick"
+        );
+        assert_eq!(
+            aim(next.seat, &draft).refusal(A, FRIGATE),
+            None,
+            "a want that is no pick stands at a taken rock"
+        );
+
+        while session.state().drafting() {
+            session.advance();
+        }
+        let draft = session.state().draft().clone();
+        assert_eq!(aim(first.seat, &draft).refusal(A, FRIGATE), None);
+        assert_eq!(aim(later.seat, &draft).refusal(A, later.row), None);
     }
 
     #[test]

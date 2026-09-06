@@ -37,8 +37,28 @@ probe; the win is holding the system when the clock runs out.
   player with a structure there; ties break by total army value. A side
   with no entities and an empty reserve is out before the clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
-  count per row, of one shipyard and one constructor. The player's first
-  wants place them at a rock of the player's choosing.
+  count per row, of one shipyard and one constructor. A match opens in
+  the placement draft, with time stopped: no body moves, nothing is
+  extracted and nothing builds until the clock starts, and the belt is
+  whole and visible, its rocks and their caps read by everyone. The
+  draft is a sequence of stages, one per reserve structure per seat:
+  the first round's stages in an order drawn from the seed, the second
+  round's in the reverse order, so the seat that went first goes last
+  for its second rock. One stage runs at a time. A stage ends the
+  moment its seat places, or after a stated span if it has not, and
+  the next begins at once. A seat whose stage ran out keeps the right
+  to place and may do so at any later tick, alongside the running
+  stage, first come first served. A placement lands at a rock no draft
+  placement has taken, and a rock a draft placement stands on is
+  taken. A reserve want before the seat's first stage has begun is
+  refused by name; a want at a taken rock is refused by name. Any
+  other want is accepted during the draft and stands as a want, the
+  way a build order is queued before a round starts; it is filled once
+  the clock runs. The draft ends, and the clock starts, on the tick
+  every seat has placed both structures, or a stated span after the
+  last stage ended, whichever is first; a seat still holding reserve
+  then places from the rocks left free, at any time. A bot places on
+  the first tick of its stage.
 - Teammates share nothing but a side. A player edits only their own
   compositions.
 - Agents play through the same view and the same verb as humans.
@@ -127,10 +147,12 @@ Every weapon has a kind, and each kind carries its own fields.
 - **Build.** Spends stockpile at `rate` toward frames at its home rock and
   repairs damaged friendlies there. Its reach is the rock's zone: a
   builder reaches everything inside it and nothing elsewhere.
-- **Extract.** Pulls up to `rate` of each material from its home rock. The
-  rock's cap per material is the ceiling: at the cap, it is split equally
-  among the extractors there, and any share an extractor cannot use is
-  split among the rest.
+- **Extract.** Pulls up to `rate` of one material, the weapon's, from
+  its home rock. The rock's cap for that material is the ceiling: at the
+  cap, it is split equally among the extractors of that material there,
+  and any share an extractor cannot use is split among the rest. The
+  roster ships one extractor row per material, so what a rock yields is
+  a per-rock decision against its caps.
 
 **Build is flow.** Every shortfall is a frame draining the stockpile
 continuously at the builders' combined rate. Effort combines across builders
@@ -271,7 +293,7 @@ and nothing is remembered, since there is nothing to remember.
 3. The playable on the engine over the sim's view.
 4. A scripted agent and the balance harness.
 5. Map generation from seed with regional caps.
-6. Factions as skews over one roster; rows beyond the first seven.
+6. Factions as skews over one roster; rows beyond the first nine.
 
 ## Questions for the harness
 

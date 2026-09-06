@@ -1,9 +1,10 @@
-use core::ops::Index;
+use core::ops::{Index, IndexMut};
 use std::collections::BTreeMap;
 
 pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
+pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
 pub use entity::{Entity, Motion};
 pub use frame::Frame;
 pub use ready::Ready;
@@ -16,13 +17,14 @@ pub use threat::{Aim, Assigned, Threat};
 pub use view::View;
 pub use wants::Wants;
 
+use crate::TICKS_PER_SECOND;
 use crate::ids::{EntityId, RockId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
 use crate::roster::{Roster, Row};
 use crate::state::sweep::Sweep;
-use crate::time::{Moment, Tick};
+use crate::time::{Moment, Tick, Time};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Held {
@@ -34,7 +36,8 @@ pub struct Held {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct State {
     tick: Tick,
-    clock: Tick,
+    length: Time,
+    draft: Draft,
     seed: u64,
     gravity: Gravity,
     seats: Vec<Seat>,
@@ -49,7 +52,7 @@ pub struct State {
 
 impl State {
     pub fn new(
-        clock: Tick,
+        length: Time,
         seed: u64,
         gravity: Gravity,
         roster: Roster,
@@ -58,7 +61,8 @@ impl State {
     ) -> State {
         State {
             tick: Tick::ZERO,
-            clock,
+            length,
+            draft: Draft::of(seed, &seats, &roster),
             seed,
             gravity,
             seats,
@@ -76,16 +80,38 @@ impl State {
         self.tick
     }
 
-    pub fn clock(&self) -> Tick {
-        self.clock
+    pub fn time(&self) -> Time {
+        Time(self.tick.0).since(Time(self.draft.ended().unwrap_or(self.tick).0))
+    }
+
+    pub fn length(&self) -> Time {
+        self.length
+    }
+
+    pub fn draft(&self) -> &Draft {
+        &self.draft
+    }
+
+    pub fn drafting(&self) -> bool {
+        self.draft.ended().is_none()
+    }
+
+    pub(crate) fn close_draft(&mut self) {
+        if !self.drafting() {
+            return;
+        }
+        self.draft.pass(self.tick);
+        if self.draft.over(self.tick) {
+            self.draft.end(self.tick);
+        }
     }
 
     pub fn gravity(&self) -> Gravity {
         self.gravity
     }
 
-    pub fn rocks(&self) -> &[Rock] {
-        &self.rocks
+    pub fn rocks(&self) -> impl Iterator<Item = (RockId, &Rock)> {
+        (0..u32::MAX).map(RockId).zip(&self.rocks)
     }
 
     pub fn rock(&self, id: RockId) -> Option<&Rock> {
@@ -129,7 +155,7 @@ impl State {
     pub fn standing_at(&self, rock: RockId) -> impl Iterator<Item = &Entity> {
         self.entities
             .values()
-            .filter(move |entity| entity.standing(self.tick) == Some(rock))
+            .filter(move |entity| entity.standing(self.time()) == Some(rock))
     }
 
     pub fn ready(&self) -> &[Ready] {
@@ -156,7 +182,7 @@ impl State {
         let mut holdings: BTreeMap<(RockId, SeatId, RowId), Held> = BTreeMap::new();
         for entity in self.entities.values() {
             let at = |rock: RockId| (rock, entity.seat(), entity.row());
-            match (entity.standing(self.tick), entity.flight()) {
+            match (entity.standing(self.time()), entity.flight()) {
                 (Some(rock), None) => holdings.entry(at(rock)).or_default().present += 1,
                 (Some(rock), Some(_)) => holdings.entry(at(rock)).or_default().leaving += 1,
                 (None, _) => {}
@@ -169,7 +195,7 @@ impl State {
     }
 
     pub fn rock_body(&self, rock: RockId) -> Body {
-        self[rock].orbit().at(self.tick, self.gravity)
+        self[rock].orbit().at(self.time(), self.gravity)
     }
 
     pub fn body_of(&self, entity: &Entity) -> Body {
@@ -203,7 +229,7 @@ impl State {
         self.entities
             .insert(id, Entity::new(id, seat, row, home, hp, motion));
         let weapons: Vec<u8> = self[row].damage_weapons().collect();
-        let now = Moment::at(self.tick);
+        let now = Moment::at(self.time());
         self.ready.extend(
             weapons
                 .into_iter()
@@ -219,7 +245,12 @@ impl State {
     }
 
     pub(crate) fn advance(&mut self) {
+        self.close_draft();
         self.tick = self.tick.next();
+        if self.time().0.is_multiple_of(u64::from(TICKS_PER_SECOND)) {
+            self.seats.iter_mut().for_each(Seat::close_second);
+            self.rocks.iter_mut().for_each(Rock::close_second);
+        }
     }
 
     pub(crate) fn remove_entity(&mut self, id: EntityId) {
@@ -320,7 +351,20 @@ impl Index<SeatId> for State {
     }
 }
 
+impl IndexMut<RockId> for State {
+    fn index_mut(&mut self, id: RockId) -> &mut Rock {
+        &mut self.rocks[id.0 as usize]
+    }
+}
+
+impl IndexMut<SeatId> for State {
+    fn index_mut(&mut self, id: SeatId) -> &mut Seat {
+        &mut self.seats[usize::from(id.0)]
+    }
+}
+
 mod command;
+mod draft;
 mod entity;
 mod frame;
 pub mod hash;

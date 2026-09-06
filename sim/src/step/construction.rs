@@ -57,7 +57,7 @@ impl<'a> Construction<'a> {
             .state
             .entities()
             .filter(|entity| entity.seat() == seat && self.rate_of(entity) > 0.0)
-            .filter_map(|entity| entity.standing(self.state.tick()))
+            .filter_map(|entity| entity.standing(self.state.time()))
             .collect();
         rocks.sort_unstable();
         rocks.dedup();
@@ -73,7 +73,7 @@ impl<'a> Construction<'a> {
     }
 
     fn rate_of(&self, entity: &Entity) -> f64 {
-        if entity.is_flying(self.state.tick()) {
+        if entity.is_flying(self.state.time()) {
             return 0.0;
         }
         self.state[entity.row()].builds().sum()
@@ -200,7 +200,8 @@ impl Want {
     }
 
     fn spend(&self, ratios: Materials, stockpile: &mut Stockpile) -> Spend {
-        let units = self.units * self.work.cost.bottleneck(ratios);
+        let binding = self.work.cost.binding(ratios);
+        let units = self.units * binding.map_or(1.0, |(_, ratio)| ratio);
         let taken = stockpile.spend(self.work.materials(units));
         Spend {
             frame: self.frame,
@@ -208,7 +209,7 @@ impl Want {
             completed: self.work.progress + taken.total() >= self.work.cost.total(),
             short: match taken.total() > 0.0 {
                 true => None,
-                false => self.work.cost.binding_material(ratios),
+                false => binding.map(|(material, _)| material),
             },
         }
     }

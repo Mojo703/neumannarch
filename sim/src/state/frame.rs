@@ -3,19 +3,19 @@ use crate::ids::RowId;
 use crate::materials::Material;
 use crate::post::Post;
 use crate::real::Real;
-use crate::time::Tick;
+use crate::time::Time;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Frame {
     post: Post,
     row: RowId,
     progress: Real,
-    fed: Tick,
+    fed: Time,
     short: Option<Material>,
 }
 
 impl Frame {
-    pub fn new(post: Post, row: RowId, progress: f64, at: Tick) -> Frame {
+    pub fn new(post: Post, row: RowId, progress: f64, at: Time) -> Frame {
         Frame {
             post,
             row,
@@ -25,7 +25,7 @@ impl Frame {
         }
     }
 
-    pub fn starved_material(&self, now: Tick) -> Option<Material> {
+    pub fn starved_material(&self, now: Time) -> Option<Material> {
         self.short
             .filter(|_| now.0.saturating_sub(self.fed.0) >= TICKS_PER_SECOND as u64)
     }
@@ -49,7 +49,7 @@ impl Frame {
         }
     }
 
-    pub(crate) fn build(&mut self, units: f64, at: Tick) {
+    pub(crate) fn build(&mut self, units: f64, at: Time) {
         self.progress.0 += units;
         self.fed = at;
         self.short = None;

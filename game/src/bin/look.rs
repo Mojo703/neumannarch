@@ -6,24 +6,49 @@ use mirage_engine::math::UVec2;
 use mirage_engine::mesh::Sphere;
 use mirage_engine::prelude::*;
 use neumannarch_game::display::camera::BeltCamera;
+use neumannarch_game::display::fights::Fights;
+use neumannarch_game::display::glyph;
 use neumannarch_game::display::glyph::Glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
-    Arc, EntityView, Entry, FlightLine, Hover, RockView, RowView, Scene, SectorView, Shown,
-    WheelBand, WheelView,
+    Arc, Client, EntityView, Entry, FlightLine, Hover, RockView, RowView, Scene, SectorView, Shown,
+    StripView, WheelBand, WheelView,
 };
+use neumannarch_game::display::strip::Strip;
 use neumannarch_game::display::viewport::Viewport;
 use neumannarch_game::display::wheels::{Aim, Still, Wheels};
 use neumannarch_game::display::{belt, hud};
-use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, SHIPYARD, STORAGE};
-use neumannarch_sim::state::view::Building;
-use neumannarch_sim::{Material, Materials, RockId, RowId, SeatId, Vec3};
+use neumannarch_game::screens::control::Controls;
+use neumannarch_game::screens::lobby::seat_names;
+use neumannarch_game::screens::order::Order;
+use neumannarch_game::screens::panel::{self, Panel};
+use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
+use neumannarch_sim::Session as Match;
+use neumannarch_sim::roster::{
+    ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD, STORAGE,
+};
+use neumannarch_sim::state::view::{Building, View};
+use neumannarch_sim::state::{Command, Draft, STAGE_SPAN};
+use neumannarch_sim::step::fire::Shots;
+use neumannarch_sim::{
+    Material, Materials, Retention, RockId, RowId, SeatId, Sequence, Stockpile, Tick, Time, Vec3,
+};
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
 
 const WINDOW: UVec2 = UVec2::new(1280, 720);
 
 const ZONE: f64 = neumannarch_sim::belt::Belt::ZONE_RADIUS_METERS;
+
+const YOU: SeatId = SeatId(0);
+
+const TAKEN: RockId = RockId(0);
+
+const BARE: RockId = RockId(1);
+
+const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
+
+const DRAFT_FOCUS_TOWARD_TAKEN: f64 = 0.3;
 
 fn glyph_of(row: RowId) -> Glyph {
     Glyph::of(&Roster::shipped()[row])
@@ -36,16 +61,29 @@ fn main() {
     for (name, scene, camera) in [
         ("region", region_scene(), region_camera()),
         ("fight", fight_scene(), fight_camera()),
+        ("stockpile", stockpile_scene(), stockpile_camera()),
         ("belt", belt_scene(), belt_camera()),
     ] {
-        let pixels = render(scene, camera);
+        let pixels = render(scene, camera, None);
         save(&out.join(format!("{name}.png")), &pixels);
     }
+    let (scene, drafting) = draft_scene();
+    let camera = draft_camera(&scene);
+    let pixels = render(scene, camera, Some(drafting));
+    save(&out.join("draft.png"), &pixels);
+}
+
+struct Drafting {
+    draft: Draft,
+    tick: Tick,
+    names: Vec<String>,
+    band: (RockId, RowId),
 }
 
 struct Looker {
     scene: Scene,
     camera: BeltCamera,
+    drafting: Option<Drafting>,
 }
 
 impl Game for Looker {
@@ -58,9 +96,9 @@ impl Game for Looker {
     fn tick(&mut self, _ctx: &mut TickCtx<'_, Self>) {}
 
     fn frame(&mut self, ctx: &mut FrameCtx<'_, Self>) {
-        let mut points_per_pixel = 1.0;
-        ctx.ui(|ui| points_per_pixel = 1.0 / ui.ctx().pixels_per_point());
-        let viewport = Viewport::of(&self.camera, ctx.window_size(), points_per_pixel);
+        let points_per_pixel = 1.0 / ctx.pixels_per_point();
+        let window = ctx.window_size();
+        let viewport = Viewport::of(&self.camera, window, points_per_pixel);
 
         belt::draw(&self.scene, &viewport, ctx);
 
@@ -69,18 +107,54 @@ impl Game for Looker {
             &self.scene,
             &roster,
             &viewport,
-            &aim(&self.scene),
+            &aim(&self.scene, self.drafting.as_ref()),
             &mut Still,
         );
         let scene = &self.scene;
+        let over = panel::window_of(window, points_per_pixel);
+        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let order = self.drafting.as_ref().map(|drafting| {
+            Order::over(
+                over,
+                &drafting.draft,
+                drafting.tick,
+                &roster,
+                &drafting.names,
+                1.0,
+            )
+        });
+        let note = self.drafting.as_ref().and_then(|drafting| {
+            let (rock, row) = drafting.band;
+            let at = wheels
+                .iter()
+                .find(|wheel| wheel.rock() == rock)?
+                .band(row, WheelBand::Plus(1))?;
+            let (beside, spoken) = wheels.spoken_at(at)?;
+            Some((
+                egui::Rect::from_center_size(beside, egui::Vec2::splat(2.0 * glyph::HALF)),
+                spoken.phrase(&roster),
+            ))
+        });
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
             wheels.paint(ui.painter(), scene.hover.as_ref());
+            if let Some(strip) = &strip {
+                strip.paint(ui.painter(), None);
+            }
+            if let Some(order) = &order {
+                order.paint(ui.painter());
+            }
+            if let Some((beside, phrase)) = note {
+                let panel = Panel::new(ui.painter(), over, egui::Pos2::ZERO, false);
+                let mut controls = Controls::over(&panel);
+                controls.note(beside, phrase);
+                controls.finish();
+            }
         });
     }
 }
 
-fn aim(scene: &Scene) -> Aim {
+fn aim<'a>(scene: &Scene, drafting: Option<&'a Drafting>) -> Aim<'a> {
     Aim {
         viewer: scene.seat,
         pointer: None,
@@ -89,14 +163,21 @@ fn aim(scene: &Scene) -> Aim {
         wants: [((RockId(0), FRIGATE), 1), ((RockId(0), RAIDER), 1)]
             .into_iter()
             .collect(),
+        draft: drafting.map(|drafting| &drafting.draft),
     }
 }
 
-fn render(scene: Scene, camera: BeltCamera) -> Vec<u8> {
+fn render(scene: Scene, camera: BeltCamera, drafting: Option<Drafting>) -> Vec<u8> {
     let mut session = Session::<Looker>::new(
         Config::new("neumannarch-look").with_tick_interval(neumannarch_sim::TICK),
         WINDOW,
-        |_ctx| Ok(Looker { scene, camera }),
+        |_ctx| {
+            Ok(Looker {
+                scene,
+                camera,
+                drafting,
+            })
+        },
     )
     .expect("the offscreen session starts");
 
@@ -118,6 +199,7 @@ fn rock(id: u32, pos: Vec3, radius: f64) -> RockView {
         pos,
         radius,
         caps: caps_of(id),
+        pull: Materials::ZERO,
     }
 }
 
@@ -273,6 +355,7 @@ fn region_scene() -> Scene {
             from: Vec3::new(-90.0, 0.0, 80.0),
             to: RockId(2),
         }],
+        strip: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: Some(RockId(0)),
@@ -336,6 +419,7 @@ fn fight_scene() -> Scene {
         entities,
         wheels,
         flights: Vec::new(),
+        strip: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: Some(RockId(0)),
@@ -345,6 +429,76 @@ fn fight_scene() -> Scene {
 
 fn fight_camera() -> BeltCamera {
     BeltCamera::new(Vec3::ZERO, 60.0)
+}
+
+fn stockpile_scene() -> Scene {
+    let mut mined = rock(0, Vec3::ZERO, 6.0);
+    mined.caps = Materials::new(20.0, 8.0, 12.0);
+    mined.pull = Materials::new(12.0, 0.0, 12.0);
+    let mut barren = rock(1, Vec3::new(340.0, 0.0, -120.0), 5.0);
+    barren.caps = Materials::new(4.0, 0.0, 16.0);
+    barren.pull = Materials::new(0.0, 0.0, 6.0);
+    let rocks = vec![mined, barren];
+
+    let entities = vec![
+        ship(0, METALS_EXTRACTOR, Vec3::new(-5.0, 0.0, 3.0)),
+        ship(0, ENERGY_EXTRACTOR, Vec3::new(5.0, 0.0, 3.0)),
+        ship(0, SHIPYARD, Vec3::new(0.0, 0.0, -6.0)),
+        ship(0, FRIGATE, Vec3::new(6.0, 0.0, -3.0)),
+        ship(1, ENERGY_EXTRACTOR, Vec3::new(344.0, 0.0, -118.0)),
+    ];
+
+    let wheels = vec![wheel(
+        0,
+        vec![sector(
+            0,
+            vec![
+                row(SHIPYARD, vec![Entry::Present(1)]),
+                row(METALS_EXTRACTOR, vec![Entry::Present(1)]),
+                row(ENERGY_EXTRACTOR, vec![Entry::Present(1)]),
+                row(
+                    FRIGATE,
+                    vec![
+                        Entry::Present(1),
+                        Entry::Building(Building {
+                            progress: 0.3,
+                            starved_of: Some(Material::Volatiles),
+                        }),
+                        Entry::Wanted {
+                            count: 2,
+                            dashed: false,
+                        },
+                    ],
+                ),
+            ],
+            None,
+        )],
+    )];
+
+    Scene {
+        rocks,
+        entities,
+        wheels,
+        flights: Vec::new(),
+        strip: Some(StripView {
+            stockpile: Stockpile::new(
+                Materials::new(120.0, 0.0, 300.0),
+                Materials::new(300.0, 300.0, 300.0),
+            ),
+            income: Materials::new(12.0, 0.0, 12.0),
+            spend: Materials::new(9.0, 4.0, 2.0),
+            elapsed: Time(neumannarch_sim::TICKS_PER_SECOND as u64 * 247),
+            clock: Time(neumannarch_sim::TICKS_PER_SECOND as u64 * 900),
+        }),
+        zone: ZONE,
+        seat: SeatId(0),
+        selection: Some(RockId(0)),
+        hover: None,
+    }
+}
+
+fn stockpile_camera() -> BeltCamera {
+    BeltCamera::new(Vec3::new(120.0, 0.0, -40.0), 500.0)
 }
 
 fn belt_scene() -> Scene {
@@ -397,6 +551,7 @@ fn belt_scene() -> Scene {
             from: flight_from,
             to: RockId(1),
         }],
+        strip: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: None,
@@ -406,4 +561,79 @@ fn belt_scene() -> Scene {
 
 fn belt_camera() -> BeltCamera {
     BeltCamera::new(Vec3::new(0.0, 0.0, -200.0), 4_200.0)
+}
+
+fn skirmish_where_you_go_first() -> (Match, Vec<String>) {
+    (0u64..)
+        .find_map(|seed| {
+            let mut lobby = Lobby::skirmish(PlayerId::HOST);
+            lobby
+                .edit(PlayerId::HOST, LobbyEdit::SetSeed(seed))
+                .expect("the host sets the seed");
+            let started = lobby.freeze().expect("a skirmish starts");
+            let names = seat_names(started.seating(), PlayerId::HOST);
+            let (setup, _) = started.parts();
+            let session =
+                Match::new(setup, Retention::shipped(), &[YOU]).expect("the host is seated");
+            (session.state().draft().stages()[0].seat == YOU).then_some((session, names))
+        })
+        .expect("some seed draws the host first")
+}
+
+fn draft_scene() -> (Scene, Drafting) {
+    let (mut session, names) = skirmish_where_you_go_first();
+    let first = session.state().draft().stages()[0];
+    let stamped = Sequence::new(YOU).stamp(
+        session.state().tick(),
+        Command::Want {
+            rock: TAKEN,
+            row: first.row,
+            count: 1,
+        },
+    );
+    session.insert(stamped).expect("the pick is taken");
+    for _ in 0..STAGE_SPAN.0 + 1 + STAGE_SPAN.0 / 2 {
+        session.advance();
+    }
+    let view = View::of(session.state(), YOU, &Shots::default());
+    let waiting = view
+        .draft
+        .stages()
+        .iter()
+        .find(|stage| stage.seat == YOU && stage.placed.is_none())
+        .expect("your second stage waits");
+    let scene = Scene::from_view(
+        &view,
+        session.state().roster(),
+        Client {
+            selection: Some(BARE),
+            pointed: Some(BARE),
+            hover: None,
+            fights: &Fights::default(),
+        },
+    );
+    let drafting = Drafting {
+        draft: view.draft.clone(),
+        tick: view.tick,
+        names,
+        band: (BARE, waiting.row),
+    };
+    (scene, drafting)
+}
+
+fn draft_camera(scene: &Scene) -> BeltCamera {
+    let at = |id: RockId| {
+        scene
+            .rocks
+            .iter()
+            .find(|rock| rock.id == id)
+            .expect("the rock is on the belt")
+            .pos
+    };
+    let (taken, bare) = (at(TAKEN), at(BARE));
+    let apart = (bare - taken).length();
+    BeltCamera::new(
+        bare + (taken - bare) * DRAFT_FOCUS_TOWARD_TAKEN,
+        apart * DRAFT_ZOOM_PER_METER_APART,
+    )
 }

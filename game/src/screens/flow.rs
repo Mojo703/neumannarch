@@ -418,9 +418,9 @@ where
     let pixel = ctx.pointer();
     let size = ctx.window_size();
     let clicked = ctx.pressed(Button::Select);
+    let points = 1.0 / ctx.pixels_per_point();
     let mut picked = None;
     ctx.ui(|ui| {
-        let points = 1.0 / ui.ctx().pixels_per_point();
         let panel = Panel::new(
             ui.painter(),
             panel::window_of(size, points),

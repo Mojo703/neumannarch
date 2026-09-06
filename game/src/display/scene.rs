@@ -5,10 +5,11 @@ use neumannarch_sim::orbit::Gravity;
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::{Berth, Building, View};
 use neumannarch_sim::state::{Held, MAX_WANT, Rock};
-use neumannarch_sim::{Material, Materials, RockId, RowId, SeatId, Tick, Vec3};
+use neumannarch_sim::{Materials, RockId, RowId, SeatId, Stockpile, Time, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
+use crate::display::label;
 use crate::display::send::Sending;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,6 +63,16 @@ pub struct RockView {
     pub pos: Vec3,
     pub radius: f64,
     pub caps: Materials,
+    pub pull: Materials,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripView {
+    pub stockpile: Stockpile,
+    pub income: Materials,
+    pub spend: Materials,
+    pub elapsed: Time,
+    pub clock: Time,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,6 +123,7 @@ pub struct Scene {
     pub entities: Vec<EntityView>,
     pub wheels: Vec<WheelView>,
     pub flights: Vec<FlightLine>,
+    pub strip: Option<StripView>,
     pub zone: f64,
     pub seat: SeatId,
     pub selection: Option<RockId>,
@@ -119,21 +131,23 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn of_belt(rocks: &[Rock], gravity: Gravity, tick: Tick) -> Scene {
+    pub fn of_belt(rocks: &[Rock], gravity: Gravity, now: Time) -> Scene {
         Scene {
             rocks: rocks
                 .iter()
                 .enumerate()
                 .map(|(at, rock)| RockView {
                     id: RockId(at as u32),
-                    pos: rock.orbit().at(tick, gravity).pos,
+                    pos: rock.orbit().at(now, gravity).pos,
                     radius: rock.radius(),
                     caps: rock.caps(),
+                    pull: Materials::ZERO,
                 })
                 .collect(),
             entities: Vec::new(),
             wheels: Vec::new(),
             flights: Vec::new(),
+            strip: None,
             zone: Belt::ZONE_RADIUS_METERS,
             seat: SeatId(0),
             selection: None,
@@ -156,9 +170,10 @@ impl Scene {
                 .iter()
                 .map(|rock| RockView {
                     id: rock.rock,
-                    pos: rock.orbit.at(view.tick, view.gravity).pos,
+                    pos: rock.orbit.at(view.time, view.gravity).pos,
                     radius: rock.radius,
                     caps: rock.caps,
+                    pull: rock.pull,
                 })
                 .collect(),
             entities: view
@@ -183,6 +198,13 @@ impl Scene {
                     to: present.home,
                 })
                 .collect(),
+            strip: Some(StripView {
+                stockpile: view.stockpile,
+                income: view.income,
+                spend: view.spend,
+                elapsed: view.time,
+                clock: view.length,
+            }),
             zone: view.zone,
             seat: view.seat,
             selection: client.selection,
@@ -229,7 +251,10 @@ impl Entry {
             Entry::Building(Building {
                 starved_of: Some(material),
                 ..
-            }) => format!("{name} short of {}", short_of(material)),
+            }) => format!(
+                "{name} short of {}",
+                label::material(material).to_ascii_lowercase()
+            ),
             Entry::Building(_) => format!("{name} building"),
             Entry::Arriving { from, .. } => format!("{name} arriving from {}", rock_name(from)),
             Entry::Wanted { dashed: true, .. } => format!("No builder for {name}"),
@@ -262,16 +287,8 @@ impl WheelBand {
     }
 }
 
-fn rock_name(rock: RockId) -> String {
+pub fn rock_name(rock: RockId) -> String {
     format!("Rock {}", u64::from(rock.0) + 1)
-}
-
-fn short_of(material: Material) -> &'static str {
-    match material {
-        Material::Metals => "metals",
-        Material::Volatiles => "volatiles",
-        Material::Energy => "energy",
-    }
 }
 
 fn reach(roster: &Roster, row: RowId, standing: bool) -> Option<f64> {
@@ -793,5 +810,30 @@ mod tests {
         assert_eq!(scene.entities.len(), 1);
         assert_eq!(scene.entities[0].range, None);
         assert_eq!(scene.zone, local.view().zone);
+    }
+
+    #[test]
+    fn a_match_scene_carries_the_seats_stockpile_and_the_clock_and_a_belt_scene_none() {
+        let local = Local::start(2);
+        let view = local.view();
+
+        let strip = scene(&local).strip.expect("a match has a strip");
+        assert_eq!(strip.stockpile, view.stockpile);
+        assert_eq!(strip.income, view.income);
+        assert_eq!(strip.spend, view.spend);
+        assert_eq!(strip.elapsed, view.time);
+        assert_eq!(strip.clock, view.length);
+        assert!(
+            scene(&local)
+                .rocks
+                .iter()
+                .zip(&view.terrain)
+                .all(|(rock, terrain)| rock.pull == terrain.pull),
+            "every rock carries its pull"
+        );
+
+        let belt = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO);
+        assert_eq!(belt.strip, None);
+        assert!(belt.rocks.iter().all(|rock| rock.pull == Materials::ZERO));
     }
 }

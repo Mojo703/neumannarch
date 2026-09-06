@@ -37,7 +37,7 @@ impl<'a> Propagation<'a> {
         let Motion::Steered { body, flight } = entity.motion() else {
             return None;
         };
-        let tick = self.state.tick();
+        let tick = self.state.time();
         let scheduled = flight.map_or(Vec3::ZERO, |flight| flight.thrust(tick));
         let thrust = scheduled + self.thrusts.of(entity.id());
         Some(Move {
@@ -50,7 +50,7 @@ impl<'a> Propagation<'a> {
     }
 
     fn departing(&self, body: Body, flight: Option<Flight>) -> Body {
-        match flight.filter(|flight| flight.departs() == self.state.tick()) {
+        match flight.filter(|flight| flight.departs() == self.state.time()) {
             Some(flight) => Body::new(body.pos, self.state.rock_body(flight.source()).vel),
             None => body,
         }

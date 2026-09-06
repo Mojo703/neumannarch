@@ -38,7 +38,12 @@ impl Seated {
     pub fn issue(&mut self, session: &Session) -> Vec<Stamped> {
         let tick = session.state().tick();
         let interval = DECISION_INTERVAL.0;
-        if tick.0 % interval != u64::from(self.seat().0) % interval {
+        let staged = session
+            .state()
+            .draft()
+            .running()
+            .is_some_and(|stage| stage.seat == self.seat());
+        if !staged && tick.0 % interval != u64::from(self.seat().0) % interval {
             return Vec::new();
         }
         let quiet = Shots::default();
@@ -64,7 +69,7 @@ mod survey;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neumannarch_sim::roster::RAIDER;
+    use neumannarch_sim::roster::{RAIDER, Roster};
     use neumannarch_sim::{Retention, RockId, Setup, TeamId};
 
     fn session() -> Session {
@@ -90,6 +95,9 @@ mod tests {
     fn an_agent_decides_once_a_cadence_and_stamps_its_seat_and_its_count() {
         let mut seated = Seated::new(SeatId(1), Box::new(Counting(0)));
         let mut session = session();
+        while session.state().drafting() {
+            session.advance();
+        }
         let mut issued: Vec<Stamped> = Vec::new();
         for _ in 0..2 * DECISION_INTERVAL.0 {
             issued.extend(seated.issue(&session));
@@ -114,6 +122,30 @@ mod tests {
             issued[0].tick < issued[1].tick,
             "both decisions were stamped at one tick"
         );
+    }
+
+    #[test]
+    fn a_bot_places_on_the_first_tick_its_stage_runs_whatever_the_cadence() {
+        let mut session = session();
+        let staged = session.state().draft().stages()[1];
+        let mut seated = Seated::new(
+            staged.seat,
+            Box::new(Scripted::new(Personality::expand(), Roster::shipped())),
+        );
+
+        while session.state().draft().running() != Some(staged) {
+            assert_eq!(seated.issue(&session), Vec::new(), "its stage waits");
+            session.advance();
+        }
+        let placing = seated.issue(&session);
+
+        let tick = session.state().tick();
+        assert_ne!(
+            tick.0 % DECISION_INTERVAL.0,
+            u64::from(staged.seat.0) % DECISION_INTERVAL.0,
+            "the tick its stage runs is not its cadence tick"
+        );
+        assert_eq!(placing.len(), 1, "it places at once: {placing:?}");
     }
 
     #[test]

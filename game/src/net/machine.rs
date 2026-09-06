@@ -1,4 +1,4 @@
-use neumannarch_protocol::{Crew, Relayed, Started};
+use neumannarch_protocol::{Crew, PlayerId, Relayed, Seating, Started};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{Retention, Rewound, SeatId, Session, Tick};
@@ -15,6 +15,7 @@ pub struct Ticked {
 
 pub struct Machine {
     crew: Crew,
+    seating: Seating,
     session: Session,
     controllers: Vec<Controller>,
     pace: Pace,
@@ -34,6 +35,7 @@ impl Machine {
         transport.report(Tick::ZERO, session.state().hash());
         Machine {
             crew: crew.clone(),
+            seating,
             session,
             controllers,
             pace: Pace::shipped(),
@@ -74,6 +76,14 @@ impl Machine {
 
     pub fn seat(&self) -> SeatId {
         self.crew.watched()
+    }
+
+    pub fn player(&self) -> PlayerId {
+        self.crew.player()
+    }
+
+    pub fn seating(&self) -> &Seating {
+        &self.seating
     }
 
     pub fn session(&self) -> &Session {

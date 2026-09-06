@@ -1,5 +1,4 @@
 use mirage_engine::Color;
-use mirage_engine::egui::Color32;
 use neumannarch_sim::Materials;
 
 const MATERIAL_COLOURS: [Color; 3] = [
@@ -14,9 +13,8 @@ pub fn toward(base: Color, caps: Materials, strength: f32) -> Color {
         return base;
     }
     let even = 1.0 / MATERIAL_COLOURS.len() as f32;
-    let shares = [caps.metals, caps.volatiles, caps.energy];
     let mut colour = base;
-    for (share, material) in shares.into_iter().zip(MATERIAL_COLOURS) {
+    for ((_, share), material) in caps.amounts().zip(MATERIAL_COLOURS) {
         let lead = ((share / total) as f32 - even).max(0.0) / (1.0 - even);
         let pull = strength * lead;
         colour = Color::rgb(
@@ -26,17 +24,6 @@ pub fn toward(base: Color, caps: Materials, strength: f32) -> Color {
         );
     }
     colour
-}
-
-pub fn painted(base: Color32, caps: Materials, strength: f32) -> Color32 {
-    let of = |channel: u8| f32::from(channel) / 255.0;
-    let tinted = toward(
-        Color::rgb(of(base.r()), of(base.g()), of(base.b())),
-        caps,
-        strength,
-    );
-    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
-    Color32::from_rgb(byte(tinted.red), byte(tinted.green), byte(tinted.blue))
 }
 
 #[cfg(test)]

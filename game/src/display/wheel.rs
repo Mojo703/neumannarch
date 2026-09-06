@@ -10,7 +10,8 @@ use crate::display::glyph::{self, Glyph};
 use crate::display::glyph_quad::seat_color32;
 use crate::display::hue;
 use crate::display::scene::{Arc, Entry, Fill, SectorView, Shown, WheelBand, WheelView};
-use crate::display::stencil::{self, Stencil};
+use crate::display::stencil::{self, Cell, Stencil};
+use crate::display::wheels::Spoken;
 use crate::screens::panel;
 
 pub const PICK_RADIUS: f32 = 36.0;
@@ -21,25 +22,25 @@ const DEPTH: f32 = 420.0;
 
 const SMALL_SCALE: f32 = 0.72;
 
-const GLYPH_HALF: f32 = 13.0;
+pub(crate) const GLYPH_HALF: f32 = 13.0;
 
-const GLYPH_SLOT: f32 = 2.0 * GLYPH_HALF * glyph::WIDEST_SCALE;
+pub(crate) const GLYPH_SLOT: f32 = 2.0 * GLYPH_HALF * glyph::WIDEST_SCALE;
 
-const SECTION_HEIGHT: f32 = 36.0;
+pub(crate) const SECTION_HEIGHT: f32 = 36.0;
 
-const LINE_HEIGHT: f32 = 13.0;
+pub(crate) const LINE_HEIGHT: f32 = 13.0;
 
-const CHARACTER_WIDTH: f32 = LINE_HEIGHT * 0.6;
+pub(crate) const CHARACTER_WIDTH: f32 = LINE_HEIGHT * 0.6;
 
-const MARK: f32 = 10.0;
+pub(crate) const MARK: f32 = 10.0;
 
-const GAP: f32 = 4.0;
+pub(crate) const GAP: f32 = 4.0;
 
-const CELL_GAP: f32 = 6.0;
+pub(crate) const CELL_GAP: f32 = 6.0;
 
-const PAD: f32 = 3.0;
+pub(crate) const PAD: f32 = 3.0;
 
-const ROW_GAP: f32 = 3.0;
+pub(crate) const ROW_GAP: f32 = 3.0;
 
 const SECTOR_GAP: f32 = 12.0;
 
@@ -65,9 +66,9 @@ const BAR_TRAIL: Color32 = Color32::from_gray(235);
 
 const SEGMENTS: usize = 12;
 
-const SCRIM: Color32 = Color32::from_rgba_premultiplied(5, 6, 14, 150);
+pub(crate) const SCRIM: Color32 = Color32::from_rgba_premultiplied(5, 6, 14, 150);
 
-const CORNER: f32 = 2.0;
+pub(crate) const CORNER: f32 = 2.0;
 
 const SIGN_SIZE: f32 = 15.0;
 
@@ -75,7 +76,7 @@ const STEP_SIZE: f32 = 12.0;
 
 const PREVIEW_ALPHA: f32 = 0.5;
 
-const MARK_STROKE: f32 = 1.2;
+pub(crate) const MARK_STROKE: f32 = 1.2;
 
 const DASH_LENGTH: f32 = 2.0;
 
@@ -91,6 +92,7 @@ pub enum Detail {
 pub struct Bands {
     pub step: u32,
     pub wants: BTreeMap<RowId, u32>,
+    pub refused: BTreeMap<RowId, String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -246,6 +248,49 @@ impl Wheel {
     }
 
     pub fn band_at(&self, at: Pos2) -> Option<(RowId, WheelBand)> {
+        let bands = self.bands.as_ref()?;
+        self.band_under(at)
+            .filter(|(row, _)| !bands.refused.contains_key(row))
+    }
+
+    pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
+        self.slots()
+            .find_map(|slot| {
+                let line = slot.lines.iter().find(|line| line.cell.contains(at));
+                match line {
+                    Some(line) => Some((
+                        line.cell.center(),
+                        Spoken::Row {
+                            row: slot.row,
+                            shown: line.speaks(),
+                        },
+                    )),
+                    None => slot.glyph_rect(self.scale).contains(at).then(|| {
+                        (
+                            slot.glyph_rect(self.scale).center(),
+                            Spoken::Row {
+                                row: slot.row,
+                                shown: None,
+                            },
+                        )
+                    }),
+                }
+            })
+            .or_else(|| self.refusal_at(at))
+    }
+
+    fn refusal_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
+        let bands = self.bands.as_ref()?;
+        let (row, _) = self.band_under(at)?;
+        let why = bands.refused.get(&row)?;
+        let slot = self.slots().find(|slot| slot.row == row)?;
+        Some((
+            egui::pos2(slot.frame.right(), slot.frame.center().y),
+            Spoken::Refused { why: why.clone() },
+        ))
+    }
+
+    fn band_under(&self, at: Pos2) -> Option<(RowId, WheelBand)> {
         let step = self.bands.as_ref()?.step;
         self.sectors
             .iter()
@@ -257,19 +302,6 @@ impl Wheel {
                     .find(|band| slot.band(*band, self.scale).contains(at))
                     .map(|band| (slot.row, band))
             })
-    }
-
-    pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, RowId, Option<Shown>)> {
-        self.slots().find_map(|slot| {
-            let line = slot.lines.iter().find(|line| line.cell.contains(at));
-            match line {
-                Some(line) => Some((line.cell.center(), slot.row, line.speaks())),
-                None => slot
-                    .glyph_rect(self.scale)
-                    .contains(at)
-                    .then(|| (slot.glyph_rect(self.scale).center(), slot.row, None)),
-            }
-        })
     }
 
     pub fn paint(&self, painter: &egui::Painter, hovered: Option<(RowId, WheelBand)>) {
@@ -296,23 +328,13 @@ impl Wheel {
     }
 
     fn spine(&self, from: f32, to: f32) -> Vec<Pos2> {
-        let inset = SPINE_INSET * self.scale;
-        (0..=SEGMENTS)
-            .map(|step| {
-                let y = from + (to - from) * step as f32 / SEGMENTS as f32;
-                egui::pos2(
-                    self.centre.x + x_at(self.scale, y) - inset,
-                    self.centre.y + y,
-                )
-            })
-            .collect()
+        spine_points(self.centre, self.scale, from, to, Side::Right)
     }
 
     fn paint_spine(&self, painter: &egui::Painter, sector: &Sector) {
-        let colour = seat_color32(sector.seat).gamma_multiply(SPINE_ALPHA);
         painter.add(Shape::line(
             self.spine(sector.top, sector.bottom),
-            Stroke::new(SPINE_WIDTH, self.faded(colour)),
+            spine_stroke(seat_color32(sector.seat), self.alpha),
         ));
     }
 
@@ -352,8 +374,10 @@ impl Wheel {
         };
         Stencil {
             glyph: &slot.glyph,
-            centre: slot.glyph_rect(self.scale).center(),
-            half: GLYPH_HALF * slot.glyph.size.scale() * self.scale,
+            cell: Cell {
+                centre: slot.glyph_rect(self.scale).center(),
+                half: GLYPH_HALF * slot.glyph.size.scale() * self.scale,
+            },
             colour,
             fill,
             alpha,
@@ -475,9 +499,10 @@ impl Wheel {
             return;
         };
         let want = bands.wants.get(&slot.row).copied().unwrap_or(0);
+        let refused = bands.refused.contains_key(&slot.row);
         for band in [WheelBand::Plus(bands.step), WheelBand::Minus(bands.step)] {
             let at = slot.band(band, self.scale);
-            let spent = band.wanted(want) == want;
+            let spent = refused || band.wanted(want) == want;
             let over = hovered == Some((slot.row, band));
             if over && !spent {
                 painter.rect_filled(at, 0.0, self.faded(panel::HOVER_FILL));
@@ -633,10 +658,38 @@ fn pick_square(centre: Pos2) -> Rect {
     Rect::from_center_size(centre, Vec2::splat(2.0 * PICK_RADIUS))
 }
 
-fn x_at(scale: f32, y: f32) -> f32 {
+pub(crate) fn x_at(scale: f32, y: f32) -> f32 {
     let depth = DEPTH * scale;
     let radius = depth + INNER * scale;
     (radius * radius - y * y).max(0.0).sqrt() - depth
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Side {
+    Right,
+    Left,
+}
+
+pub(crate) fn spine_points(centre: Pos2, scale: f32, from: f32, to: f32, side: Side) -> Vec<Pos2> {
+    let inset = SPINE_INSET * scale;
+    (0..=SEGMENTS)
+        .map(|step| {
+            let y = from + (to - from) * step as f32 / SEGMENTS as f32;
+            let out = x_at(scale, y) - inset;
+            let x = match side {
+                Side::Right => centre.x + out,
+                Side::Left => centre.x - out,
+            };
+            egui::pos2(x, centre.y + y)
+        })
+        .collect()
+}
+
+pub(crate) fn spine_stroke(colour: Color32, alpha: f32) -> Stroke {
+    Stroke::new(
+        SPINE_WIDTH,
+        colour.gamma_multiply(SPINE_ALPHA).gamma_multiply(alpha),
+    )
 }
 
 fn stacked(
@@ -915,6 +968,7 @@ mod tests {
         Bands {
             step: 1,
             wants: BTreeMap::from([(FRIGATE, 2)]),
+            refused: BTreeMap::new(),
         }
     }
 
@@ -1195,20 +1249,20 @@ mod tests {
         };
         let nine = counted(9);
         let ten = counted(10);
-        let column = |wheel: &Wheel| {
-            slots(wheel)
-                .map(|(_, slot)| slot)
-                .skip(STRIPS_PER_COLUMN)
-                .map(|slot| slot.frame.left())
-                .fold(f32::INFINITY, f32::min)
-        };
-        assert!(column(&nine).is_finite(), "the roster wraps");
+        let mine = slot_of(&nine, FRIGATE).frame.left();
+        let next = slots(&nine)
+            .map(|(_, slot)| slot.frame.left())
+            .filter(|left| *left > mine + 1.0)
+            .fold(f32::INFINITY, f32::min);
+        assert!(
+            next.is_finite(),
+            "the roster wraps past the frigate's column"
+        );
 
         let grown = slot_of(&ten, FRIGATE).frame.right() + STEP_WIDTH;
         assert!(
-            grown <= column(&nine),
-            "{grown} runs under the next column at {}",
-            column(&nine)
+            grown <= next,
+            "{grown} runs under the next column at {next}"
         );
     }
 
@@ -1311,26 +1365,60 @@ mod tests {
         let slot = slot_of(&wheel, FRIGATE);
         let at = |line: usize| slot.lines[line].cell.center();
 
+        let said = |at: Pos2| wheel.spoken_at(at).map(|(_, spoken)| spoken);
+
         assert_eq!(
-            wheel
-                .spoken_at(at(0))
-                .map(|(_, row, shown)| (row, shown.map(|shown| shown.entry))),
-            Some((FRIGATE, Some(Entry::Present(2))))
+            said(at(0)),
+            Some(Spoken::Row {
+                row: FRIGATE,
+                shown: Some(shown(Entry::Present(2)))
+            })
         );
         assert_eq!(
-            wheel
-                .spoken_at(at(1))
-                .and_then(|(_, _, shown)| Some(shown?.entry.phrase("Frigate"))),
+            said(at(1)).map(|spoken| spoken.phrase(&Roster::shipped())),
             Some("Frigate arriving from Rock 5".to_string())
         );
         assert_eq!(
-            wheel
-                .spoken_at(slot.glyph_rect(1.0).center())
-                .map(|(_, row, shown)| (row, shown)),
-            Some((FRIGATE, None)),
+            said(slot.glyph_rect(1.0).center()),
+            Some(Spoken::Row {
+                row: FRIGATE,
+                shown: None
+            }),
             "the glyph names its row alone"
         );
-        assert_eq!(wheel.spoken_at(CENTRE), None, "the middle carries nothing");
+        assert_eq!(said(CENTRE), None, "the middle carries nothing");
+    }
+
+    #[test]
+    fn a_refused_band_takes_no_click_and_says_why_beside_its_strip() {
+        let refused = Bands {
+            refused: BTreeMap::from([(FRIGATE, "Not yet".to_string())]),
+            ..selected()
+        };
+        let wheel = wheel(vec![sector(MINE, Vec::new())], Detail::Full, Some(refused));
+        let slot = slot_of(&wheel, FRIGATE);
+        let plus = slot.band(WheelBand::Plus(1), 1.0).center();
+
+        assert_eq!(
+            wheel.band_at(plus),
+            None,
+            "a refused band is no band to click"
+        );
+        assert_eq!(
+            wheel.spoken_at(plus),
+            Some((
+                egui::pos2(slot.frame.right(), slot.frame.center().y),
+                Spoken::Refused {
+                    why: "Not yet".to_string()
+                }
+            ))
+        );
+
+        let live = slot_of(&wheel, SHIPYARD)
+            .band(WheelBand::Plus(1), 1.0)
+            .center();
+        assert_eq!(wheel.band_at(live), Some((SHIPYARD, WheelBand::Plus(1))));
+        assert_eq!(wheel.spoken_at(live), None, "a live band says nothing");
     }
 
     #[test]

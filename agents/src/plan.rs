@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::roster::{Roster, Row};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
 use neumannarch_sim::{Materials, RockId, RowId};
@@ -17,6 +17,8 @@ const STORE_TRIGGER: f64 = 0.9;
 const REACH: f64 = 2_000.0;
 
 const CHOICES: usize = 2;
+
+const PAYBACK_HORIZON: f64 = 60.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -49,9 +51,9 @@ impl Plan {
         let mut plan = Plan {
             targets: BTreeMap::new(),
             promised: BTreeMap::new(),
-            budget: survey.view.stockpile.stock() + survey.income * BUILD_HORIZON,
+            budget: survey.view.stockpile.stock() + survey.view.income * BUILD_HORIZON,
         };
-        plan.opening(survey);
+        plan.draft(survey, personality, commitments);
         plan.economy(survey, personality, commitments, dice);
         plan.army(survey, personality, commitments);
         plan
@@ -91,16 +93,78 @@ impl Plan {
             .collect()
     }
 
-    fn opening(&mut self, survey: &Survey) {
-        if !survey.mine.is_empty() {
+    fn draft(&mut self, survey: &Survey, personality: &Personality, commitments: &mut Commitments) {
+        let draft = &survey.view.draft;
+        let seat = survey.view.seat;
+        for (rock, row) in draft.placements(seat) {
+            if survey.roles.masons.contains(&row) {
+                commitments.claim(rock, survey.view.time);
+            }
+        }
+        if draft.ended().is_some() && !survey.mine.is_empty() {
             return;
         }
-        let Some(rock) = opening_rock(survey) else {
+        for (rock, row) in draft.placements(seat) {
+            self.keep(Priority::Opening, rock, row, 1);
+        }
+        let Some(stage) = draft.running().filter(|stage| stage.seat == seat) else {
             return;
         };
-        for (row, count) in &survey.view.reserve {
-            self.keep(Priority::Opening, rock, *row, *count);
+        let Some(rock) = self.fittest(survey, personality) else {
+            return;
+        };
+        self.keep(Priority::Opening, rock, stage.row, 1);
+    }
+
+    fn wanted_shares(&self, survey: &Survey, personality: &Personality) -> Materials {
+        let shares = |of: Materials| of * (1.0 / of.total().max(f64::MIN_POSITIVE));
+        let drafted = survey
+            .view
+            .draft
+            .placements(survey.view.seat)
+            .filter_map(|(rock, _)| survey.view.terrain_of(rock))
+            .fold(Materials::ZERO, |caps, terrain| caps + terrain.caps);
+        let held = shares(drafted);
+        let mut wanted = Materials::ZERO;
+        for (material, share) in shares(self.intended(survey, personality)).amounts() {
+            wanted[material] = share * (1.0 - held[material]);
         }
+        wanted
+    }
+
+    fn fittest(&self, survey: &Survey, personality: &Personality) -> Option<RockId> {
+        let wanted = self.wanted_shares(survey, personality);
+        let nearest = |from: RockId, enemy: bool| -> Option<f64> {
+            survey
+                .view
+                .draft
+                .stages()
+                .iter()
+                .filter(|stage| match enemy {
+                    true => survey.view.is_enemy(stage.seat),
+                    false => stage.seat == survey.view.seat,
+                })
+                .filter_map(|stage| Some(survey.between(from, stage.placed?)))
+                .min_by(f64::total_cmp)
+        };
+        survey
+            .view
+            .terrain
+            .iter()
+            .filter(|terrain| survey.view.draft.took(terrain.rock).is_none())
+            .map(|terrain| {
+                let rock = terrain.rock;
+                let fit: f64 = terrain
+                    .caps
+                    .amounts()
+                    .map(|(material, cap)| cap * wanted[material])
+                    .sum();
+                let away = nearest(rock, true).map_or(1.0, |gap| gap / (gap + REACH));
+                let near = nearest(rock, false).unwrap_or_default();
+                (rock, fit * away / (1.0 + near / REACH))
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
+            .map(|(rock, _)| rock)
     }
 
     fn economy(
@@ -113,20 +177,94 @@ impl Plan {
         let Some(home) = survey.home else {
             return;
         };
+        for rock in survey.developed.iter().copied() {
+            self.stand(survey, rock);
+        }
+        self.expand(survey, personality, commitments, dice, home);
+        self.extractors(survey, personality);
         for rock in yards(survey, personality) {
             for row in first(&survey.roles.yards) {
                 self.want(survey, Priority::Economy, rock, row, 1);
             }
         }
-        for rock in survey.developed.iter().copied() {
-            self.stand(survey, rock);
-            for row in first(&survey.roles.extractors) {
-                let count = extractors(survey, personality, rock, row);
-                self.want(survey, Priority::Economy, rock, row, count);
+        self.stores(survey, personality, home);
+    }
+
+    fn demand(&self, survey: &Survey, personality: &Personality) -> Materials {
+        let mix = self.intended(survey, personality);
+        match mix.total() {
+            total if total > 0.0 => mix * (self.building_rate(survey) / total),
+            _ => Materials::ZERO,
+        }
+    }
+
+    fn intended(&self, survey: &Survey, personality: &Personality) -> Materials {
+        let weights = personality.weights(
+            survey.roster,
+            survey.roles,
+            survey.enemy_plating,
+            survey.enemy_range,
+        );
+        let army = counted(survey, personality.army_value(survey.enemy), &weights);
+        let army = army
+            .iter()
+            .filter_map(|(row, count)| survey.roster.get(*row).zip(Some(*count)));
+        self.wanted(survey)
+            .chain(army)
+            .map(|(row, count)| row.cost * f64::from(count))
+            .fold(Materials::ZERO, |mix, cost| mix + cost)
+    }
+
+    fn building_rate(&self, survey: &Survey) -> f64 {
+        self.wanted(survey)
+            .map(|(row, count)| row.builds().sum::<f64>() * f64::from(count))
+            .sum()
+    }
+
+    fn wanted<'a>(&'a self, survey: &'a Survey) -> impl Iterator<Item = (&'a Row, u32)> {
+        self.targets
+            .iter()
+            .filter_map(|((_, row), target)| survey.roster.get(*row).zip(Some(target.count)))
+    }
+
+    fn extractors(&mut self, survey: &Survey, personality: &Personality) {
+        let wanted = self.demand(survey, personality);
+        let left = survey.view.length.since(survey.view.time).seconds();
+        let repaying = left.min(PAYBACK_HORIZON);
+        for (material, row) in &survey.roles.extractors {
+            let Some(stats) = survey.roster.get(*row) else {
+                continue;
+            };
+            let rate = stats.extracts_of(*material);
+            let mut short = (wanted[*material] - survey.view.income[*material]).max(0.0);
+            let mut spare: BTreeMap<RockId, f64> = BTreeMap::new();
+            let mut counts: BTreeMap<RockId, u32> = BTreeMap::new();
+            for rock in survey.developed.iter().copied() {
+                let Some(terrain) = survey.view.terrain_of(rock) else {
+                    continue;
+                };
+                let standing = survey.count(rock, *row);
+                let mine = (rate * f64::from(standing)).min(terrain.caps[*material]);
+                let others = (terrain.pull[*material] - mine).max(0.0);
+                spare.insert(rock, terrain.caps[*material] - others - mine);
+                counts.insert(rock, standing);
+            }
+            while short > 0.0 {
+                let Some(rock) = widest(&spare) else {
+                    break;
+                };
+                let pulls = rate.min(spare[&rock]);
+                if pulls * repaying < stats.cost.total() {
+                    break;
+                }
+                short -= pulls;
+                *spare.entry(rock).or_default() -= pulls;
+                *counts.entry(rock).or_default() += 1;
+            }
+            for (rock, count) in counts.into_iter().filter(|(_, count)| *count > 0) {
+                self.want(survey, Priority::Economy, rock, *row, count);
             }
         }
-        self.stores(survey, personality, home);
-        self.expand(survey, personality, commitments, dice, home);
     }
 
     fn stand(&mut self, survey: &Survey, rock: RockId) {
@@ -179,7 +317,7 @@ impl Plan {
         {
             spare -= 1;
             sent += 1;
-            commitments.claim(rock, survey.view.tick);
+            commitments.claim(rock, survey.view.time);
             self.want(survey, Priority::Economy, rock, mason, 1);
         }
 
@@ -196,7 +334,7 @@ impl Plan {
             survey.enemy_plating,
             survey.enemy_range,
         );
-        let mut left = (personality.army_ratio * survey.enemy).max(personality.army_floor);
+        let mut left = personality.army_value(survey.enemy);
         let mut threatened: Vec<(RockId, f64)> = survey
             .threats
             .iter()
@@ -226,15 +364,8 @@ impl Plan {
         value: f64,
         weights: &[(RowId, f64)],
     ) {
-        for (row, share) in weights {
-            let Some(stats) = survey.roster.get(*row) else {
-                continue;
-            };
-            let count = (value * share / stats.cost.total()) as u32;
-            if count == 0 {
-                continue;
-            }
-            self.want(survey, priority, rock, *row, count);
+        for (row, count) in counted(survey, value, weights) {
+            self.want(survey, priority, rock, row, count);
         }
     }
 
@@ -288,7 +419,7 @@ impl Plan {
             return 0;
         };
         let mut bought = 0;
-        while bought < count && covers(self.budget, cost) {
+        while bought < count && affords(self.budget, cost) {
             self.budget -= cost;
             bought += 1;
         }
@@ -296,9 +427,26 @@ impl Plan {
     }
 }
 
-fn covers(budget: Materials, cost: Materials) -> bool {
-    let left = budget - cost;
-    left.metals >= 0.0 && left.volatiles >= 0.0 && left.energy >= 0.0
+fn counted(survey: &Survey, value: f64, weights: &[(RowId, f64)]) -> Vec<(RowId, u32)> {
+    weights
+        .iter()
+        .filter_map(|(row, share)| {
+            let count = (value * share / survey.roster.get(*row)?.cost.total()) as u32;
+            (count > 0).then_some((*row, count))
+        })
+        .collect()
+}
+
+fn widest(spare: &BTreeMap<RockId, f64>) -> Option<RockId> {
+    spare
+        .iter()
+        .filter(|(_, room)| **room > 0.0)
+        .max_by(|a, b| a.1.total_cmp(b.1).then(b.0.cmp(a.0)))
+        .map(|(rock, _)| *rock)
+}
+
+fn affords(budget: Materials, cost: Materials) -> bool {
+    (budget - cost).amounts().all(|(_, left)| left >= 0.0)
 }
 
 fn is_structure(roster: &Roster, row: RowId) -> bool {
@@ -309,18 +457,6 @@ fn is_structure(roster: &Roster, row: RowId) -> bool {
 
 fn first(rows: &[RowId]) -> impl Iterator<Item = RowId> + '_ {
     rows.iter().copied().take(1)
-}
-
-fn opening_rock(survey: &Survey) -> Option<RockId> {
-    let mut rocks: Vec<(RockId, f64)> = survey
-        .view
-        .terrain
-        .iter()
-        .map(|terrain| (terrain.rock, terrain.caps.total()))
-        .collect();
-    rocks.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    let at = usize::from(survey.view.seat.0) % rocks.len().max(1);
-    rocks.get(at).map(|(rock, _)| *rock)
 }
 
 fn yards(survey: &Survey, personality: &Personality) -> Vec<RockId> {
@@ -334,25 +470,6 @@ fn yards(survey: &Survey, personality: &Personality) -> Vec<RockId> {
     );
     rocks.truncate(personality.yards);
     rocks
-}
-
-fn extractors(survey: &Survey, personality: &Personality, rock: RockId, row: RowId) -> u32 {
-    let Some(caps) = survey.view.terrain_of(rock).map(|terrain| terrain.caps) else {
-        return 0;
-    };
-    let Some(rate) = survey
-        .roster
-        .get(row)
-        .map(|row| row.extracts().sum::<f64>())
-    else {
-        return 0;
-    };
-    if rate <= 0.0 {
-        return 0;
-    }
-    let richest = caps.metals.max(caps.volatiles).max(caps.energy);
-    let saturating = libm::ceil(richest / rate) as u32;
-    personality.extractors_per_rock.min(saturating)
 }
 
 fn claimed(survey: &Survey, commitments: &Commitments) -> Vec<RockId> {
@@ -446,11 +563,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::roster::{RAIDER, SHIPYARD};
+    use neumannarch_sim::roster::{
+        CONSTRUCTOR, ENERGY_EXTRACTOR, METALS_EXTRACTOR, RAIDER, SHIPYARD, VOLATILES_EXTRACTOR,
+    };
     use neumannarch_sim::state::view::View;
     use neumannarch_sim::state::{Batch, Issued, Seat, State};
     use neumannarch_sim::step::fire::Shots;
-    use neumannarch_sim::{Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick};
+    use neumannarch_sim::{Material, Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick, Time};
 
     use super::*;
     use crate::personality::Personality;
@@ -462,11 +581,60 @@ mod tests {
 
     const ENEMY_ROCK: RockId = RockId(9);
 
-    fn sided() -> State {
-        let reserve = BTreeMap::from([(SHIPYARD, 1), (RAIDER, 4)]);
-        let seat = |team| Seat::new(TeamId(team), Materials::new(1e4, 1e4, 1e4), reserve.clone());
+    const HOME: RockId = RockId(0);
+
+    const ALIKE_ROCK: RockId = RockId(1);
+
+    const UNLIKE_ROCK: RockId = RockId(2);
+
+    const RICH: Materials = Materials::new(1e4, 1e4, 1e4);
+
+    const EXTRACTORS: [(Material, RowId); 3] = [
+        (Material::Metals, METALS_EXTRACTOR),
+        (Material::Volatiles, VOLATILES_EXTRACTOR),
+        (Material::Energy, ENERGY_EXTRACTOR),
+    ];
+
+    fn mining(standing: u32) -> View {
+        let mut batch = Batch::new();
+        for (seq, (row, count)) in [(SHIPYARD, 1), (METALS_EXTRACTOR, standing)]
+            .into_iter()
+            .enumerate()
+        {
+            let seq = u32::try_from(seq).expect("two commands");
+            assert_eq!(batch.insert(want(0, seq, HOME, row, count)), Ok(()));
+        }
+        let reserve = BTreeMap::from([(SHIPYARD, 1), (METALS_EXTRACTOR, standing)]);
+        let (state, outcome) = opened(sided(reserve)).step(&batch);
+        assert_eq!(outcome.rejected, Vec::new());
+        View::of(&state, SeatId(0), &Shots::default())
+    }
+
+    fn opened(state: State) -> State {
+        let mut state = state;
+        while state.drafting() {
+            let (next, _) = state.step(&Batch::new());
+            state = next;
+        }
+        state
+    }
+
+    fn planned(view: &View) -> Plan {
+        let roster = Roster::shipped();
+        let roles = Roles::of(&roster);
+        let survey = Survey::of(view, &roster, &roles);
+        Plan::of(
+            &survey,
+            &Personality::expand(),
+            &mut Commitments::default(),
+            &mut Dice::new(0),
+        )
+    }
+
+    fn sided(reserve: BTreeMap<RowId, u32>) -> State {
+        let seat = |team| Seat::new(TeamId(team), RICH, reserve.clone());
         State::new(
-            CLOCK,
+            Time(CLOCK.0),
             0,
             Belt::GRAVITY,
             Roster::shipped(),
@@ -484,6 +652,94 @@ mod tests {
     }
 
     #[test]
+    fn a_bots_second_draft_pick_complements_its_first() {
+        let mut state = sided(BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]));
+        let opening = state.draft().stages()[2];
+        while state.draft().running() != Some(opening) {
+            state = state.step(&Batch::new()).0;
+        }
+        let mut batch = Batch::new();
+        let placing = want(opening.seat.0, 0, HOME, opening.row, 1);
+        assert_eq!(batch.insert(placing), Ok(()));
+        let mut view = View::of(&state.step(&batch).0, opening.seat, &Shots::default());
+        let metals = Materials::new(RICH[Material::Metals], 0.0, 0.0);
+        let beside = view.terrain_of(ALIKE_ROCK).expect("a free rock").orbit;
+        for terrain in &mut view.terrain {
+            terrain.caps = match terrain.rock {
+                HOME | ALIKE_ROCK => metals,
+                UNLIKE_ROCK => RICH - metals,
+                _ => Materials::ZERO,
+            };
+        }
+        view.terrain[UNLIKE_ROCK.0 as usize].orbit = beside;
+
+        let picked = planned(&view).commands(&view);
+
+        assert_eq!(
+            picked.first().map(|Command::Want { rock, .. }| *rock),
+            Some(UNLIKE_ROCK),
+            "it took the rock as poor as the one it opened on, not the one that completes it"
+        );
+    }
+
+    #[test]
+    fn no_extractor_is_wanted_at_a_rock_whose_headroom_cannot_feed_it() {
+        let roster = Roster::shipped();
+        for standing in [0, 3] {
+            let view = mining(standing);
+            let plan = planned(&view);
+
+            let terrain = view.terrain_of(HOME).expect("the home rock");
+            for (material, row) in EXTRACTORS {
+                let rate = roster[row].extracts_of(material);
+                let headroom = terrain.caps[material] - terrain.pull[material];
+                let fed = f64::from(plan.planned(HOME, row).saturating_sub(1)) * rate;
+                assert!(fed < headroom, "{material:?}: {fed} past {headroom}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_bot_whose_income_covers_its_builders_wants_no_further_extractor() {
+        let mut view = mining(0);
+        view.income = RICH;
+
+        let plan = planned(&view);
+
+        for (_, row) in EXTRACTORS {
+            assert_eq!(plan.planned(HOME, row), 0, "{row:?} wanted");
+        }
+    }
+
+    #[test]
+    fn a_bot_near_the_clocks_end_wants_no_extractor_that_cannot_repay() {
+        let mut view = mining(0);
+        assert!(
+            planned(&view).planned(HOME, METALS_EXTRACTOR) > 0,
+            "with a match to play"
+        );
+        view.time = view.length.since(Time(1));
+
+        let plan = planned(&view);
+
+        for (_, row) in EXTRACTORS {
+            assert_eq!(plan.planned(HOME, row), 0, "{row:?} wanted");
+        }
+    }
+
+    #[test]
+    fn a_standing_extractor_is_never_wanted_away_by_the_economy() {
+        let mut covered = mining(3);
+        covered.income = RICH;
+
+        assert_eq!(planned(&covered).planned(HOME, METALS_EXTRACTOR), 3);
+        assert!(
+            planned(&mining(3)).planned(HOME, METALS_EXTRACTOR) >= 3,
+            "a shortfall asks for more, never for fewer"
+        );
+    }
+
+    #[test]
     fn an_allys_army_is_no_threat_and_its_rock_is_never_attacked() {
         let mut batch = Batch::new();
         for (seat, rock) in [(1, ALLY_ROCK), (2, ENEMY_ROCK)] {
@@ -495,7 +751,8 @@ mod tests {
                 );
             }
         }
-        let (state, outcome) = sided().step(&batch);
+        let reserve = BTreeMap::from([(SHIPYARD, 1), (RAIDER, 4)]);
+        let (state, outcome) = opened(sided(reserve)).step(&batch);
         assert_eq!(outcome.rejected, Vec::new());
         let view = View::of(&state, SeatId(0), &Shots::default());
         assert!(

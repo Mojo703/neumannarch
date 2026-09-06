@@ -17,7 +17,6 @@ pub struct Personality {
     pub name: &'static str,
     pub seed: u64,
     pub rocks: usize,
-    pub extractors_per_rock: u32,
     pub stores: u32,
     pub yards: usize,
     pub masons: u32,
@@ -37,7 +36,6 @@ impl Personality {
             name: "turtle",
             seed: 0x7075_7274_6c65,
             rocks: 3,
-            extractors_per_rock: 4,
             stores: 2,
             yards: 1,
             masons: 1,
@@ -57,7 +55,6 @@ impl Personality {
             name: "expand",
             seed: 0x6578_7061_6e64,
             rocks: 8,
-            extractors_per_rock: 2,
             stores: 1,
             yards: 3,
             masons: 3,
@@ -77,6 +74,10 @@ impl Personality {
             Bot::Turtle => Personality::turtle(),
             Bot::Expand => Personality::expand(),
         }
+    }
+
+    pub fn army_value(&self, enemy: f64) -> f64 {
+        (self.army_ratio * enemy).max(self.army_floor)
     }
 
     pub fn named(name: &str) -> Option<Personality> {

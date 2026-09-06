@@ -23,7 +23,7 @@ impl State {
         teams.dedup();
         Standings {
             teams: teams.into_iter().map(|team| self.score(team)).collect(),
-            over: self.tick() >= self.clock(),
+            over: self.time() >= self.length(),
         }
     }
 

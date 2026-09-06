@@ -1,7 +1,7 @@
 use crate::TICKS_PER_SECOND;
 use crate::ids::{EntityId, RockId, SeatId};
 use crate::state::{Schedule, State};
-use crate::time::Tick;
+use crate::time::Time;
 
 const SEARCH_STEP: u64 = TICKS_PER_SECOND as u64;
 
@@ -45,19 +45,19 @@ impl Send {
             .entities()
             .filter(|entity| entity.seat() == seat && entity.home() == destination)
             .filter_map(|entity| entity.flight())
-            .find(|flight| flight.source() == source && !flight.has_departed(state.tick()))
+            .find(|flight| flight.source() == source && !flight.has_departed(state.time()))
             .map(|flight| flight.schedule())
     }
 
     fn solved(state: &State, source: RockId, destination: RockId) -> Option<Schedule> {
         let gravity = state.gravity();
-        let depart = Tick(state.tick().0 + Send::FORMING_TICKS).next();
+        let depart = Time(state.time().0 + Send::FORMING_TICKS).next();
         let from = state[source].orbit().at(depart, gravity);
         let limit = state.roster().movement_limit().0;
         (SEARCH_STEP..=SEARCH_BOUND)
             .step_by(SEARCH_STEP as usize)
             .find_map(|step| {
-                let arrive = Tick(depart.0 + step);
+                let arrive = Time(depart.0 + step);
                 let to = state[destination].orbit().at(arrive, gravity);
                 Schedule::between(from, to, depart, arrive, limit, gravity)
             })

@@ -7,7 +7,7 @@ pub use post::Post;
 pub use real::Real;
 pub use setup::{BadSetup, MAX_SEATS, Setup};
 pub use state::{Batch, Refused, Sequence, Stamped};
-pub use time::{Moment, Tick};
+pub use time::{Moment, Tick, Time};
 pub use vec3::Vec3;
 
 pub const TICKS_PER_SECOND: u32 = 120;

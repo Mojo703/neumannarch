@@ -62,13 +62,15 @@ mod tests {
     use neumannarch_game::screens::{control, lobby, title};
     use neumannarch_protocol::Notice;
     use neumannarch_sim::roster::SHIPYARD;
-    use neumannarch_sim::{RockId, RowId};
+    use neumannarch_sim::{RockId, RowId, Time};
 
     use super::*;
 
     const TARGET: UVec2 = UVec2::new(1280, 720);
 
     const PATIENCE: usize = 600;
+
+    const ROCK: RockId = RockId(10);
 
     static ONE_DRIVE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -77,8 +79,6 @@ mod tests {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-
-    const ROCK: RockId = RockId(10);
 
     fn game() -> Offscreen<Probe> {
         Offscreen::new(
@@ -303,7 +303,7 @@ mod tests {
         session.tick();
         session.step();
         let started = play(&session);
-        assert_eq!(started.session().state().clock(), shortest);
+        assert_eq!(started.session().state().length(), Time(shortest.0));
         assert_eq!(started.seat(), neumannarch_sim::SeatId(0));
 
         placed(&mut session);
@@ -334,6 +334,9 @@ mod tests {
 
         let band = band_of(session, centre, SHIPYARD);
         click_at(session, band);
+        while play(session).session().state().drafting() {
+            session.tick();
+        }
         advance(session, 2);
         session.step();
 

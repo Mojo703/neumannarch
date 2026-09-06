@@ -83,29 +83,48 @@ frontend is speaking.
 - `Vec3 { x, y, z }` of `f64`: the sim's own vector with a closed set of
   operations: add, sub, scale, dot, cross, length, normalized. Converting
   to the engine's `f32` math happens in `game`, never here.
-- `Materials { metals, volatiles, energy }` of `f64`: the triple, with
+- `Materials([f64; 3])`: the triple over `Material::EVERY`, with
   component-wise arithmetic and `min`. A row's cost, a rock's caps, a
-  row's capacity and a player's stock are all `Materials`; the field name
-  carries the meaning, since the arithmetic is identical.
+  row's capacity and a player's stock are all `Materials`, since the
+  arithmetic is identical. `Index<Material>` and `IndexMut<Material>` are
+  the one way in, and `amounts()` walks the three in `Material::EVERY`;
+  there are no named fields, so no caller can read one material without
+  naming it. `Materials::new` takes metals, volatiles and energy in that
+  order.
 - `Stockpile { stock: Materials, capacity: Materials }`: the only place
   materials are held. Income clamps to capacity, spending never goes
   below zero, refunds clamp. No other type touches a stock directly.
+- `PerSecond { filling: Materials, completed: Materials }`: one second's
+  accumulation of a `Materials` fact, beside the stockpile because it is
+  `Materials` arithmetic and nothing else. It is `pub(crate)`; a seat's
+  and a rock's readers hand out the completed `Materials` alone.
 - Transcendentals: `libm::sin`, `cos`, `sinh`, `cosh`, `atan2`, `exp`,
   `log`, `pow`. `f64::sqrt` is exact under IEEE 754 and allowed.
   `sim/clippy.toml` disallows the `std` transcendentals and `HashMap`,
   `HashSet`, `Instant`, `SystemTime`.
-- `Tick(u64)`: the sim clock. `Moment(f64)`: a fractional tick, used for
-  weapon ready times and shot ordering. `TICK` and `TICKS_PER_SECOND` in
-  `lib.rs` are the only place seconds meet ticks.
+- `Tick(u64)` is the count of steps taken and nothing else. The lockstep,
+  the log, the snapshots, the settled hashes, a command's stamp and the
+  draft's stages are all about steps, so they take a `Tick`.
+- `Time(u64)` is the match's own time, the tick less the tick the clock
+  started at, zero for every tick of the draft. Everything physical takes
+  a `Time`: a rock's orbit, a send's departure and arrival, a schedule's
+  burns, a frame's fed window, the per-second rotation, the standings and
+  the win. The two are separate types, so a schedule cannot be handed a
+  step count and the belt cannot turn while the clock is stopped.
+  `State::time` is the one place a tick becomes a time.
+- `Moment(f64)` is a fractional `Time`, used for weapon ready times and
+  shot ordering. `TICK` and `TICKS_PER_SECOND` in `lib.rs` are the only
+  place seconds meet either.
 
 ## Sim: the state
 
 ```rust
 pub struct State {
     tick: Tick,
-    clock: Tick,                    // the match ends here
+    length: Tick,                   // the match runs this long once the clock starts
+    draft: Draft,                   // the stages, the one running, the tick it ended
     gravity: Gravity,               // the central mass's μ
-    seats: Vec<Seat>,               // team, alive, stockpile, reserve
+    seats: Vec<Seat>,               // team, alive, stockpile, reserve, income, spend
     roster: Roster,                 // the movement limit and Vec<Row>
     rocks: Vec<Rock>,               // orbit, caps, radius; indexed by RockId
     entities: BTreeMap<EntityId, Entity>,   // dead ones removed
@@ -116,9 +135,15 @@ pub struct State {
 }
 
 pub struct Post { pub rock: RockId, pub seat: SeatId }      // one composition
+pub struct Draft { stages: Vec<Stage>, running: usize,
+                   began: Tick, ended: Option<Tick> }
+pub struct Stage { pub seat: SeatId, pub row: RowId,
+                   pub placed: Option<RockId> }
 pub struct Seat { team: TeamId, alive: bool, stockpile: Stockpile,
-                  base_capacity: Materials, reserve: BTreeMap<RowId, u32> }
-pub struct Rock { orbit: Orbit, caps: Materials, radius: Real }
+                  base_capacity: Materials, reserve: BTreeMap<RowId, u32>,
+                  income: PerSecond, spend: PerSecond }
+pub struct Rock { orbit: Orbit, caps: Materials, radius: Real,
+                  pull: PerSecond }
 pub struct Frame { post: Post, row: RowId, progress: Real }
 pub struct Ready { entity: EntityId, weapon: u8, at: Moment }
 
@@ -144,14 +169,67 @@ the verb names a rock, and an entity's home is a rock. `State::entities_at`
 answers who is homed at a rock and `State::standing_at` who is at it now;
 the two differ only for a unit whose send is still forming.
 
+- The draft is a fact of the state and the clock hangs off it. It is a
+  sequence of stages, one per reserve row a seat holds, capped at
+  `STAGES_PER_SEAT`: the first round in an order `Draft::of` draws from the
+  seed through `hash::digest(&(seed, seat))`, ties by seat id, so no dice
+  type and no platform call decides it, and the second round in that order
+  reversed, so the seat that went first goes last. A seat's own rows go
+  down in order of Build rate, the greatest first, ties by row id, so the
+  shipyard takes the seat's first rock and its economy's home is the rock
+  it chose first. One stage runs at a time. `Draft::place` ends the running
+  stage the moment its seat places and begins the next at that tick;
+  `Draft::pass` ends it at `STAGE_SPAN` after it began and begins the next.
+  A seat whose stage ran out keeps its unplaced stage and may place at any
+  later tick, alongside the running one, which is why `Draft::awaits`
+  answers by the stage's place in the sequence and not by whose turn it is:
+  `Some(true)` where the seat's unplaced stage has begun, `Some(false)`
+  where it has not, `None` where the want is no pick at all. A `Stage`
+  carries the seat, the row and the rock it placed at, so the draft alone
+  answers what is free, what a seat has placed and which stages ran out
+  unplaced, and the panel is drawn from it with nothing derived; nothing
+  counts the reserve, which no placement spends until the clock starts.
+  `State::apply` treats a want of one as a pick: `Rejected::NotYet` before
+  the stage, `Rejected::RockTaken` at a rock a placement took, otherwise
+  the rock is taken there and then, so two picks in one tick are first come
+  first served in the batch's own order. `State::close_draft` passes a
+  stage that has run out and ends the draft on the tick every stage has
+  placed, or at `GRACE` after the last stage ended. While it runs,
+  `State::step` applies commands and advances the tick and does nothing
+  else: no phase runs, so no body moves, nothing is extracted, nothing is
+  built and no want is filled, and a want accepted during the draft stands
+  until the clock starts. The skipped phases are not redundant with match
+  time standing still: fulfilment, extraction and construction act on a
+  tick, not on a span, and would fill, credit and build at time zero. The
+  draft's end is the clock's start, so `State::time` counts from it and is
+  zero throughout the draft, and the match is over when `State::time`
+  reaches `length`. Standings, the win, the view's countdown and the bots'
+  payback all read match time and need no rule of their own.
 - Ids are newtypes over the index into their store: `RockId(u32)`,
   `EntityId(u32)`, `RowId(u16)`, `SeatId(u8)`. `State` implements `Index`
-  for each, so a rule reads `state[id]`. Dead entities are removed at the
+  for each, so a rule reads `state[id]`, and `IndexMut` for `SeatId` and
+  `RockId`, so a rule that credits a seat or a rock writes `state[id]`
+  too rather than matching on an absence that an id off the state's own
+  entities cannot have. Dead entities are removed at the
   end of the step and ids are never reused within a match, so an id held
   across a tick is validated by lookup, never by trust.
 - `Wants` is a `BTreeMap<RowId, u32>` with no zero entries. A post whose
   wants are empty, whose entities are gone and whose frames are closed is
   removed at the end of the step; that is the whole existence rule.
+- A `PerSecond` accumulates one `Materials` fact over one second: each tick
+  fills it, and `State::advance` closes every seat's and every rock's when
+  the tick it reaches is a multiple of `TICKS_PER_SECOND`, which is where
+  a second is defined and the only place it is. What it reports is the last completed
+  second's total, zero until the first second closes, and it stands until
+  the next closes. A seat's `income` is what its extractors pulled, gross,
+  so the display can draw what capacity lost; its `spend` is what its
+  frames drained; a rock's `pull` is what every extractor there took, of
+  any seat. Three methods fill one and no other code does: `Seat::earn`
+  fills a seat's income, `Seat::drain` its spend, and `Rock::extract` a
+  rock's pull. `Seat::refund` returns a cancelled frame's materials and
+  fills none of the three, since a refund is neither income nor spend.
+  They are fields of the state, so a restored snapshot replays them
+  exactly and they hash with everything else.
 - `Seat::new` takes the stock the seat starts with, which is also its base
   capacity; every tick the capacity is that base plus the capacity of its
   living entities, so nothing a seat starts with is lost.
@@ -168,8 +246,10 @@ the two differ only for a unit whose send is still forming.
   above the rock's own radius, the floor holding keeps them off. One test
   holds every shipped rock's floor inside its zone, so the zone is always a
   shell.
-- `Roster` owns the movement limit and the rows. The shipped seven are built
-  by `Roster::shipped()` from `roster/shipped.rs`; `Roster::add(Row) -> RowId`,
+- `Roster` owns the movement limit and the rows. The shipped nine are built
+  by `Roster::shipped()` from `roster/shipped.rs`, one extractor row per
+  material among them, alike in every stat but the material their
+  `Weapon::Extract` names; `Roster::add(Row) -> RowId`,
   `Roster::moving_at(Real) -> Roster` and `Roster::units_by(impl Fn(Row) -> Row)
   -> Roster`, which rewrites every unit row and leaves the structures alone,
   build the variants a test or `harness sweep` plays. `Roster::movement_limit()` is the one acceleration
@@ -305,17 +385,18 @@ impl Session {
 
 ## Sim: the step
 
-Each phase is a type that borrows the snapshot and returns its effect.
+Each phase reads the snapshot and returns its effect, as a type that
+borrows the snapshot or as the effect's own constructor.
 `State` has `step`, queries, and nothing else; a phase that wants to live
 on `State` is a missing type.
 
 ```rust
-let snap = &applied;                                   // commands applied
+let snap = &applied;                                   // commands applied, the draft closed
 let sweep = snap.sweep();                              // one spatial index a tick
 let thrusts = Holding::of(snap, &sweep).run();         // Thrusts: one per steered unit
 let moved   = Propagation::of(snap, &thrusts).run();   // Moved: bodies one tick on, flights ended
 let filled  = Fulfilment::of(snap).run();              // Assigned: reserve, surplus, frames opened
-let income  = Extraction::of(snap).run();              // Income: per seat
+let income  = Income::extracted(snap);                 // Income: per rock and seat
 let work    = Construction::of(snap).run();            // Progress: spend, completions
 let shots   = Fire::of(snap, &sweep).run();            // Shots: ordered, with pending damage
 State::next(snap, moved, filled, income, work, shots)  // deaths, reaping, elimination, tick+1
@@ -499,9 +580,15 @@ fn chase(Body, &Row, target: Body) -> Vec3;
   marks it and nothing scraps it. `Assigned` carries the placements, the
   sends, the openings and the cancellations.
 - **Extraction** groups extract weapons by the rock their entity stands
-  at; per material, each takes its rate, the cap is split equally among
-  them when the sum exceeds it, and unused shares redistribute until none
-  is left or the cap is met. `Income` is one `Materials` per seat.
+  at. A weapon names one material, so a rock's cap for a material is
+  split among the extractors of that material alone and an extractor of
+  another material is not in that split: each takes its rate, the cap is
+  split equally among them when the sum exceeds it, and unused shares
+  redistribute until none is left or the cap is met. `Income::extracted`
+  reads the tick's extraction off the snapshot into a
+  `BTreeMap<(RockId, SeatId), Materials>`, so rock then seat order is the
+  key's and no code sorts it, and `Income::apply` credits every seat and
+  every rock from it. Nothing else reads an `Income` or takes one apart.
 - **Construction** works one seat's rocks in turn over one copy of its
   stockpile. At each rock it assigns the builders' combined rate evenly
   across that seat's frames there, computes the per-material ratio of
@@ -549,14 +636,19 @@ fn chase(Body, &Row, target: Body) -> Vec3;
 
 ```rust
 pub struct View {
-    seat: SeatId, tick: Tick, clock: Tick, gravity: Gravity,
-    stockpile: Stockpile, reserve: BTreeMap<RowId, u32>,
+    seat: SeatId, tick: Tick,            // the step count, for the draft's windows
+    time: Time, length: Time,            // the match's own time and how long it runs
+    gravity: Gravity,
+    draft: Draft,                        // the sim's own, cloned whole
+    stockpile: Stockpile,
+    income: Materials, spend: Materials,  // the viewer's last whole second
+    reserve: BTreeMap<RowId, u32>,
     compositions: Vec<Composition>,      // every seat's holdings, by rock
     plans: Vec<Plan>,                    // the viewer's own wants and frames
     present: Vec<Present>,               // every entity of the match
     teams: Box<[TeamId]>,                // the seating, indexed by seat
     exchanges: Vec<Exchange>,            // the tick's fire, per rock and seat
-    terrain: Vec<Terrain>,               // every rock: orbit, caps, radius
+    terrain: Vec<Terrain>,               // every rock: orbit, caps, radius, pull
     zone: f64,
     standings: Standings,
 }
@@ -583,7 +675,19 @@ impl View {
   shots. Wants and frames are the one exception, and the type says so: a
   composition exists for every seat that holds or moves anything at a
   rock, and only the viewer's own wants and frames leave the sim, as
-  `plans`. The reserve and the stockpile are the viewer's too.
+  `plans`. The reserve and the stockpile are the viewer's too, and so are
+  the `income` and the `spend` beside it: a seat's own extraction and its
+  own frames. A rock's `pull` stands beside its caps in `Terrain`, every
+  seat's extraction there summed, since a rock and its caps are visible to
+  all. All three are the last completed second's totals.
+- The `draft` is the sim's own, cloned whole, since the stages, the one
+  running and the rocks taken are visible to all (DESIGN.md, Start). The
+  panel reads `Draft::stages` for the order with each stage's seat, row and
+  rock, `Draft::running` for the stage now running and `Draft::began` for
+  the tick it began; a stage before the running one with no rock is one
+  that ran out. A bot asks `Draft::running` whether it is picking,
+  `Draft::took` what is spoken for, `Draft::placements` what it has placed
+  itself, and `Draft::ended` when the clock started.
 - It derives nothing itself; every fact is asked of the type that owns
   it — `State::holdings` for what each seat holds at each rock,
   `Frame::fraction` and `Frame::starved_material` for a frame,
@@ -613,8 +717,8 @@ impl View {
 - `State::standings() -> Standings`: per team, the rocks where it has a
   structure, the cost total of its living entities, and whether any of its
   seats is still in. `over()` says the clock has run out and `leaders()`
-  applies DESIGN.md's tie-break; the clock is a field of the state, so the
-  end is a query. `Standings::new` builds one from those parts, which is
+  applies DESIGN.md's tie-break, comparing the state's match time against
+  its length, so the end is a query. `Standings::new` builds one from those parts, which is
   what a hand-built view in `look` and in tests needs.
 
 ## Game: the display library
@@ -690,9 +794,44 @@ impl Entry {
   `LONG_RANGE_FROM_METERS` is the range at which a damage weapon's mark
   becomes a bar instead of a dot.
 - `tint::toward(base, caps, strength)`: a rock's colour from its caps, so
-  a region reads as one hue. `belt` paints a rock's mesh with it and `hud`
-  strokes that rock's zone circle with it, faintly, so a region reads as
-  one hue on both layers.
+  a region reads as one hue. `belt` paints a rock's mesh with it; the
+  zone circle on the HUD is one ink for every rock.
+- `icon::Icon`: one material's icon, the closed rings of its SVG in the
+  glyph's sixty-unit cell, parsed by `usvg` (no text, no fonts) from the
+  three files under `game/icons/` into a `LazyLock` the first time any
+  glyph is drawn, which is the mesh catalog at boot; a file that is not
+  one closed filled path is a boot-time panic naming the material.
+  `icon::of(material)` is the drawing and `placed(centre, width)` is it
+  as a `Primitive::Path`, so the glyph's Extract mark, the stockpile's
+  cells and the rock bars draw it through the same painter and
+  rasteriser as the dot, the line and the ring. A path is filled
+  even-odd on both layers: the rasteriser counts crossings, and
+  `stencil::Cell` fills it as a mesh of trapezoids, one per band between
+  vertex heights, so a nut's hole is a hole.
+- `strip::Strip`: the stockpile and the clock, laid out across the top
+  centre from `scene::StripView` (the seat's stockpile, income, spend,
+  elapsed tick and clock), in the wheel's vocabulary: a scrim box per
+  cell, the count font for every numeral, the bar a box of the count
+  line's height outlined in the panel's line ink, filled to the stock in
+  the hue faded toward the backdrop, the spend segment darker inside the
+  tip and the income segment fainter past it, the overrun the fill
+  itself running past the box's end when the stock is at capacity. The
+  clock's fill is the panel's dim ink so the elapsed numeral reads over
+  it. `spoken_at` is the cell under the pointer and its two phrases.
+- `bars::Bars`: every rock's resource bars, the mirror of its wheel: a
+  row per material with a cap, at the wheel strip's height, the icon at
+  the row's right end nearest the rock and the bar growing leftward from
+  it, the rows' right ends on the wheel's arc mirrored, the longest
+  band a wheel strip's width, and along the mirrored arc one spine per
+  rock in the panel's dim ink, drawn by the wheel's own `spine_points`
+  with `Side::Left`. The cap is a band of the count line's height in
+  the hue lerped toward the backdrop by `CAP_ALPHA`, the pull the full
+  hue laid over it from the right end; no scrim, no outline. One
+  drawing serves both states: small and faint at rest, full and whole
+  under the pointer or the selection, never a different shape, every
+  colour faded by the `Placed` alpha. `Bars::over` takes the frame's `Placed` list and
+  rests every rock without one at the small scale and the resting alpha,
+  which is what `at_rest` gives the lobby, loading and results screens.
 - `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
   state, its marks, the `alpha` it is drawn at, and the belt a starved
   frame carries in its material's `hue`. Every HUD glyph goes through it,
@@ -734,8 +873,18 @@ impl Entry {
   decide what the pointer is over before any wheel is built.
 - `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the frame's
   layout and the frame's hit test in one pass. `Aim { viewer, pointer,
-  hovered, step, wants }` is what the pointer and the keyboard say, the
-  wants keyed by rock and row so any full wheel can carry its bands. `Ease` is
+  hovered, step, wants, draft }` is what the pointer and the keyboard say
+  and the draft the view carries, the wants keyed by rock and row so any
+  full wheel can carry its bands. `Aim::refusal(rock, row)` is the
+  draft's own rule and nothing else, `Draft::awaits` and `Draft::took`
+  read as the sim reads them: `NOT_YET` for a reserve band before the
+  seat's stage has begun, `ROCK_TAKEN` for a pick at a rock a placement
+  took, `None` once the draft has ended or where `draft` is `None`, as
+  in `look`'s hand-built scenes. A full wheel's `Bands { step, wants,
+  refused }` carries the reasons by row; a refused band is drawn spent,
+  `Wheel::band_at` never returns it, so no click can edit it, and
+  `spoken_at` answers `Spoken::Refused { why }` at the strip's right
+  edge, where a live band shows its step. `Ease` is
   where a wheel's scale and alpha are eased toward their targets over
   `ease::SPAN_SECONDS`: `Motion`, a store the play screen owns and steps
   once per frame by the engine's own `dt`, never egui's clock, in which
@@ -749,11 +898,46 @@ impl Entry {
   any wheel grew, the smallest footprint under the pointer winning so a
   small wheel inside the full one's reach still takes the pointer, and a hovered wheel stays hovered until the pointer
   leaves its full footprint by `HOVER_MARGIN`, so growing under the
-  pointer never changes what is hovered and an overshoot closes nothing. `at`, `band_at` and `entry_at` are what a click, a
-  drag and the hover phrase read.
+  pointer never changes what is hovered and an overshoot closes nothing. `at`, `band_at` and `spoken_at` are what a click, a
+  drag and the hover phrase read; `spoken_at` answers with a `Spoken`,
+  a wheel's row, a rock bar or a refused band, which composes its own
+  phrase from the roster. `Wheels` owns the frame's `Bars` too, laid
+  from the same eased `Placed` list, so a rock's bars grow and fade with
+  its wheel.
 - `ease`: `SPAN_SECONDS`, the one span every eased value on screen
   settles over, and `toward`, which closes that span's share of a
-  value's gap to its target in one frame.
+  value's gap to its target in one frame; `toward_over` is the same
+  step over a stated span, which only the draft panel's fade takes.
+- `screens::order::Order`: the draft's panel, DISPLAY.md's initiative
+  list, the third panel inside a match.
+
+```rust
+pub struct Order { frame: Rect, rows: Vec<Row>, alpha: f32 }
+struct Row { rect, seat: SeatId, name: String, glyph: Glyph, standing: Standing }
+pub enum Standing { Waiting, Running { left: f32 }, RanOut, Placed(RockId) }
+pub const FADE_SECONDS: f64;
+
+impl Order {
+    pub fn over(window: Rect, draft: &Draft, tick: Tick, roster: &Roster,
+                names: &[String], alpha: f32) -> Order;
+    pub fn paint(&self, painter: &egui::Painter);
+}
+```
+
+  One row per `Draft::stages` entry in order, laid by `panel::column`
+  at the lobby table's corner, so it clears the strip at any width. A
+  row's `Standing` is read off the draft alone: `Placed` where the stage
+  carries a rock; `Running` for the stage at `Draft::running`'s position,
+  `left` the share of `STAGE_SPAN` since `Draft::began` still to run;
+  `RanOut` for an unplaced stage before it, or every unplaced stage once
+  no stage runs; `Waiting` after it. The running row is whole and every
+  other faint at `wheels::RESTING_ALPHA`; the glyph is hollow until
+  placed and solid after, through `Stencil`. `names` are the seats'
+  names in seat order from `lobby::seat_names(&Seating, me)`, which
+  `Machine` now keeps the `Seating` for; `Play` owns the panel's alpha,
+  eased by `ease::toward_over` over `FADE_SECONDS` toward one while the
+  draft runs and zero once `Draft::ended`, and draws the panel while it
+  is above zero.
 - `camera::BeltCamera`: the focus point moving at the local orbital
   velocity, pan by meters or by pointer pixels, and zoom within a range
   stated against the belt's own scale. A pan, a zoom or a new focus sets
@@ -770,10 +954,10 @@ impl Entry {
   `Scene` and a `Viewport` to the engine's draws — rocks, one light, and
   ships, in 3D. `hud`: one function from a `Scene`, a `Viewport` and an
   `egui::Painter` to what is painted over the belt's own projection —
-  every rock's zone circle in its tint, every standing armed ship's range
-  circle in its owner's colour, and the flight lines. The wheels are
-  painted after it, through `Wheels::paint`, so nothing on the belt covers
-  a wheel.
+  every rock's zone circle in one ink, every standing armed ship's range
+  circle in its owner's colour, and the flight lines. The wheels and the
+  bars are painted after it, through `Wheels::paint`, and the strip
+  after them, so nothing on the belt covers a wheel.
 - The binary is the playable: a `Game` whose `tick` and `frame` are the
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped
@@ -805,7 +989,14 @@ impl Entry {
 `look` is a binary of `game`, behind the `look` feature, over the
 engine's `offscreen` feature and its default `ui` feature so the HUD
 lands in the pixels. It holds the three fixed scenes from DISPLAY.md as
-code, renders each through a `Session`, reads pixels back, and writes
+code, and a fourth, a stockpile mid-match (income, spend, one material
+at capacity, one stalling) beside a rock with mixed caps and an
+extractor's glyph on its wheel, and a fifth, the draft mid-way: a real
+two-seat skirmish session, its seed chosen so the host goes first, one
+stage placed, one run out, one running half drained, one waiting, the
+bare rock beside the taken one carrying the hollow wheel with a refused
+band's reason. It renders each through a `Session`,
+reads pixels back, and writes
 PNGs under `game/look/`, which is `.gitignore`d: screenshots are the
 judgement's input, never committed. `cargo run -p neumannarch-game --features
 look --bin look` runs it; `check.sh` builds it, with `cargo build -p
@@ -826,10 +1017,13 @@ its `Commitments` and a `Dice`.
 
 - `Survey` is one decision's tally of one view and derives everything it
   answers from that view alone, own and enemy alike: the rocks a seat
-  holds, occupies and builds at, its income and army, the enemy's army
+  holds, occupies and builds at, its army, the enemy's army
   and the rocks it holds, the threat at each rock, and the worst plating
-  and range the enemy fields. An enemy is a seat the view says is on
-  another team, so a teammate is neither a threat nor a target. Nothing is
+  and range the enemy fields. It does not derive income: the view carries
+  the seat's own, measured by the sim, and a plan reads `view.income`
+  rather than a second answer to one fact. An enemy is a seat the view
+  says is on another team, so a teammate is neither a threat nor a
+  target. Nothing is
   remembered, since nothing is hidden (DESIGN.md, Visibility).
 - `Commitments` is what the agent has decided and the view cannot say: the
   rocks it has claimed and how long it will wait for each, the rocks a
@@ -840,8 +1034,105 @@ its `Commitments` and a `Dice`.
   `Want`s, in priority order: the opening, defence, economy, then army.
   An attack commits to the nearest enemy rock once the army it can see it
   needs is standing.
+- `Plan::draft` is the whole of a bot's opening; there is no rule by seat
+  index any more. While its stage runs it asks for one of that stage's row,
+  and only that; off its stage it asks for nothing, and
+  while the draft runs it re-asserts the placements the draft records for
+  it so its own standing want is never dropped. The rock is the free rock
+  with the greatest
+  `fit × away / (1 + near / REACH)`, ties by lowest rock id, where `fit` is
+  the rock's caps weighted by the shares of `Plan::intended`, the same cost
+  mix the extractor rule spends at; `away` is `gap / (gap + REACH)` over
+  the distance to the nearest rock an enemy seat has taken, one where none
+  has; and `near` is the distance to the nearest rock this seat has taken,
+  zero where it holds none. So a bot takes a rock rich in what it means to
+  build, away from its enemies and beside its own. Both the enemies' rocks
+  and its own are read off `View::draft`, since nothing stands during the
+  draft for the survey to see. A seat's second pick weighs what its first
+  lacks: `Plan::wanted_shares` is `mix[m]/Σmix × (1 - held[m]/Σheld)` per
+  material, where `held` is the caps of the rocks the seat has already
+  drafted, so the more of a material those rocks supply the less it weighs
+  and a material they have none of keeps its whole share of the mix, and
+  `fit` is the rock's caps weighted by those shares. No share is ever
+  negative, so the rule carries no case of its own and the pair covers the
+  mix between them. A mix of one material that the first rock already
+  supplies scores every free rock at zero, which the tie-break by lowest
+  rock id settles.
+- The rock a bot's constructor drafts is its first expansion: `Plan::draft`
+  claims it in `Commitments` from the tick it lands, so `expand` keeps the
+  constructor there instead of counting it spare and pulling it home, and
+  the claim retires itself the moment a structure stands there. The rock is
+  in the survey's `developed` from the start, since a builder stands at it,
+  so the extractor rule wants extractors there by income and the yards rule
+  wants a yard there, in that order, and the constructor builds them.
+  `Commitments` keeps its claims and bars in match time, not in steps. `Seated::issue` breaks its own decision
+  cadence while the bot's stage runs, so a bot places on the first tick it
+  sees its stage running rather than waiting out the cadence; DESIGN.md
+  says it places on the stage's first tick, and a stage begins inside a
+  step, so the first tick a view can show it is the tick after.
+- `economy` runs in one order and the order is the rule: the structures
+  already standing, `expand`'s masons, the extractors, then the yards, then
+  the stores. Income comes before the buildings it pays for, so a second
+  yard cannot eat the energy an extractor needs and stall the seat with a
+  frame it can never fill; the stores, the least urgent spend, are charged
+  last. The demand is therefore matched to the builders that stand and the
+  masons the plan commits, not to the yards it is about to want.
+- The economy sizes extraction by matching income to build capacity, all
+  of it read off the plan's own targets, the personality and the roster:
+
+```rust
+fn counted(&Survey, f64, &[(RowId, f64)]) -> Vec<(RowId, u32)>;
+fn widest(&BTreeMap<RockId, f64>) -> Option<RockId>;
+impl Plan {
+    fn wanted(&self, &Survey) -> impl Iterator<Item = (&Row, u32)>;
+    fn building_rate(&self, &Survey) -> f64;               // per second
+    fn intended(&self, &Survey, &Personality) -> Materials; // a cost mix
+    fn demand(&self, &Survey, &Personality) -> Materials;   // per second
+    fn extractors(&mut self, &Survey, &Personality);
+}
+```
+
+  `wanted` is every row the plan has a target for, at every rock, with
+  its count; there is no second tally of what the bot will have.
+  `building_rate` is the combined Build rate of those rows. That rate is
+  the sim's own ceiling on spend, since build is flow at the builders'
+  rate, so the economy grows with the base rather than with an appetite
+  no extractor could meet. `intended` is the cost mix that rate will be
+  spent on: those same rows, plus the army rows at `Personality::weights`
+  sized by `counted`, which is also what `force` asks for. `demand` is
+  that mix normalised to its own total and multiplied by the rate, so it
+  is a `Materials` per second whose total is the build rate.
+- Shortfall per material is `demand` less `View.income`, floored at zero.
+  Income is measured by the sim; the agent derives none of its own.
+- Spare at a rock for a material is its cap less what every other seat
+  pulls there and less what this seat already pulls:
+  `caps[m] - (pull[m] - mine).max(0.0) - mine`, where `mine` is this
+  seat's standing extractors of that material at that rock at their rate,
+  capped by the cap. A seat's own pull is not lost headroom for a count
+  that includes the extractors making it, and subtracting only what
+  others take says so without over-counting in the seconds before `pull`
+  has caught up with a rock's newest extractors. Each placement lowers
+  the spare, so it bounds the whole count at the rock and not the
+  placements alone.
+- Payback: an extractor is placed only where `min(rate, spare)` times the
+  smaller of the clock's remaining seconds and `PAYBACK_HORIZON` covers
+  its cost's total, so a bot near the clock builds nothing that cannot
+  repay before the match ends.
+- Placement walks the materials in the roster's order while a material is
+  short, taking the developed rock with the greatest spare, ties by
+  lowest rock id, and stops when no rock has spare left or the placement
+  cannot repay. Each placement lowers the shortfall by its yield. The want is what stands at the rock plus
+  the placements, through `Plan::want` like every other, so `affordable`
+  charges it against the budget; a material with nothing short still
+  wants what stands, since nothing complete is scrapped.
+- The two personalities differ in this rule only through `demand`: the
+  yards, masons and stores they want and the army value
+  `Personality::army_value` gives them. Nothing here reads the dice.
 - `Roles` reads the roster once into the row an agent prefers per job, so
-  no agent names a row by id.
+  no agent names a row by id. Extraction is a job per material, not one
+  job: `Roles::extractors` is the best-rated row that pulls each
+  material, in the roster's own material order, which is the order the
+  economy places them in.
 - `Personality::of(protocol::Bot)` is the one place a lobby's bot becomes
   constants, and it is exhaustive, so a bot the protocol can name always
   has a way of playing. A bot in a lobby is a `Seated` agent run by the
@@ -854,7 +1145,11 @@ record reproduces the live hash and that the same match built twice from
 independent initial states hashes the same; `rollback` inserts every
 command late and scrambled and checks the settled hashes match the
 on-time match; `matrix` plays named compositions pairwise from symmetric
-starts and prints a table of rocks and the tie-break's verdict; `sweep`
+starts and prints a table of rocks and the tie-break's verdict; `draft`
+plays one personality against itself over `MIRRORS` seeds and prints, per
+seed, which team's window opened first, the rocks each seat drafted with
+their caps, and who won, then how often the first picker won, so the pick
+order's weight is a number and not a hunch; `sweep`
 sets the holding rule's constants, playing two forces at one rock under
 roster variants and printing, per variant, how long the force takes to
 close to weapon range, how far it spreads while closing, how long the fight
@@ -1197,6 +1492,8 @@ sim/src/
                     apply; sweep.rs Sweep, the tick's spatial index;
                     threat.rs Threat, Aim, Assigned: the one target rule;
                     view.rs View, Present; hash.rs;
+                    draft.rs Draft, Stage, STAGE_SPAN, GRACE,
+                    STAGES_PER_SEAT;
                     standings.rs Standings
   step/             mod.rs step, next, spawn_body; propagation.rs;
                     fulfilment.rs; extraction.rs; construction.rs;
@@ -1222,7 +1519,7 @@ agents/src/
   lib.rs            Agent, Seated, DECISION_INTERVAL; the surface
   dice.rs  commitments.rs  roles.rs  survey.rs  plan.rs  personality.rs
   scripted.rs       Scripted
-  bin/harness.rs    native only: match, replay, rollback, matrix
+  bin/harness.rs    native only: match, replay, rollback, matrix, draft
 game/src/
   lib.rs            the surface
   controls.rs       Controls: the buttons and axes the playable reads

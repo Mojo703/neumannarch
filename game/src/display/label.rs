@@ -1,3 +1,13 @@
+use neumannarch_sim::Material;
+
+pub fn material(material: Material) -> &'static str {
+    match material {
+        Material::Metals => "Metals",
+        Material::Volatiles => "Volatiles",
+        Material::Energy => "Energy",
+    }
+}
+
 pub fn titled(word: &str) -> String {
     let mut letters = word.chars();
     match letters.next() {
@@ -7,23 +17,35 @@ pub fn titled(word: &str) -> String {
 }
 
 pub fn is_a_phrase(text: &str) -> bool {
-    !text.is_empty() && !text.contains(['.', ';', ',', '-'])
+    let dashed = text
+        .char_indices()
+        .filter(|(_, letter)| *letter == '-')
+        .any(|(at, _)| {
+            !text[at + 1..]
+                .chars()
+                .next()
+                .is_some_and(|next| next.is_ascii_digit())
+        });
+    !text.is_empty() && !text.contains(['.', ';', ',']) && !dashed
 }
 
 #[cfg(test)]
 mod tests {
+    use mirage_engine::egui::{Pos2, Rect};
     use neumannarch_protocol::{Bot, Holder, Lobby, PlayerId, Refused};
     use neumannarch_sim::roster::{FRIGATE, Roster};
     use neumannarch_sim::state::view::Building;
-    use neumannarch_sim::{Material, RockId, TeamId, Tick};
+    use neumannarch_sim::{Materials, RockId, Stockpile, TeamId, Tick};
 
     use super::*;
-    use crate::display::scene::{Entry, WheelBand};
+    use crate::display::scene::{Entry, StripView, WheelBand, rock_name};
+    use crate::display::strip::Strip;
+    use crate::display::wheels::{NOT_YET, ROCK_TAKEN, Spoken};
     use crate::net::listener::NoListener;
     use crate::screens::control::HOST_ONLY;
     use crate::screens::lobby::{
         ALREADY_READY, CLOCKS, LobbyScreen, NO_SEAT, clock_name, player_name, refusal_phrase,
-        team_name,
+        seat_names, team_name,
     };
     use crate::screens::pause::NO_SURRENDER;
     use crate::screens::title::{NO_QUIT, NO_SETTINGS, Outcome, TAGLINE, TITLE};
@@ -117,6 +139,30 @@ mod tests {
             neumannarch_protocol::NotReady::Unready { slot: 1 },
             neumannarch_protocol::NotReady::HostUnseated,
         ];
+        let strip = Strip::across(
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1280.0, 720.0)),
+            StripView {
+                stockpile: Stockpile::new(
+                    Materials::new(120.0, 0.0, 300.0),
+                    Materials::new(300.0, 300.0, 300.0),
+                ),
+                income: Materials::new(12.0, 0.0, 9.0),
+                spend: Materials::new(9.0, 4.0, 0.0),
+                elapsed: neumannarch_sim::Time(4120),
+                clock: neumannarch_sim::Time(9000),
+            },
+        );
+        let bars = Material::EVERY.map(|material| Spoken::Bar {
+            material,
+            pull: 12.0,
+            cap: 20.0,
+        });
+        let refused_bands = [NOT_YET, ROCK_TAKEN].map(|why| Spoken::Refused {
+            why: why.to_string(),
+        });
+        let seated = Lobby::skirmish(PlayerId::HOST)
+            .freeze()
+            .expect("a skirmish starts");
         let holders = [
             Holder::Open,
             Holder::Closed,
@@ -157,6 +203,17 @@ mod tests {
             .chain([TeamId(0), TeamId(3)].map(team_name))
             .chain([PlayerId::HOST, PlayerId(3)].map(player_name))
             .chain(CLOCKS.map(clock_name))
+            .chain(Material::EVERY.into_iter().flat_map(|material| {
+                strip
+                    .phrases(material)
+                    .into_iter()
+                    .chain([strip.net(material)])
+            }))
+            .chain([strip.elapsed()])
+            .chain(bars.iter().map(|bar| bar.phrase(&roster)))
+            .chain(refused_bands.iter().map(|band| band.phrase(&roster)))
+            .chain(seat_names(seated.seating(), PlayerId::HOST))
+            .chain([rock_name(RockId(11))])
             .collect()
     }
 
@@ -203,5 +260,20 @@ mod tests {
         assert!(!is_a_phrase("A two-to-four-player space RTS"));
         assert!(!is_a_phrase(""));
         assert!(is_a_phrase("Waiting for Team 2"));
+    }
+
+    #[test]
+    fn a_minus_before_a_numeral_is_a_sign_and_not_a_dash() {
+        assert!(is_a_phrase("-5"));
+        assert!(is_a_phrase("+12 in -9 out"));
+        assert!(!is_a_phrase("Team 2 - Team 3"));
+        assert!(!is_a_phrase("Rock 5-"));
+    }
+
+    #[test]
+    fn a_material_is_named_in_title_case() {
+        assert_eq!(material(Material::Metals), "Metals");
+        assert_eq!(material(Material::Volatiles), "Volatiles");
+        assert_eq!(material(Material::Energy), "Energy");
     }
 }
