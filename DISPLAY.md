@@ -1,14 +1,14 @@
 # Neumannarch — display language
 
-What the player sees, as the target. The only input is the sim's view.
-In the belt and on the HUD nothing is a numeral, a label or a panel
-except the wheels' counts, the stockpile's stock and net and the clock;
-every other fact is a shape, a position, a colour or a line. Screens are
-panels: every screen outside a match, and only pause and results inside
-one (Screens, below). Every control shows, while hovered, the change to
-a want it will make; what the sim does about that change is drawn in the
-next tick by the same rules as everything else, never predicted by the
-client.
+What the player sees, as the target. The display reads the view for what
+is, and asks the state what a hover would do. In the belt and on the HUD
+nothing is a numeral, a label or a panel except the wheels' counts, the
+stockpile's stock and net and the clock; every other fact is a shape, a
+position, a colour or a line. Screens are panels: every screen outside a
+match, and only pause and results inside one (Screens, below). Every
+control shows, while hovered, the change to a want it will make, and
+what the sim would do about that change; the answer is the sim's own and
+the client predicts nothing of its own.
 
 ## Ships are the truth
 
@@ -75,17 +75,17 @@ sections with a gap between sectors. A sector taller than a stated
 number of strips wraps into a second column beside the first, and a
 third past that, so a crowded asteroid stays within the screen's height; a
 column is as wide as its strips can grow, a digit and a signed step more
-than they show, so a count rising or a band's step appearing never runs
+than they show, so a count rising or a button's step appearing never runs
 under the next column. A sector carries a spine: a thin line in the
 seat's colour along its inner edge, on the arc.
 
 A wheel has two states and no third: full where the pointer or the
 selection rests, small elsewhere. Hover and selection are one state
-drawn one way, with the same scale, the same detail, the same bands and
+drawn one way, with the same scale, the same detail, the same buttons and
 the same alpha; selection differs from hover only in that it outlasts
 the pointer and holds the camera's focus. While the pointer rests on
 another asteroid's wheel, the selected wheel keeps its full size and its
-bands and is drawn at the faint alpha of a small wheel, and is whole
+buttons and is drawn at the faint alpha of a small wheel, and is whole
 again when the pointer leaves; the hovered wheel is full and whole. Two
 wheels may be full at once, the hovered one whole and the selected one
 faint. A small wheel is drawn at a smaller scale and shows present and
@@ -100,12 +100,15 @@ what the camera and the screens do. A faded glyph is blended toward the
 backdrop, never drawn translucent, so its strokes do not double where
 they cross. Which wheel is hovered is decided against the wheels as they
 stood before any grew, and a hovered wheel stays hovered until the
-pointer leaves its full extent by a margin of a band's width or more, so
+pointer leaves its full extent by a margin of a button's width or more, so
 growing under the pointer never changes which wheel is hovered, an
 overshoot past an edge closes nothing, and nothing jitters. A bare
 asteroid under the pointer carries the seat's own wheel as a selected
 one does, every row hollow, so what an asteroid could hold shows before
-it is clicked.
+it is clicked. A viewer whose seat is out of the match carries no sector
+of its own anywhere and so draws no buttons: an eliminated player
+watches, with pan, zoom, the selection and the pause screen's Leave and
+nothing else.
 
 The wheels' numerals, the stockpile's and the clock's are the only
 numerals on the HUD. Ownership is colour, and colour is the team's; a
@@ -146,7 +149,7 @@ Fill is the owner's colour; the outline is white.
 
 ## The stockpile and the clock
 
-One strip across the top centre, of the wheel strip's height: one box in
+One stockpile bar across the top centre, of the wheel strip's height: one box in
 the screens' style, a scrim with the screens' line around it, holding
 four cells packed the wheel's cell gap apart and no more, three one per
 material, metals then volatiles then energy, and a fourth for the clock.
@@ -168,11 +171,17 @@ fainter; the net numeral sits after the overrun. An empty bar with a
 negative net is a stall and draws nothing more, since the frame's belt
 at the asteroid names the material. Hovering a cell shows one short
 phrase beneath it, the capacity, "of 300"; the two segments already
-carry the in and the out. While a wheel's plus band is hovered, each
-material's bar marks the row's cost as the darker segment inside the
-fill's tip, in place of the spend projection, and a minus band marks the
-refund as the fainter segment past the tip, so what a want costs is read
-where it is paid and never as a numeral.
+carry the in and the out. While a wheel's plus button is hovered, each
+material's bar marks the cost as the darker segment inside the fill's
+tip, in place of the spend projection, and a minus button marks the
+refund as the fainter segment past the tip, in place of the income
+projection, so what a want costs is read where it is paid and never as a
+numeral. The cost is the sim's preview: the units the hover would have
+built, times their rows' costs, so what the reserve or a surplus fills
+is free and the bar marks nothing. The refund is what the frames the
+hover would cancel have consumed. A cost longer than the fill is clipped
+at the bar's left. A send drag marks neither bar, since it both spends
+and refunds.
 
 The clock's cell is a bar of the same length in ink, full at the start,
 its fill shrinking from the right as the match runs, so the filled part
@@ -250,30 +259,34 @@ its dashes roll toward the destination, so its direction reads from a
 still frame and from motion alike. Arrival moves the glyph
 from the ship into the wheel's present count.
 
-## Editing: the wheel's bands
+## Editing: the wheel's buttons
 
 Build is flow, so there is no queue; the player edits wants. A full
 wheel, hovered or selected, looks one way and carries its
 interactions; hovering shows them and clicking the asteroid locks them in
 place when the pointer leaves. Each of its own sections gains
-a plus band and a minus band between its glyph and its counts, plus
+a plus button and a minus button between its glyph and its counts, plus
 above minus, each an action button in the style of every other, an
-outlined box bearing its sign in ink always, not on hover; the bands
+outlined box bearing its sign in ink always, not on hover; the buttons
 stand at one place in every strip, so a count appearing never moves the
-band under the pointer; while Shift is held the bands bear
-"+5" and "-5" and add or remove five. A hovered band brightens and
-fills. A band that would change nothing, plus at the cap or minus at
-zero, is dimmed and bears no phrase. A click adds or removes that many
+button under the pointer; while Shift is held the buttons bear
+"+5" and "-5" and add or remove five. A hovered button brightens and
+fills. A button the sim would refuse is dimmed, and bears its refusal as
+a phrase where the sim has one; minus at zero, which the sim has no rule
+for, is dimmed and bears no phrase. A click adds or removes that many
 wants and selects the asteroid. Holding repeats after a third of a second
 and every tenth of a second after that. A full wheel takes input
-through its bands and through the drag under Sending, and nothing else;
-a small wheel takes none and shows no bands.
+through its buttons and through the drag under Sending, and nothing else;
+a small wheel takes none and shows no buttons.
 
-Hovering a live band shows its change as a signed step beside the
+Hovering a live button shows its change as a signed step beside the
 strip, "+1" or "-5", and changes no count. The click lands the change,
 and the next tick draws the sim's response by the rules above: a count
 rising, a frame filling, a dashed mark, a ship lifting out toward its
-new home. The client predicts nothing.
+new home. What a hover shows before the click is the sim's own preview
+of the wants the click would issue, asked of the state the belt is drawn
+from the moment the pointer moves and once a tick while it rests; the
+client computes nothing about it.
 
 Gamepad: the stick points at a section, one face button is plus and
 another is minus, a shoulder button is Shift, holding a button shows its
@@ -286,9 +299,21 @@ wheel in its place, which does not collapse again.
 
 Sending: drag from one asteroid's wheel to another's. While the drag is
 held, the source wheel dims the lines that would go and the destination
-wheel shows them as an arriving line at half alpha, a hover preview like
-the plus band's; the mouse wheel adjusts how many; release issues the
-two count edits, and the flight is the sim's response.
+wheel shows them as an arriving line at half alpha, with a wanted line
+beside it for the units the send cannot fill; both are the sim's preview
+of the two count edits, never the client's own arithmetic. The drag is
+the one hover that draws on a wheel: a button's hover shows its signed
+step and marks the stockpile bar, and no line of a wheel moves for it. One straight line runs from the source asteroid
+to the destination, the flight line's own dashes and style at the
+preview's alpha, so the drag and a real flight read as one thing. The
+line and the arriving lines are the preview's own facts and not the
+gesture's: they are made from the units the preview sends, one line per
+source, so where the preview sends nothing there is nothing to draw. A
+drag begins only on an asteroid standing at least one unit of the seat;
+a press on one standing none selects and focuses it as a click on a bare
+asteroid does, so no drag ever asks the sim to move nothing. The
+mouse wheel adjusts how many; release issues the two count edits, and the
+flight is the sim's response.
 
 ## Camera
 
@@ -328,7 +353,7 @@ Every control on every screen, the wheel included, is one of three kinds,
 and each kind looks and behaves one way everywhere.
 
 - **An action** is a button that does one thing on click: Start, Ready,
-  Leave, Kick, Rematch, Random Seed, Quit, a wheel band.
+  Leave, Kick, Rematch, Random Seed, Quit, a wheel button.
 - **A choice** is a dropdown showing its current value; a click opens the
   list and a click picks. A team, a seat's holder, the clock. Nothing
   cycles on click.
@@ -403,7 +428,9 @@ follows Controls, above.
   label is a word in title case, never an identifier.
 - **Loading.** The belt from the lobby, still, until every machine has
   built the match and agreed the first hash.
-- **Play.** The match, as every section above describes. Escape opens the
+- **Play.** The match, as every section above describes. A player whose
+  seat is out watches it to the clock: the belt, the wheels of the seats
+  still in, and no wheel or button of its own. Escape opens the
   pause screen over it: Resume and Leave, and Surrender once DESIGN.md
   has a rule for it. Play continues under it
   in multiplayer and stops under it in a skirmish. Play has two held
@@ -416,7 +443,7 @@ follows Controls, above.
 - **The draft.** While the draft runs (DESIGN.md, Start), Play carries
   one panel, the third inside a match, titled Draft: the order, drawn
   as an initiative list at the screen's left edge over the belt, never
-  over the strip, in the screens' style, packed as tight as its rows
+  over the stockpile bar, in the screens' style, packed as tight as its rows
   read. One row per stage in the order the stages run, the first round
   then the second: the glyph of the structure that stage places,
   filled in the seat's colour once placed and hollow in the seat's
@@ -427,7 +454,7 @@ follows Controls, above.
   places, and replaced by the asteroid's name, "Asteroid 3", once placed. After
   the last stage ends, one last row, titled Clock, drains the grace.
   The running stage's row is whole and every other row is faint, as a
-  small wheel is. The strip's clock cell reads 0:00 with its bar full.
+  small wheel is. The stockpile bar's clock cell reads 0:00 with its bar full.
   A bot's name is drawn from a short list the bot's personality owns,
   chosen by the seed and the seat, so a match's bots read as people
   and two bots of one personality read apart; the lobby's Holder
@@ -436,9 +463,9 @@ follows Controls, above.
   seat's colour, the one wanted line a small wheel ever shows, so a
   taken asteroid reads as taken from the belt. Placing goes through the
   wheel: a bare asteroid under the pointer shows the seat's own hollow
-  wheel. Every band is live during the draft, since a want accepted
-  then stands until the clock runs, except a reserve band before the
-  seat's first stage, disabled with "Not yet", and a reserve band at a
+  wheel. Every button is live during the draft, since a want accepted
+  then stands until the clock runs, except a reserve button before the
+  seat's first stage, disabled with "Not yet", and a reserve button at a
   asteroid the draft has taken, disabled with "Asteroid taken", which are the
   sim's own refusals and nothing more. Nothing is refused silently.
   When the last placement lands or the grace runs out, the panel goes

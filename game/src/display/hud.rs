@@ -4,6 +4,7 @@ use neumannarch_sim::Vec3;
 use crate::display::glyph_quad::seat_color32;
 use crate::display::scene::Scene;
 use crate::display::viewport::Viewport;
+use crate::display::wheel;
 
 const FLIGHT_WIDTH: f32 = 1.5;
 
@@ -67,7 +68,7 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
         ) else {
             continue;
         };
-        paint_flight_line(painter, from, to);
+        paint_flight_line(painter, from, to, flight.previewed);
     }
 }
 
@@ -90,7 +91,11 @@ fn paint_circle(
     }
 }
 
-fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2) {
+fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2, previewed: bool) {
+    let preview = match previewed {
+        true => wheel::PREVIEW_ALPHA,
+        false => 1.0,
+    };
     let delta = to - from;
     let length = delta.length();
     if length <= 0.0 {
@@ -111,7 +116,7 @@ fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2) {
                 FLIGHT_FAINT_ALPHA + (FLIGHT_FULL_ALPHA - FLIGHT_FAINT_ALPHA) * (mid / length);
             painter.line_segment(
                 [from + direction * clipped_start, from + direction * end],
-                Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR.gamma_multiply(alpha)),
+                Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR.gamma_multiply(alpha * preview)),
             );
         }
         start += cycle;

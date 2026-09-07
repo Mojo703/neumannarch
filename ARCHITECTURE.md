@@ -136,6 +136,7 @@ pub struct State {
 }
 
 pub struct Post { pub asteroid: AsteroidId, pub seat: SeatId }      // one composition
+pub struct Posting { post: Post, row: RowId }               // one row of one composition
 pub struct Draft { stages: Vec<Stage>, running: usize,
                    began: Tick, ended: Option<Tick> }
 pub struct Stage { pub seat: SeatId, pub row: RowId,
@@ -161,12 +162,19 @@ pub struct Body { pub pos: Vec3, pub vel: Vec3 }            // inertial frame
 pub struct Flight { source: AsteroidId, schedule: Schedule }
 pub struct Schedule { burns: [Burn; 2], arrive: Tick }
 struct Burn { from: Tick, ticks: NonZeroU32, accel: Vec3 }  // held whole ticks
-pub struct Send { source: AsteroidId, destination: AsteroidId,      // one schedule,
+pub struct Route { source: AsteroidId, destination: AsteroidId, seat: SeatId }
+pub struct Send { route: Route,                                 // one schedule,
                   schedule: Schedule, members: Vec<EntityId> }   // every member
 ```
 
 A place is an asteroid, so `AsteroidId` is the place: a post is an asteroid and
 a seat, the verb names an asteroid, and an entity's home is an asteroid.
+A `Posting` is one row of one post, which is what the verb addresses and
+what every map over a row at a place is keyed by: the holdings, the
+plans, the shortfalls, the openings. It orders by asteroid, then seat,
+then row, so a walk over one of those maps is the walk over posts and
+rows the rules already take. Where a map is the viewer's own the seat is
+the viewer's, and there is no second type for it.
 `State::entities_at` answers who is homed at an asteroid and
 `State::standing_at` who is at it now; the two differ only for a unit whose
 send is still forming.
@@ -282,11 +290,18 @@ pub struct Batch(Vec<Issued>);                      // one tick's, ordered
 pub struct Sequence { seat: SeatId, next: u32 }
 pub struct Setup { teams: Vec<TeamId>, seed: u64, clock: Tick }
 pub enum BadSetup { NoSeats, TooManySeats }
-pub enum Rejected { NoSuchSeat, DeadSeat, NoSuchAsteroid, NoSuchRow, TooMany }
+pub enum Rejected { NoSuchSeat, DeadSeat, NoSuchAsteroid, NoSuchRow, TooMany,
+                    NotYet, AsteroidTaken }
+pub struct Preview { shortfalls: BTreeMap<Posting, ShortfallFilling>,
+                     refund: Materials }
+pub struct ShortfallFilling { from_reserve: u32, sent_from: BTreeMap<AsteroidId, u32>,
+                              to_build: u32 }
 pub enum Refused { Duplicate, TooMany, Late, Ahead }
 
 impl State {
     pub fn step(&self, issued: &Batch) -> (State, Outcome);
+    pub fn admits_want(&self, posting: Posting, count: u32) -> Result<(), Rejected>;
+    pub fn preview(&self, seat: SeatId, wants: &[Command]) -> Result<Preview, Rejected>;
 }
 pub struct Outcome { rejected: Vec<(Issued, Rejected)>, shots: Shots }
 ```
@@ -300,6 +315,37 @@ arrived in: `Batch::insert` refuses a `(seat, seq)` it already holds as
 is the cap on what a peer can put in one tick. `seq` counts a seat's
 commands from zero for the match and a `Sequence` per local seat stamps
 it, so no frontend counts for itself.
+
+`State::admits_want` is the one place a want is refused: `apply` asks it
+before it changes anything, and the display asks it for every button a
+full wheel draws, with the count that button would issue, so a control is
+never live and then refused. It takes the `Posting` the button stands
+on, so no caller carries the three ids apart. `pick` is left with the
+placing alone.
+
+`State::preview` answers what the sim would do this tick if the seat
+issued those wants and nothing else changed: it applies them to a clone
+as `apply` would, so a want the state refuses comes back by name and
+previews nothing, and reads what fulfilment would assign on that clone
+less what it assigns on the state as it stands, so a shortfall already
+being filled is not credited to the hover. Per posting it reports the
+units the reserve would place, the units it would send and the asteroid
+each leaves, and the units left to build, which is a count of units and
+not of frames, since fulfilment opens one frame per row per tick.
+Beside them `refund` is what the frames it would cancel have consumed,
+by the share-of-cost rule `Cancellation::refund` owns and `step::fulfil`
+refunds by, and `Preview::cost_to_build(&Roster)` is what the units left
+to build would cost. Neither cost nor refund is stored beside the parts
+it is derived from. Every count a preview carries is what the hover
+*adds*, which is what `added_beyond` computes and what its name says: a
+hover that lowers a want takes a shortfall away rather than filling one,
+and a preview reports nothing there but the refund. A preview never runs
+the schedule solve: it settles as though nothing is held back
+(`SendSchedules::nothing_held_back`), so a send with no schedule this
+tick, whose units stay home and open frames, is a thing the preview does
+not know, which is accepted. One preview over the shipped belt with 420
+entities takes 242 µs in release, which is why `Play` asks for one when
+the hover changes and once a tick while it is held, never once a frame.
 
 `Setup::new` refuses a match with no seats or more than `MAX_SEATS` by
 name, so a setup off the wire is checked once. `State::start(&setup)`
@@ -594,6 +640,21 @@ fn chase(Body, &Row, target: Body) -> Vec3;
   other. Surplus with nowhere to go stays where it stands, complete:
   nothing marks it and nothing scraps it. `Assigned` carries the
   placements, the sends, the openings and the cancellations.
+  It is reached in three stages so the preview can stop after the first.
+  `Fulfilment::assign` is the assignment alone, a `ShortfallAssignment`
+  of what the reserve places, what units move over which `Route`, and
+  what is still short per posting; it touches no schedule.
+  `Fulfilment::schedule`, which the step alone runs, solves one send per
+  route and answers a `SendSchedules` of the sends that depart and the
+  routes that stay. `Fulfilment::settle` turns the two into the
+  `Assigned`, and is the one place openings and cancellations are
+  decided: what is leaving a post is read off the assignment's routes
+  less the ones that stay, never off the sends, so the preview can pass
+  `SendSchedules::nothing_held_back` and reach the same code without a
+  solve. A `Cancellation` carries the `Posting` its frame stands at, the
+  frame and its progress, so the seat and the row are read off the
+  posting and nothing repeats it. The step's result is unchanged by the split, which
+  the replay and rollback tests and the harness hold.
 - **Extraction** groups extract weapons by the asteroid their entity
   stands at. A weapon names one material, so an asteroid's cap for a
   material is split among the extractors of that material alone and an
@@ -659,30 +720,30 @@ pub struct View {
     stockpile: Stockpile,
     income: Materials, spend: Materials,  // the viewer's last whole second
     reserve: BTreeMap<RowId, u32>,
-    compositions: Vec<Composition>,      // every seat's holdings, by asteroid
-    plans: Vec<Plan>,                    // the viewer's own wants and frames
+    compositions: BTreeMap<Post, Composition>,   // every seat's holdings
+    plans: BTreeMap<Posting, Plan>,      // the viewer's own wants and frames
     present: Vec<Present>,               // every entity of the match
     teams: Box<[TeamId]>,                // the seating, indexed by seat
     exchanges: Vec<Exchange>,            // the tick's fire, per asteroid and seat
     terrain: Vec<Terrain>,               // every asteroid: orbit, caps, radius, pull
     zone: f64,
+    still_in: bool,                      // the viewer's own seat is not out
     standings: Standings,
 }
 pub struct Present { id: EntityId, row: RowId, seat: SeatId, body: Body,
                      hp: f64, home: AsteroidId, at: Berth }
 pub enum Berth { Standing(AsteroidId), Flying { from: AsteroidId } }
-pub struct Composition { asteroid: AsteroidId, seat: SeatId, builder: bool,
-                         rows: BTreeMap<RowId, Held> }
-pub struct Plan { asteroid: AsteroidId, row: RowId, want: u32,
-                  building: Option<Building> }
+pub struct Composition { builder: bool, rows: BTreeMap<RowId, Held> }
+pub struct Plan { want: u32, building: Option<Building> }
 pub struct Building { progress: f64, starved_of: Option<Material> }
-pub struct Held { present: u32, leaving: u32, arriving: u32 }   // state::Held
+pub struct Held { present: u32, surplus: u32, leaving: u32, arriving: u32 }
 
 impl View {
     pub fn of(state: &State, seat: SeatId, shots: &Shots) -> View;
     pub fn team_of(&self, seat: SeatId) -> Option<TeamId>;
     pub fn is_enemy(&self, seat: SeatId) -> bool;   // its team differs from the viewer's
-    pub fn plan_of(&self, asteroid: AsteroidId, row: RowId) -> Option<&Plan>;
+    pub fn plan_of(&self, posting: Posting) -> Option<&Plan>;
+    pub fn want_of(&self, posting: Posting) -> u32;
 }
 ```
 
@@ -717,12 +778,27 @@ impl View {
   at its source and is homed at its destination, so `Standing(asteroid)` with
   a `home` elsewhere is exactly a unit leaving that asteroid, and no flag says
   whether an entity is in the air.
-- `Held` counts one row for one seat at one asteroid: `present` stands there
+- `Held` counts one posting: `present` stands there
   and belongs there, `leaving` stands there in a send that has not
-  departed, `arriving` is homed there and in a send. A ship in flight is
+  departed, `arriving` is homed there and in a send, and `surplus` is
+  what the surplus rule would send away, `State::surplus_at` counted,
+  which is the same query fulfilment takes the units from, so the wheel's
+  hollow dot and the send the sim makes can never disagree. A surplus is
+  read off the want, and a want is the viewer's own, so `State::holdings`
+  never counts one and the view fills it for the viewer's own postings
+  alone: it is asked once, for the one seat that may see it. A ship in flight is
   counted only at the asteroid it flies to. `State::count`, which the
   shortfall rule reads, is what an asteroid is homed by, present and arriving
   together.
+- A view is what is, and nothing about the pointer: `View::of` takes the
+  state, the seat and the tick's shots and no more. What a hover would do
+  is asked of the state directly, by the one owner of the pointer
+  (Game: the display library), so no fact about the pointer is stored and
+  answered a tick late.
+- `still_in` is the viewer's own seat, still in the match or out
+  (DESIGN.md, Session). A viewer that is out draws no sector of its own
+  and so no button, which is why `Rejected::DeadSeat` cannot reach the
+  display.
 - A post builds one frame of a row at a time (DESIGN.md, Compositions),
   so a `Plan` carries at most one `Building`.
 - The roster is match-constant and travels with the initial state, so a
@@ -745,12 +821,17 @@ pub struct Scene {
     asteroids: Vec<AsteroidView>,          // position, radius, caps
     entities: Vec<EntityView>,     // position, glyph, seat, weapon range
     wheels: Vec<WheelView>,        // one per asteroid that carries a wheel
-    flights: Vec<FlightLine>,      // every flying ship, whoever owns it
+    flights: Vec<FlightLine>,      // every flying ship, and a held drag
+    stockpile_bar: Option<StockpileBarView>,
     zone: f64,                     // the zone radius every asteroid draws
     seat: SeatId,                  // whose view this is
     selection: Option<AsteroidId>,
-    hover: Option<Hover>,          // a wheel band or a Sending
+    gesture: Option<WheelGesture>, // a wheel button or a Sending
 }
+pub struct FlightLine { from: Vec3, to: AsteroidId, previewed: bool }
+pub enum WheelGesture { Button(ButtonAt, Preview), Send(Sending, Preview) }
+pub struct ButtonAt { posting: Posting, button: WheelButton }
+pub enum BarMark { Cost(Materials), Refund(Materials) }
 pub struct WheelView { asteroid: AsteroidId, sectors: Vec<SectorView> }
 pub struct SectorView { seat: SeatId, rows: Vec<RowView>, arc: Option<Arc> }
 pub struct RowView { row: RowId, entries: Vec<Shown> }
@@ -764,8 +845,8 @@ pub enum Entry {
     Placed,                          // a draft placement, until the clock starts
 }
 pub enum Fill { Solid, Hollow, Filling(f32), Dashed }
-pub enum WheelBand { Plus(u32), Minus(u32) }
-pub struct Client<'a> { selection, pointed, hover, fights: &'a Fights }
+pub enum WheelButton { Plus(u32), Minus(u32) }
+pub struct Client<'a> { selection, pointed, gesture, fights: &'a Fights }
 
 impl Scene {
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene;
@@ -776,9 +857,12 @@ impl Scene {
 
 impl Entry {
     pub fn fill(self) -> Fill;
-    pub fn dim(self) -> bool;
     pub fn count(self) -> Option<u32>;   // None for Building: a frame has no count
     pub fn phrase(self, name: &str) -> String;
+}
+
+impl ButtonAt {
+    pub fn edit(self, want: u32) -> Command;   // the click's own want
 }
 ```
 
@@ -807,11 +891,23 @@ impl Entry {
   where the view reports shots exchanged, drains it as the seat's HP at the
   asteroid falls, trails the last second and a half of damage, and forgets an
   arc ten seconds after the last shot; `arcs()` is what the scene draws.
+- A `WheelGesture` is what the pointer rests on and the sim's answer
+  about it, carried together: a `Preview` sits inside each variant, so
+  the reading each gesture gets is the one its variant can give. The
+  `Send` variant's preview builds the destination's arriving entries, the
+  wanted line beside them and one flight line per `Route` it sends
+  along; the `Button` variant's builds the stockpile bar's `BarMark` and
+  nothing on a wheel, since a hovered button shows only its signed step
+  (DISPLAY.md, Editing). A preview that sends nothing has no entry and no
+  line to build, so no code asks whether one is empty and no empty
+  preview stands in for a missing one; and `Play` starts no send drag
+  from an asteroid standing none of the seat's units, so a drag that
+  would move nothing does not exist either.
 - `send::Sending { from, to, count }`: the drag between two asteroids' wheels.
-  `rows` is what it moves, cheapest first, off the units standing at the
-  source, and `commands` is the two count edits per row it moves. One
-  type, so the entries the scene dims and the edits the release issues
-  cannot disagree.
+  `rows` is the `Moving { row, count }` list it takes, cheapest first,
+  off the units standing at the source, and `commands` is the two count
+  edits per row it moves. One type, so the entries the scene dims and the
+  edits the release issues cannot disagree.
 - `glyph::Glyph { frame, marks, size }`: `Glyph::of(&Row)` by DISPLAY.md's
   three rules, a pure function with a test per rule. `glyph::HALF` is a
   glyph's nominal half-width, which both layers size by, and
@@ -834,9 +930,10 @@ impl Entry {
   even-odd on both layers: the rasteriser counts crossings, and
   `stencil::Cell` fills it as a mesh of trapezoids, one per band between
   vertex heights, so a nut's hole is a hole.
-- `strip::Strip`: the stockpile and the clock, laid out across the top
-  centre from `scene::StripView` (the seat's stockpile, income, spend,
-  elapsed tick and clock), in the wheel's vocabulary: one box in the
+- `stockpile_bar::StockpileBar`: the stockpile and the clock, laid out
+  across the top centre from `scene::StockpileBarView` (the seat's
+  stockpile, income, spend, elapsed tick, clock and the `BarMark` a
+  hovered button leaves), in the wheel's vocabulary: one box in the
   screens' scrim and line around every cell, the cells the wheel's cell
   gap apart, a cell running icon, stock numeral, bar, net numeral; the
   count font for every numeral, the bar a box of the count line's
@@ -844,8 +941,12 @@ impl Entry {
   hue faded toward the backdrop, the spend segment darker inside the
   tip and the income segment fainter past it, the overrun the fill
   itself running past the box's end when the stock is at capacity. The
+  `BarMark` takes the place of one of those two segments and no more:
+  a cost replaces the spend projection inside the tip, a refund the
+  income projection past it, so the two readings never stack and the
+  same two lengths mean one thing at a time. The
   clock's fill is the panel's dim ink so the elapsed numeral reads over
-  it. `spoken_at` is the cell under the pointer and its one phrase, the
+  it. `speaks_at` is the cell under the pointer, whose one phrase is the
   capacity.
 - `bars::Bars`: every asteroid's resource bars, the mirror of its wheel:
   a row per material with a cap, at the wheel strip's height, the icon
@@ -880,23 +981,26 @@ impl Entry {
   as wide as its digits. Sections are laid out by cost, structures above
   units, `STRIPS_PER_COLUMN` to a column and the overflow in the next
   column beside it, each column as wide as the most its strips can grow
-  to: every count one digit wider, and the signed step a hovered band
+  to: every count one digit wider, and the signed step a hovered button
   shows, so nothing a strip gains runs under the next column. Every
-  rectangle is computed once, so `paint`, `band_at` and
-  `spoken_at` read the same geometry and cannot drift. `WheelBand::edit`
-  is the `Command` a click issues, `WheelBand::wanted` is the count it
-  would leave, which is also how a band that would change nothing knows
-  to draw itself spent, and `WheelBand::delta` is the signed step a
-  hovered band shows beside its strip.
+  rectangle is computed once, so `paint`, `button_at` and
+  `spoken_at` read the same geometry and cannot drift. `WheelButton::edit`
+  is the `Command` a click issues and `WheelButton::wanted` is the count
+  it would leave, which is the count the view asked the sim about, so it
+  no longer clamps at `MAX_WANT`: past the cap is the sim's refusal to
+  make. `WheelButton::delta` is the signed step a
+  hovered button shows beside its strip.
 - `wheel::Detail`: a wheel is drawn `Full` where the pointer or the
   selection rests on it and `Small` everywhere else, two fixed scales and
   two fixed slot counts, never a size that follows the crowd. A small
   wheel carries a section only for the rows standing or moving there and
   never a wanted slot, but for a draft placement's `Entry::Placed` line.
-  `Bands { step, wants, refused }` is passed only to a
+  `Buttons { step, wants, refusals }` is passed only to a
   full wheel, so a small wheel takes no input by construction, and the
-  bands stand as two buttons between each section's glyph and its cells,
-  plus over minus. `Sizing { detail,
+  buttons stand two to a section, between its glyph and its cells,
+  plus over minus. `ButtonRefusals { adding, removing }` is what the sim
+  says about one row's two buttons, one `State::admits_want` each with
+  the count that button would issue. `Sizing { detail,
   scale }` is how a wheel is drawn this frame: the detail decides what
   it shows and the scale, eased toward the detail's own, how large.
 - `wheel::Footprint`: the rectangle an asteroid's wheel would take at each
@@ -904,19 +1008,19 @@ impl Entry {
   decide what the pointer is over before any wheel is built.
 - `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the
   frame's layout and the frame's hit test in one pass. `Aim { viewer,
-  pointer, hovered, step, wants, draft }` is what the pointer and the
-  keyboard say and the draft the view carries, the wants keyed by
-  asteroid and row so any full wheel can carry its bands.
-  `Aim::refusal(asteroid, row)` is the draft's own rule and nothing
-  else, `Draft::awaits` and `Draft::took` read as the sim reads them:
-  `NOT_YET` for a reserve band before the seat's stage has begun,
-  `ASTEROID_TAKEN` for a pick at an asteroid a placement took, `None`
-  once the draft has ended or where `draft` is `None`, as in `look`'s
-  hand-built scenes. A full wheel's `Bands { step, wants, refused }`
-  carries the reasons by row; a refused band is drawn spent,
-  `Wheel::band_at` never returns it, so no click can edit it, and
+  pointer, hovered, step, view, state }` is what the pointer and the
+  keyboard say, over the two the display reads: `View::want_of` for what
+  a row is wanted at, `State::admits_want` for what each of its buttons
+  would take. `Aim` holds no map and decides no rule of its own:
+  `buttons_at` asks those two for the rows of the one full wheel it is
+  building. A refused button is drawn spent,
+  `Wheel::button_at` never returns it, so no click can edit it, and
   `spoken_at` answers `Spoken::Refused { why }` at the strip's right
-  edge, where a live band shows its step. `Ease` is where a wheel's
+  edge, where a live button shows its step. `label::refusal` turns a
+  `Rejected` into that phrase: "Not yet" and "Asteroid taken" have one,
+  and the rest are drawn spent without one, which is what
+  `Rejected::TooMany` at the cap wants and what the four an asteroid's
+  own wheel cannot reach get. `Ease` is where a wheel's
   scale and alpha are eased toward their targets over `Span::Fast`:
   `Motion`, a store the play screen owns and steps once per frame by the
   engine's own `dt`, never egui's clock, in which a wheel first drawn
@@ -931,15 +1035,15 @@ impl Entry {
   still takes the pointer, and a hovered wheel stays hovered until the
   pointer leaves its full footprint by `HOVER_MARGIN`, so growing under
   the pointer never changes what is hovered and an overshoot closes
-  nothing. `at`, `band_at` and `spoken_at` are what a click, a drag and
+  nothing. `at`, `button_at` and `spoken_at` are what a click, a drag and
   the hover phrase read; `spoken_at` answers with a `Spoken`, a wheel's
-  row, an asteroid bar or a refused band, which composes its own phrase
+  row, an asteroid bar or a refused button, which composes its own phrase
   from the roster. `Wheels` owns the frame's `Bars` too, laid from the
   same eased `Placed` list, so an asteroid's bars grow and fade with its
   wheel.
 - `ease`: `Span { Fast, Slow }`, the two spans every eased value on
   screen settles over and no other, `duration` 20 ms and 100 ms; `Fast`
-  for what the pointer causes, a wheel's growth, hover and bands, `Slow`
+  for what the pointer causes, a wheel's growth, hover and buttons, `Slow`
   for what the camera and the screens do, pan, zoom, refocus and the
   draft panel's coming and going. `toward(value, target, dt, span)`
   closes that span's share of a value's gap to its target in one frame.
@@ -959,7 +1063,7 @@ impl Order {
 ```
 
   One row per `Draft::stages` entry in order, packed without a gap
-  under the title, at the screen's left below the strip, the panel as
+  under the title, at the screen's left below the stockpile bar, the panel as
   wide as its rows. A row's `Standing` is read off the draft alone:
   `Placed` where the stage carries an asteroid; `Running` for the stage at
   `Draft::running`'s position, `left` the share of `STAGE_SPAN` since
@@ -999,10 +1103,10 @@ impl Order {
   `egui::Painter` to what is painted over the belt's own projection —
   every asteroid's zone circle in one ink, every standing armed ship's range
   circle in its owner's colour, and the flight lines. The wheels and the
-  bars are painted after it, through `Wheels::paint`, and the strip
-  after them over an opaque backdrop, so nothing on the belt covers a
-  wheel and nothing shows through the strip; `Wheels::clear_of(rect)`
-  drops every section and every bar whose frame intersects the strip's
+  bars are painted after it, through `Wheels::paint`, and the stockpile
+  bar after them over an opaque backdrop, so nothing on the belt covers a
+  wheel and nothing shows through it; `Wheels::clear_of(rect)`
+  drops every section and every bar whose frame intersects the stockpile bar's
   box before painting or hit-testing, and `Controls::avoid(rect)` keeps
   a hover note out of it, so nothing of the HUD is drawn inside the
   box or half under its edge.
@@ -1010,13 +1114,20 @@ impl Order {
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped
   commands into the `Session`, advances it within the pacing rule, reads
-  the tick's `View` and feeds the `Fights`. `Play`'s frame builds a
+  the tick's `View`, refreshes the preview of the hover it holds, and
+  feeds the `Fights`. `Play` is the one owner of what the pointer rests
+  on: its frame decides that from the wheels' own hit test, asks
+  `State::preview` the moment the hover changes and once a tick while it
+  is held, and hands the answer to `Scene` inside the `WheelGesture`, so
+  the stockpile bar and the wheels read one preview and none is a tick
+  behind the pointer. A paused or held match holds no hover and asks
+  nothing. `Play`'s frame builds a
   `Scene` and draws it — `belt` then `hud`, so the HUD is never occluded
   — over one full-window transparent egui layer that claims no widgets,
   and every other screen is drawn on that same layer. Input is keyboard
   and mouse through the engine's action vocabularies, which
   `controls.rs` declares: a click on a wheel or an asteroid selects and
-  focuses it, a band click edits one want and repeats after a third of a
+  focuses it, a button click edits one want and repeats after a third of a
   second and every tenth after that, Shift raises the step from one to
   five, a left drag from wheel to wheel is the send, the right or middle
   button and the pan keys drag the belt, the zoom axis zooms or, during
@@ -1024,7 +1135,7 @@ impl Order {
   it again. The gamepad bindings DISPLAY.md states are a later unit. Its
   own headless drive, behind the `look` feature, plays a whole skirmish
   through the engine's offscreen `Session` — title to lobby to a
-  placement through a wheel's band to the standings — picks a team out
+  placement through a wheel's button to the standings — picks a team out
   of an open list, removes a guest from a room it serves, and clicks a
   disabled Quit; it writes `game/look/title.png`,
   `title_quit_reason.png`, `lobby.png`, `lobby_choice.png`, `wheel.png`
@@ -1044,7 +1155,7 @@ extractor's glyph on its wheel, and a fifth, the draft mid-way: a real
 two-seat skirmish session, its seed chosen so the host goes first, one
 stage placed, one run out, one running half drained, one waiting, the
 bare asteroid beside the taken one carrying the hollow wheel with a refused
-band's reason. It renders each through a `Session`,
+button's reason. It renders each through a `Session`,
 reads pixels back, and writes
 PNGs under `game/look/`, which is `.gitignore`d: screenshots are the
 judgement's input, never committed. `cargo run -p neumannarch-game --features
@@ -1544,6 +1655,7 @@ sim/src/
                     Issued, Stamped, Batch, Sequence, Rejected, Refused,
                     apply; sweep.rs Sweep, the tick's spatial index;
                     threat.rs Threat, Aim, Assigned: the one target rule;
+                    preview.rs Preview, ShortfallFilling, State::preview;
                     view.rs View, Present; hash.rs;
                     draft.rs Draft, Stage, STAGE_SPAN, GRACE,
                     STAGES_PER_SEAT;
@@ -1580,7 +1692,8 @@ game/src/
                     wheel and wheels.rs the frame's layout and hit test;
                     glyph.rs glyph_quad.rs camera.rs viewport.rs
                     stencil.rs tint.rs fights.rs send.rs belt.rs hud.rs,
-                    as before; ease.rs the one span and its step;
+                    as before; stockpile_bar.rs the top centre's box;
+                    ease.rs the one span and its step;
                     hue.rs the three materials' colours;
                     label.rs titled, is_a_phrase and the words test
   net/              controller.rs Controller, Human; transport.rs
@@ -1709,3 +1822,24 @@ it; a new one is added here in the unit that introduces it:
   results a start, since the lobby the room broadcasts is the truth about
   what took and a machine is welcomed once. A notice type per screen would
   delete the arms.
+- `label::refusal` answers with no phrase for five of `Rejected`'s seven.
+  `TooMany` wants none, since the button is simply drawn spent; the other
+  four cannot reach a drawn button, because a wheel asks only about the
+  viewer's own seat, an asteroid the view listed and a row of the roster,
+  and a viewer whose seat is out draws no button at all. Splitting
+  `Rejected` into the faults of an address the state does not hold and
+  the refusals of a rule, and carrying only the second to the view, would
+  delete the four arms; it was left because the split ripples through
+  every crate that reads an `Outcome`.
+- `Play::previewed` takes a `Rejected` from `State::preview` as an empty
+  preview. No hover can raise one: `Wheel::button_at` never answers with a
+  button the sim refuses, so no refused want is ever previewed, and a
+  drag's edits are clamped to `MAX_WANT` at an asteroid the seat stands
+  units at. A `Preview` of a want and a refusal of it in one type, so the
+  display could not hold the first without answering the second, would
+  delete the arm.
+- A `Preview` settles as though every send it names departs, so it can
+  skip the schedule solve. Where no schedule exists this tick the sim
+  will instead leave those units home and open frames, and the hover will
+  have said otherwise for one tick. Solving inside the preview would
+  delete it, at the price of the solve on every pointer move.

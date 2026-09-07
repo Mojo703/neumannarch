@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use neumannarch_sim::roster::{Roster, Row};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
-use neumannarch_sim::{AsteroidId, Materials, RowId};
+use neumannarch_sim::{AsteroidId, Materials, Posting, RowId, SeatId};
 
 use crate::commitments::Commitments;
 use crate::dice::Dice;
@@ -36,7 +36,8 @@ struct Target {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
-    targets: BTreeMap<(AsteroidId, RowId), Target>,
+    seat: SeatId,
+    targets: BTreeMap<Posting, Target>,
     promised: BTreeMap<RowId, u32>,
     budget: Materials,
 }
@@ -49,6 +50,7 @@ impl Plan {
         dice: &mut Dice,
     ) -> Plan {
         let mut plan = Plan {
+            seat: survey.view.seat,
             targets: BTreeMap::new(),
             promised: BTreeMap::new(),
             budget: survey.view.stockpile.stock() + survey.view.income * BUILD_HORIZON,
@@ -60,28 +62,25 @@ impl Plan {
     }
 
     pub fn commands(&self, view: &View) -> Vec<Command> {
-        let mut standing: BTreeMap<(AsteroidId, RowId), u32> = BTreeMap::new();
-        for plan in &view.plans {
-            standing.insert((plan.asteroid, plan.row), plan.want);
-        }
-        let dropped = standing
+        let dropped = view
+            .plans
             .iter()
-            .filter(|(at, want)| **want > 0 && !self.targets.contains_key(at))
-            .map(|((asteroid, row), _)| Command::Want {
-                asteroid: *asteroid,
-                row: *row,
+            .filter(|(posting, plan)| plan.want > 0 && !self.targets.contains_key(posting))
+            .map(|(posting, _)| Command::Want {
+                asteroid: posting.asteroid(),
+                row: posting.row(),
                 count: 0,
             });
         let mut changes: Vec<(Priority, Command)> = self
             .targets
             .iter()
-            .filter(|(at, target)| standing.get(at).copied().unwrap_or_default() != target.count)
-            .map(|((asteroid, row), target)| {
+            .filter(|(posting, target)| view.want_of(**posting) != target.count)
+            .map(|(posting, target)| {
                 (
                     target.priority,
                     Command::Want {
-                        asteroid: *asteroid,
-                        row: *row,
+                        asteroid: posting.asteroid(),
+                        row: posting.row(),
                         count: target.count,
                     },
                 )
@@ -222,9 +221,9 @@ impl Plan {
     }
 
     fn wanted<'a>(&'a self, survey: &'a Survey) -> impl Iterator<Item = (&'a Row, u32)> {
-        self.targets
-            .iter()
-            .filter_map(|((_, row), target)| survey.roster.get(*row).zip(Some(target.count)))
+        self.targets.iter().filter_map(|(posting, target)| {
+            survey.roster.get(posting.row()).zip(Some(target.count))
+        })
     }
 
     fn extractors(&mut self, survey: &Survey, personality: &Personality) {
@@ -389,10 +388,11 @@ impl Plan {
 
     fn keep(&mut self, priority: Priority, asteroid: AsteroidId, row: RowId, count: u32) {
         let count = count.min(MAX_WANT);
+        let posting = self.posting(asteroid, row);
         let planned = self.planned(asteroid, row);
         if count <= planned {
             if count > 0
-                && let Some(target) = self.targets.get_mut(&(asteroid, row))
+                && let Some(target) = self.targets.get_mut(&posting)
             {
                 target.priority = target.priority.min(priority);
             }
@@ -400,20 +400,24 @@ impl Plan {
         }
         *self.promised.entry(row).or_default() += count - planned;
         self.targets.insert(
-            (asteroid, row),
+            posting,
             Target {
                 priority: self
                     .targets
-                    .get(&(asteroid, row))
+                    .get(&posting)
                     .map_or(priority, |target| target.priority.min(priority)),
                 count,
             },
         );
     }
 
+    fn posting(&self, asteroid: AsteroidId, row: RowId) -> Posting {
+        Posting::of(asteroid, self.seat, row)
+    }
+
     fn planned(&self, asteroid: AsteroidId, row: RowId) -> u32 {
         self.targets
-            .get(&(asteroid, row))
+            .get(&self.posting(asteroid, row))
             .map_or(0, |target| target.count)
     }
 

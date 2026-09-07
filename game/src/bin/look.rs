@@ -11,10 +11,10 @@ use neumannarch_game::display::glyph;
 use neumannarch_game::display::glyph::Glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
-    Arc, AsteroidView, Client, EntityView, Entry, FlightLine, Hover, RowView, Scene, SectorView,
-    Shown, StripView, WheelBand, WheelView,
+    Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, FlightLine, RowView, Scene, SectorView,
+    Shown, StockpileBarView, WheelButton, WheelGesture, WheelView,
 };
-use neumannarch_game::display::strip::Strip;
+use neumannarch_game::display::stockpile_bar::StockpileBar;
 use neumannarch_game::display::viewport::Viewport;
 use neumannarch_game::display::wheels::{Aim, Still, Wheels};
 use neumannarch_game::display::{belt, hud};
@@ -28,10 +28,10 @@ use neumannarch_sim::roster::{
     ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD, STORAGE,
 };
 use neumannarch_sim::state::view::{Building, View};
-use neumannarch_sim::state::{Command, Draft, STAGE_SPAN};
+use neumannarch_sim::state::{Command, STAGE_SPAN, State};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Material, Materials, Retention, RowId, SeatId, Sequence, Stockpile, Tick, Time,
+    AsteroidId, Material, Materials, Posting, Retention, RowId, SeatId, Sequence, Stockpile, Time,
     Vec3,
 };
 
@@ -59,32 +59,74 @@ fn main() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("look");
     fs::create_dir_all(&out).expect("game/look is writable");
 
+    let watched = Watched::wanting();
     for (name, scene, camera) in [
-        ("region", region_scene(), region_camera()),
+        ("region", region_scene(&watched), region_camera()),
         ("fight", fight_scene(), fight_camera()),
         ("stockpile", stockpile_scene(), stockpile_camera()),
         ("belt", belt_scene(), belt_camera()),
     ] {
-        let pixels = render(scene, camera, None);
+        let pixels = render(scene, camera, None, watched.clone());
         save(&out.join(format!("{name}.png")), &pixels);
     }
-    let (scene, drafting) = draft_scene();
+    let (scene, drafting, watched) = draft_scene();
     let camera = draft_camera(&scene);
-    let pixels = render(scene, camera, Some(drafting));
+    let pixels = render(scene, camera, Some(drafting), watched);
     save(&out.join("draft.png"), &pixels);
 }
 
+#[derive(Clone)]
+struct Watched {
+    view: View,
+    state: State,
+}
+
+impl Watched {
+    fn of(session: &Match) -> Watched {
+        Watched {
+            view: View::of(session.state(), YOU, &Shots::default()),
+            state: session.state().clone(),
+        }
+    }
+
+    fn wanting() -> Watched {
+        let (mut session, _) = skirmish_where_you_go_first();
+        let mut sequence = Sequence::new(YOU);
+        for row in [FRIGATE, RAIDER] {
+            let stamped = sequence.stamp(
+                session.state().tick(),
+                Command::Want {
+                    asteroid: AsteroidId(0),
+                    row,
+                    count: 1,
+                },
+            );
+            session.insert(stamped).expect("the want stands");
+        }
+        session.advance();
+        Watched::of(&session)
+    }
+
+    fn previewing(&self, at: ButtonAt) -> WheelGesture {
+        let edit = at.edit(self.view.want_of(at.posting));
+        let preview = self
+            .state
+            .preview(YOU, &[edit])
+            .expect("the button the pointer rests on stands");
+        WheelGesture::Button(at, preview)
+    }
+}
+
 struct Drafting {
-    draft: Draft,
-    tick: Tick,
     names: Vec<String>,
-    band: (AsteroidId, RowId),
+    button: Posting,
 }
 
 struct Looker {
     scene: Scene,
     camera: BeltCamera,
     drafting: Option<Drafting>,
+    watched: Watched,
 }
 
 impl Game for Looker {
@@ -106,34 +148,36 @@ impl Game for Looker {
         let roster = Roster::shipped();
         let scene = &self.scene;
         let over = viewport.bounds();
-        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let bar = scene
+            .stockpile_bar
+            .map(|view| StockpileBar::across(over, view));
         let wheels = Wheels::over(
             scene,
             &roster,
             &viewport,
-            &aim(scene, self.drafting.as_ref()),
+            &aim(scene, &self.watched),
             &mut Still,
         );
-        let wheels = match &strip {
-            Some(strip) => wheels.clear_of(strip.frame()),
+        let wheels = match &bar {
+            Some(bar) => wheels.clear_of(bar.frame()),
             None => wheels,
         };
         let order = self.drafting.as_ref().map(|drafting| {
             Order::over(
                 over,
-                &drafting.draft,
-                drafting.tick,
+                &self.watched.view.draft,
+                self.watched.view.tick,
                 &roster,
                 &drafting.names,
                 1.0,
             )
         });
         let note = self.drafting.as_ref().and_then(|drafting| {
-            let (asteroid, row) = drafting.band;
+            let posting = drafting.button;
             let at = wheels
                 .iter()
-                .find(|wheel| wheel.asteroid() == asteroid)?
-                .band(row, WheelBand::Plus(1))?;
+                .find(|wheel| wheel.asteroid() == posting.asteroid())?
+                .button(posting.row(), WheelButton::Plus(1))?;
             let (beside, spoken) = wheels.spoken_at(at)?;
             Some((
                 egui::Rect::from_center_size(beside, egui::Vec2::splat(2.0 * glyph::HALF)),
@@ -142,9 +186,9 @@ impl Game for Looker {
         });
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
-            wheels.paint(ui.painter(), scene.hover.as_ref());
-            if let Some(strip) = &strip {
-                strip.paint(ui.painter(), None);
+            wheels.paint(ui.painter(), scene.gesture.as_ref());
+            if let Some(bar) = &bar {
+                bar.paint(ui.painter(), None);
             }
             if let Some(order) = &order {
                 order.paint(ui.painter());
@@ -152,8 +196,8 @@ impl Game for Looker {
             if let Some((beside, phrase)) = note {
                 let panel = Panel::new(ui.painter(), over, egui::Pos2::ZERO, false);
                 let mut controls = Controls::over(&panel);
-                if let Some(strip) = &strip {
-                    controls.avoid(strip.frame());
+                if let Some(bar) = &bar {
+                    controls.avoid(bar.frame());
                 }
                 controls.note(beside, phrase);
                 controls.finish();
@@ -162,20 +206,23 @@ impl Game for Looker {
     }
 }
 
-fn aim<'a>(scene: &Scene, drafting: Option<&'a Drafting>) -> Aim<'a> {
+fn aim<'a>(scene: &Scene, watched: &'a Watched) -> Aim<'a> {
     Aim {
         viewer: scene.seat,
         pointer: None,
         hovered: None,
         step: 1,
-        wants: [((AsteroidId(0), FRIGATE), 1), ((AsteroidId(0), RAIDER), 1)]
-            .into_iter()
-            .collect(),
-        draft: drafting.map(|drafting| &drafting.draft),
+        view: &watched.view,
+        state: &watched.state,
     }
 }
 
-fn render(scene: Scene, camera: BeltCamera, drafting: Option<Drafting>) -> Vec<u8> {
+fn render(
+    scene: Scene,
+    camera: BeltCamera,
+    drafting: Option<Drafting>,
+    watched: Watched,
+) -> Vec<u8> {
     let mut session = Session::<Looker>::new(
         Config::new("neumannarch-look").with_tick_interval(neumannarch_sim::TICK),
         WINDOW,
@@ -184,6 +231,7 @@ fn render(scene: Scene, camera: BeltCamera, drafting: Option<Drafting>) -> Vec<u
                 scene,
                 camera,
                 drafting,
+                watched,
             })
         },
     )
@@ -276,7 +324,7 @@ fn arc(seat: u8, fraction: f32, trailing: f32) -> Option<Arc> {
     })
 }
 
-fn region_scene() -> Scene {
+fn region_scene(watched: &Watched) -> Scene {
     let asteroids = vec![
         asteroid(0, Vec3::new(0.0, 0.0, 0.0), 6.0),
         asteroid(1, Vec3::new(320.0, 0.0, -110.0), 5.0),
@@ -362,16 +410,16 @@ fn region_scene() -> Scene {
         flights: vec![FlightLine {
             from: Vec3::new(-90.0, 0.0, 80.0),
             to: AsteroidId(2),
+            previewed: false,
         }],
-        strip: None,
+        stockpile_bar: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
-        hover: Some(Hover::Wheel {
-            asteroid: AsteroidId(0),
-            row: RAIDER,
-            band: WheelBand::Plus(1),
-        }),
+        gesture: Some(watched.previewing(ButtonAt {
+            posting: Posting::of(AsteroidId(0), SeatId(0), RAIDER),
+            button: WheelButton::Plus(1),
+        })),
     }
 }
 
@@ -427,11 +475,11 @@ fn fight_scene() -> Scene {
         entities,
         wheels,
         flights: Vec::new(),
-        strip: None,
+        stockpile_bar: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
-        hover: None,
+        gesture: None,
     }
 }
 
@@ -488,7 +536,7 @@ fn stockpile_scene() -> Scene {
         entities,
         wheels,
         flights: Vec::new(),
-        strip: Some(StripView {
+        stockpile_bar: Some(StockpileBarView {
             stockpile: Stockpile::new(
                 Materials::new(120.0, 0.0, 300.0),
                 Materials::new(300.0, 300.0, 300.0),
@@ -497,11 +545,12 @@ fn stockpile_scene() -> Scene {
             spend: Materials::new(9.0, 4.0, 2.0),
             elapsed: Time(neumannarch_sim::TICKS_PER_SECOND as u64 * 247),
             clock: Time(neumannarch_sim::TICKS_PER_SECOND as u64 * 900),
+            marked: None,
         }),
         zone: ZONE,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
-        hover: None,
+        gesture: None,
     }
 }
 
@@ -558,12 +607,13 @@ fn belt_scene() -> Scene {
         flights: vec![FlightLine {
             from: flight_from,
             to: AsteroidId(1),
+            previewed: false,
         }],
-        strip: None,
+        stockpile_bar: None,
         zone: ZONE,
         seat: SeatId(0),
         selection: None,
-        hover: None,
+        gesture: None,
     }
 }
 
@@ -588,7 +638,7 @@ fn skirmish_where_you_go_first() -> (Match, Vec<String>) {
         .expect("some seed draws the host first")
 }
 
-fn draft_scene() -> (Scene, Drafting) {
+fn draft_scene() -> (Scene, Drafting, Watched) {
     let (mut session, names) = skirmish_where_you_go_first();
     let first = session.state().draft().stages()[0];
     let stamped = Sequence::new(YOU).stamp(
@@ -603,30 +653,26 @@ fn draft_scene() -> (Scene, Drafting) {
     for _ in 0..STAGE_SPAN.0 + 1 + STAGE_SPAN.0 / 2 {
         session.advance();
     }
-    let view = View::of(session.state(), YOU, &Shots::default());
+    let watched = Watched::of(&session);
+    let view = &watched.view;
     let waiting = view
         .draft
         .stages()
         .iter()
         .find(|stage| stage.seat == YOU && stage.placed.is_none())
         .expect("your second stage waits");
+    let button = Posting::of(BARE, YOU, waiting.row);
     let scene = Scene::from_view(
-        &view,
+        view,
         session.state().roster(),
         Client {
             selection: Some(BARE),
             pointed: Some(BARE),
-            hover: None,
+            gesture: None,
             fights: &Fights::default(),
         },
     );
-    let drafting = Drafting {
-        draft: view.draft.clone(),
-        tick: view.tick,
-        names,
-        band: (BARE, waiting.row),
-    };
-    (scene, drafting)
+    (scene, Drafting { names, button }, watched)
 }
 
 fn draft_camera(scene: &Scene) -> BeltCamera {

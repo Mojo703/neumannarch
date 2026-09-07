@@ -1,4 +1,21 @@
 use neumannarch_sim::Material;
+use neumannarch_sim::state::Rejected;
+
+pub const NOT_YET: &str = "Not yet";
+
+pub const ASTEROID_TAKEN: &str = "Asteroid taken";
+
+pub fn refusal(refused: Rejected) -> Option<&'static str> {
+    match refused {
+        Rejected::NotYet => Some(NOT_YET),
+        Rejected::AsteroidTaken => Some(ASTEROID_TAKEN),
+        Rejected::TooMany
+        | Rejected::DeadSeat
+        | Rejected::NoSuchSeat
+        | Rejected::NoSuchAsteroid
+        | Rejected::NoSuchRow => None,
+    }
+}
 
 pub fn material(material: Material) -> &'static str {
     match material {
@@ -39,9 +56,9 @@ mod tests {
     use neumannarch_sim::{AsteroidId, Materials, Stockpile, TeamId, Tick};
 
     use super::*;
-    use crate::display::scene::{Entry, StripView, WheelBand, asteroid_name};
-    use crate::display::strip::Strip;
-    use crate::display::wheels::{ASTEROID_TAKEN, NOT_YET, Spoken};
+    use crate::display::scene::{Entry, StockpileBarView, WheelButton, asteroid_name};
+    use crate::display::stockpile_bar::StockpileBar;
+    use crate::display::wheels::Spoken;
     use crate::net::listener::NoListener;
     use crate::screens::control::HOST_ONLY;
     use crate::screens::lobby::{
@@ -141,9 +158,9 @@ mod tests {
             neumannarch_protocol::NotReady::Unready { slot: 1 },
             neumannarch_protocol::NotReady::HostUnseated,
         ];
-        let strip = Strip::across(
+        let bar = StockpileBar::across(
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1280.0, 720.0)),
-            StripView {
+            StockpileBarView {
                 stockpile: Stockpile::new(
                     Materials::new(120.0, 0.0, 300.0),
                     Materials::new(300.0, 300.0, 300.0),
@@ -152,6 +169,7 @@ mod tests {
                 spend: Materials::new(9.0, 4.0, 0.0),
                 elapsed: neumannarch_sim::Time(4120),
                 clock: neumannarch_sim::Time(9000),
+                marked: None,
             },
         );
         let bars = Material::EVERY.map(|material| Spoken::Bar {
@@ -159,7 +177,7 @@ mod tests {
             pull: 12.0,
             cap: 20.0,
         });
-        let refused_bands = [NOT_YET, ASTEROID_TAKEN].map(|why| Spoken::Refused {
+        let refused_buttons = [NOT_YET, ASTEROID_TAKEN].map(|why| Spoken::Refused {
             why: why.to_string(),
         });
         let seated = Lobby::skirmish(PlayerId::HOST)
@@ -208,11 +226,15 @@ mod tests {
             .chain(
                 Material::EVERY
                     .into_iter()
-                    .flat_map(|material| [strip.phrase(material), strip.net(material)]),
+                    .flat_map(|material| [bar.phrase(material), bar.net(material)]),
             )
-            .chain([strip.elapsed()])
-            .chain(bars.iter().map(|bar| bar.phrase(&roster)))
-            .chain(refused_bands.iter().map(|band| band.phrase(&roster)))
+            .chain([bar.elapsed()])
+            .chain(bars.iter().map(|spoken| spoken.phrase(&roster)))
+            .chain(
+                refused_buttons
+                    .iter()
+                    .map(|refused| refused.phrase(&roster)),
+            )
             .chain((0..8u64).flat_map(|seed| seat_names(seated.seating(), PlayerId::HOST, seed)))
             .chain(["Draft".to_string(), "Clock".to_string()])
             .chain([asteroid_name(AsteroidId(11))])
@@ -241,11 +263,11 @@ mod tests {
     }
 
     #[test]
-    fn a_band_bears_the_sign_of_the_step_it_edits_by() {
-        assert_eq!(WheelBand::Plus(1).label(), "+");
-        assert_eq!(WheelBand::Minus(1).label(), "-");
-        assert_eq!(WheelBand::Plus(5).label(), "+5");
-        assert_eq!(WheelBand::Minus(5).label(), "-5");
+    fn a_button_bears_the_sign_of_the_step_it_edits_by() {
+        assert_eq!(WheelButton::Plus(1).label(), "+");
+        assert_eq!(WheelButton::Minus(1).label(), "-");
+        assert_eq!(WheelButton::Plus(5).label(), "+5");
+        assert_eq!(WheelButton::Minus(5).label(), "-5");
     }
 
     #[test]

@@ -1,21 +1,20 @@
-use std::collections::BTreeMap;
-
 use mirage_engine::egui;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
 use neumannarch_protocol::Lobby;
-use neumannarch_sim::state::Command;
+use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, RowId, SeatId, Session, Vec3};
+use neumannarch_sim::state::{Command, Preview};
+use neumannarch_sim::{AsteroidId, SeatId, Session, Vec3};
 
 use crate::controls::{Button, Controls};
 use crate::display::camera::BeltCamera;
 use crate::display::ease::{self, Clock, Span};
 use crate::display::fights::Fights;
 use crate::display::glyph_quad::GlyphQuad;
-use crate::display::scene::{Client, Hover, Scene, WheelBand};
+use crate::display::scene::{ButtonAt, Client, Scene, WheelGesture};
 use crate::display::send::Sending;
-use crate::display::strip::Strip;
+use crate::display::stockpile_bar::StockpileBar;
 use crate::display::viewport::Viewport;
 use crate::display::wheels::{Aim, Ease, Motion, Wheels};
 use crate::display::{belt, hud};
@@ -46,9 +45,7 @@ struct Drag {
 }
 
 struct Repeat {
-    asteroid: AsteroidId,
-    row: RowId,
-    band: WheelBand,
+    at: ButtonAt,
     held: f32,
     edits: u32,
 }
@@ -61,7 +58,7 @@ pub enum Picked {
 enum Mode {
     Playing {
         gesture: Gesture,
-        hover: Option<Hover>,
+        hover: Option<WheelGesture>,
     },
     Paused,
     Held(Held),
@@ -84,6 +81,7 @@ pub struct Play {
     camera: BeltCamera,
     selection: Option<AsteroidId>,
     hovered: Option<AsteroidId>,
+    shifted: bool,
     doing: Mode,
     followed: bool,
     panning: Panning,
@@ -102,7 +100,7 @@ impl Play {
                 Client {
                     selection: None,
                     pointed: None,
-                    hover: None,
+                    gesture: None,
                     fights: &Fights::default(),
                 },
             )
@@ -122,6 +120,7 @@ impl Play {
             camera,
             selection: None,
             hovered: None,
+            shifted: false,
             doing: Mode::played(),
             followed: false,
             panning: Panning::still(),
@@ -147,10 +146,46 @@ impl Play {
         self.selection
     }
 
-    pub fn hover(&self) -> Option<&Hover> {
+    pub fn gesture(&self) -> Option<&WheelGesture> {
         match &self.doing {
             Mode::Playing { hover, .. } => hover.as_ref(),
             Mode::Paused | Mode::Held(_) => None,
+        }
+    }
+
+    fn previewed_button(&self, at: ButtonAt) -> WheelGesture {
+        let edit = at.edit(self.view.want_of(at.posting));
+        WheelGesture::Button(at, self.previewed(&[edit]))
+    }
+
+    fn previewed_send(&self, sending: Sending) -> WheelGesture {
+        let edits = sending.commands(&self.view, self.roster());
+        WheelGesture::Send(sending, self.previewed(&edits))
+    }
+
+    fn previewed(&self, wants: &[Command]) -> Preview {
+        self.machine
+            .session()
+            .state()
+            .preview(self.machine.seat(), wants)
+            .unwrap_or_default()
+    }
+
+    fn refreshes_preview(&mut self) {
+        let refreshed = match self.gesture() {
+            Some(WheelGesture::Button(at, _)) => Some(self.previewed_button(*at)),
+            Some(WheelGesture::Send(sending, _)) => Some(self.previewed_send(*sending)),
+            None => None,
+        };
+        if let Mode::Playing { hover, .. } = &mut self.doing {
+            *hover = refreshed;
+        }
+    }
+
+    fn step(&self) -> u32 {
+        match self.shifted {
+            true => SHIFT_STEP,
+            false => 1,
         }
     }
 
@@ -195,6 +230,7 @@ impl Play {
         }
         self.holds(ticked.pace);
         self.view = self.machine.view();
+        self.refreshes_preview();
         if ticked.pace != Allowed::Advance {
             return;
         }
@@ -216,11 +252,10 @@ impl Play {
         self.order_alpha = ease::toward(self.order_alpha, self.order_target(), dt, Span::Slow);
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
-        let shifted = ctx.down(Button::Shift);
+        self.shifted = ctx.down(Button::Shift);
         let aimed = self.wheels(
             &viewport,
             Some(viewport.point_at(ctx.pointer())),
-            shifted,
             &mut motion,
         );
         self.read_input(ctx, &viewport, &aimed);
@@ -230,12 +265,14 @@ impl Play {
         let pointer = viewport.point_at(ctx.pointer());
         let scene = self.scene();
         let over = viewport.bounds();
-        let strip = scene.strip.map(|view| Strip::across(over, view));
+        let bar = scene
+            .stockpile_bar
+            .map(|view| StockpileBar::across(over, view));
         let wheels = self.wheels_over(
             &scene,
-            strip.as_ref(),
+            bar.as_ref(),
             &viewport,
-            &self.aim(Some(pointer), shifted),
+            &self.aim(Some(pointer)),
             &mut motion,
         );
         self.motion = motion;
@@ -244,15 +281,15 @@ impl Play {
         let clicked = ctx.pressed(Button::Select);
         let phrase = self.phrase(&wheels, pointer);
         let order = self.order(over);
-        let hover = self.hover().copied();
+        let gesture = self.gesture().cloned();
         let doing = &self.doing;
         let mut left = None;
         let mut resumed = false;
         ctx.ui(|ui| {
             hud::paint(&scene, &viewport, ui.painter());
-            wheels.paint(ui.painter(), hover.as_ref());
-            if let Some(strip) = &strip {
-                strip.paint(ui.painter(), Some(pointer));
+            wheels.paint(ui.painter(), gesture.as_ref());
+            if let Some(bar) = &bar {
+                bar.paint(ui.painter(), Some(pointer));
             }
             if let Some(order) = &order {
                 order.paint(ui.painter());
@@ -260,8 +297,8 @@ impl Play {
             let panel = Panel::new(ui.painter(), over, pointer, clicked);
             if let Some((beside, phrase)) = phrase {
                 let mut controls = control::Controls::over(&panel);
-                if let Some(strip) = &strip {
-                    controls.avoid(strip.frame());
+                if let Some(bar) = &bar {
+                    controls.avoid(bar.frame());
                 }
                 controls.note(beside, phrase);
                 controls.finish();
@@ -293,13 +330,13 @@ impl Play {
             Client {
                 selection: self.selection,
                 pointed: self.hovered,
-                hover: self.hover().copied(),
+                gesture: self.gesture().cloned(),
                 fights: &self.fights,
             },
         )
     }
 
-    fn roster(&self) -> &neumannarch_sim::roster::Roster {
+    fn roster(&self) -> &Roster {
         self.machine.session().state().roster()
     }
 
@@ -327,57 +364,39 @@ impl Play {
         &self,
         viewport: &Viewport,
         pointer: Option<egui::Pos2>,
-        shifted: bool,
         ease: &mut impl Ease,
     ) -> Wheels {
         let scene = self.scene();
-        let strip = scene
-            .strip
-            .map(|view| Strip::across(viewport.bounds(), view));
-        self.wheels_over(
-            &scene,
-            strip.as_ref(),
-            viewport,
-            &self.aim(pointer, shifted),
-            ease,
-        )
+        let bar = scene
+            .stockpile_bar
+            .map(|view| StockpileBar::across(viewport.bounds(), view));
+        self.wheels_over(&scene, bar.as_ref(), viewport, &self.aim(pointer), ease)
     }
 
     fn wheels_over(
         &self,
         scene: &Scene,
-        strip: Option<&Strip>,
+        bar: Option<&StockpileBar>,
         viewport: &Viewport,
         aim: &Aim<'_>,
         ease: &mut impl Ease,
     ) -> Wheels {
         let wheels = Wheels::over(scene, self.roster(), viewport, aim, ease);
-        match strip {
-            Some(strip) => wheels.clear_of(strip.frame()),
+        match bar {
+            Some(bar) => wheels.clear_of(bar.frame()),
             None => wheels,
         }
     }
 
-    fn aim(&self, pointer: Option<egui::Pos2>, shifted: bool) -> Aim<'_> {
+    fn aim(&self, pointer: Option<egui::Pos2>) -> Aim<'_> {
         Aim {
             viewer: self.machine.seat(),
             pointer,
             hovered: self.hovered,
-            step: match shifted {
-                true => SHIFT_STEP,
-                false => 1,
-            },
-            wants: self.wants(),
-            draft: Some(&self.view.draft),
+            step: self.step(),
+            view: &self.view,
+            state: self.machine.session().state(),
         }
-    }
-
-    fn wants(&self) -> BTreeMap<(AsteroidId, RowId), u32> {
-        self.view
-            .plans
-            .iter()
-            .map(|plan| ((plan.asteroid, plan.row), plan.want))
-            .collect()
     }
 
     fn phrase(&self, wheels: &Wheels, pointer: egui::Pos2) -> Option<(egui::Rect, String)> {
@@ -460,64 +479,71 @@ impl Play {
             .panning
             .drag(ctx, &mut self.camera, viewport.window(), !sending);
 
-        let band = wheels.band_at(at);
+        let button = wheels.button_at(at);
         let over = wheels.at(at).or_else(|| self.asteroid_at(viewport, at));
         if let Gesture::Sending(drag) = &mut gesture {
             drag.adjust(notches);
         }
         if ctx.pressed(Button::Select) {
-            gesture = self.pressed(band, over);
+            gesture = self.pressed(button, over);
         }
         if ctx.released(Button::Select) {
             gesture = self.released(gesture, over);
         }
         if let Gesture::Editing(holding) = &mut gesture
-            && holding.repeats(band, dt)
+            && holding.repeats(button, dt)
         {
-            let (asteroid, row, band) = (holding.asteroid, holding.row, holding.band);
-            self.edit(asteroid, row, band);
+            let at = holding.at;
+            self.edit(at);
         }
 
-        let hover = match (&gesture, band) {
-            (Gesture::Sending(drag), _) => over.filter(|to| *to != drag.from).map(|to| {
-                Hover::Send(Sending {
+        let hover = match (&gesture, button) {
+            (Gesture::Sending(drag), _) => over
+                .filter(|to| *to != drag.from)
+                .map(|to| Sending {
                     from: drag.from,
                     to,
                     count: drag.count,
                 })
-            }),
-            (_, Some((asteroid, row, band))) => Some(Hover::Wheel {
-                asteroid,
-                row,
-                band,
-            }),
+                .map(|sending| self.sending_hover(sending)),
+            (_, Some(at)) => Some(self.button_hover(at)),
             (Gesture::Still | Gesture::Editing(_), None) => None,
         };
         self.doing = Mode::Playing { gesture, hover };
     }
 
-    fn pressed(
-        &mut self,
-        band: Option<(AsteroidId, RowId, WheelBand)>,
-        over: Option<AsteroidId>,
-    ) -> Gesture {
-        match (band, over) {
-            (Some((asteroid, row, band)), _) => {
-                self.selection = Some(asteroid);
-                self.edit(asteroid, row, band);
+    fn button_hover(&self, at: ButtonAt) -> WheelGesture {
+        match self.gesture() {
+            Some(held @ WheelGesture::Button(over, _)) if *over == at => held.clone(),
+            _ => self.previewed_button(at),
+        }
+    }
+
+    fn sending_hover(&self, sending: Sending) -> WheelGesture {
+        match self.gesture() {
+            Some(held @ WheelGesture::Send(over, _)) if *over == sending => held.clone(),
+            _ => self.previewed_send(sending),
+        }
+    }
+
+    fn pressed(&mut self, button: Option<ButtonAt>, over: Option<AsteroidId>) -> Gesture {
+        match (button, over) {
+            (Some(at), _) => {
+                self.selection = Some(at.posting.asteroid());
+                self.edit(at);
                 Gesture::Editing(Repeat {
-                    asteroid,
-                    row,
-                    band,
+                    at,
                     held: 0.0,
                     edits: 1,
                 })
             }
-            (None, Some(from)) => Gesture::Sending(Drag {
-                from,
-                count: Sending::present(&self.view, from, self.roster()),
-                adjusted: 0.0,
-            }),
+            (None, Some(from)) => match Drag::off(&self.view, from, self.roster()) {
+                Some(drag) => Gesture::Sending(drag),
+                None => {
+                    self.focuses(from);
+                    Gesture::Still
+                }
+            },
             (None, None) => {
                 self.selection = None;
                 Gesture::Still
@@ -545,10 +571,10 @@ impl Play {
         Gesture::Still
     }
 
-    fn edit(&mut self, asteroid: AsteroidId, row: RowId, band: WheelBand) {
-        let want = self.view.plan_of(asteroid, row).map_or(0, |plan| plan.want);
-        if band.wanted(want) != want {
-            self.issue(band.edit(asteroid, row, want));
+    fn edit(&mut self, at: ButtonAt) {
+        let want = self.view.want_of(at.posting);
+        if at.button.wanted(want) != want {
+            self.issue(at.edit(want));
         }
     }
 
@@ -592,6 +618,15 @@ impl Mode {
 }
 
 impl Drag {
+    fn off(view: &View, from: AsteroidId, roster: &Roster) -> Option<Drag> {
+        let count = Sending::present(view, from, roster);
+        (count > 0).then_some(Drag {
+            from,
+            count,
+            adjusted: 0.0,
+        })
+    }
+
     fn adjust(&mut self, notches: f32) {
         self.adjusted += notches;
         while self.adjusted >= 1.0 {
@@ -606,8 +641,8 @@ impl Drag {
 }
 
 impl Repeat {
-    fn repeats(&mut self, slot: Option<(AsteroidId, RowId, WheelBand)>, dt: f32) -> bool {
-        if slot != Some((self.asteroid, self.row, self.band)) {
+    fn repeats(&mut self, under: Option<ButtonAt>, dt: f32) -> bool {
+        if under != Some(self.at) {
             return false;
         }
         self.held += dt;
@@ -633,19 +668,41 @@ mod tests {
             .expect("the host holds a seat");
         let mut play = Play::of(lobby, Machine::of(started, &crew, &mut Local));
         let from = AsteroidId(0);
+        let sending = Sending {
+            from,
+            to: AsteroidId(1),
+            count: 1,
+        };
+        let hover = Some(play.previewed_send(sending));
         play.doing = Mode::Playing {
             gesture: Gesture::Sending(Drag {
                 from,
                 count: 1,
                 adjusted: 0.0,
             }),
-            hover: Some(Hover::Send(Sending {
-                from,
-                to: AsteroidId(1),
-                count: 1,
-            })),
+            hover,
         };
         play
+    }
+
+    #[test]
+    fn a_press_on_an_asteroid_holding_no_unit_of_the_seat_starts_no_drag() {
+        let lobby = Lobby::skirmish(PlayerId::HOST);
+        let started = lobby.freeze().expect("a skirmish is a match");
+        let crew = started
+            .seating()
+            .run_by(PlayerId::HOST)
+            .expect("the host holds a seat");
+        let mut play = Play::of(lobby, Machine::of(started, &crew, &mut Local));
+        let bare = AsteroidId(3);
+
+        let gesture = play.pressed(None, Some(bare));
+
+        assert!(
+            matches!(gesture, Gesture::Still),
+            "a bare asteroid has nothing to send"
+        );
+        assert_eq!(play.selection(), Some(bare), "the press selects it");
     }
 
     #[test]
@@ -656,7 +713,7 @@ mod tests {
 
         assert!(matches!(play.doing, Mode::Held(Held::Waiting(_))));
         assert!(
-            play.hover().is_none(),
+            play.gesture().is_none(),
             "a held match previews nothing over the belt"
         );
     }

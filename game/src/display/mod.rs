@@ -14,7 +14,7 @@ mod local;
 pub mod scene;
 pub mod send;
 pub mod stencil;
-pub mod strip;
+pub mod stockpile_bar;
 pub mod tint;
 pub mod viewport;
 pub mod wheel;

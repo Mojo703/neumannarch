@@ -1,6 +1,5 @@
 use crate::belt::Belt;
 use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
-use crate::materials::Materials;
 use crate::orbit::body::Body;
 use crate::post::Post;
 use crate::roster::Kind;
@@ -88,24 +87,24 @@ fn move_bodies(next: &mut State, moved: &Moved) {
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
     for placement in &filled.placements {
         let taken = next
-            .seat_mut(placement.post.seat)
-            .is_some_and(|seat| seat.take_reserved(placement.row));
+            .seat_mut(placement.seat())
+            .is_some_and(|seat| seat.take_reserved(placement.row()));
         if taken {
-            spawn(next, placement.post, placement.row);
+            spawn(next, placement.post(), placement.row());
         }
     }
     for send in &filled.sends {
-        let flight = Flight::new(send.source, send.schedule);
+        let route = send.route();
+        let flight = Flight::new(route.source, send.schedule);
         for member in &send.members {
-            join(next, *member, send.destination, flight);
+            join(next, *member, route.destination, flight);
         }
     }
     for opening in &filled.openings {
-        next.add_frame(Frame::new(opening.post, opening.row, 0.0, snap.time()));
+        next.add_frame(Frame::new(opening.post(), opening.row(), 0.0, snap.time()));
     }
     for cancellation in &filled.cancellations {
-        let cost = snap[cancellation.row].cost;
-        refund(next, cancellation.seat, share(cost, cancellation.progress));
+        next[cancellation.posting.seat()].refund(cancellation.refund(snap));
         closing.push(cancellation.frame);
     }
 }
@@ -228,19 +227,6 @@ fn join(next: &mut State, entity: EntityId, destination: AsteroidId, flight: Fli
     });
 }
 
-fn refund(next: &mut State, seat: SeatId, materials: Materials) {
-    next[seat].refund(materials);
-}
-
-fn share(cost: Materials, progress: f64) -> Materials {
-    let total = cost.total();
-    if total > 0.0 {
-        cost * (progress / total)
-    } else {
-        Materials::ZERO
-    }
-}
-
 pub(crate) mod construction;
 pub(crate) mod extraction;
 pub mod fire;
@@ -257,6 +243,7 @@ mod tests {
     use crate::ids::TeamId;
     use crate::materials::Material;
     use crate::orbit::body::Gravity;
+    use crate::posting::Posting;
     use crate::real::Real;
     use crate::roster::Roster;
     use crate::roster::{
@@ -310,7 +297,7 @@ mod tests {
             world.run(TICKS_PER_SECOND as u64 + 1);
             world
                 .view(0)
-                .plan_of(asteroid(0), LANCER)
+                .plan_of(Posting::of(asteroid(0), SeatId(0), LANCER))
                 .and_then(|plan| plan.building)
                 .expect("the lancer's frame is open")
         };

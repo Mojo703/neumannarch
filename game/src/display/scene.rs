@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::orbit::Gravity;
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::{Berth, Building, View};
-use neumannarch_sim::state::{Asteroid, Held, MAX_WANT};
-use neumannarch_sim::{AsteroidId, Materials, RowId, SeatId, Stockpile, Time, Vec3};
+use neumannarch_sim::state::{Asteroid, Command, Held, Preview, Route};
+use neumannarch_sim::{AsteroidId, Materials, Post, Posting, RowId, SeatId, Stockpile, Time, Vec3};
 
 use crate::display::fights::Fights;
 use crate::display::glyph::Glyph;
@@ -21,19 +21,21 @@ pub enum Fill {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WheelBand {
+pub enum WheelButton {
     Plus(u32),
     Minus(u32),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Hover {
-    Wheel {
-        asteroid: AsteroidId,
-        row: RowId,
-        band: WheelBand,
-    },
-    Send(Sending),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ButtonAt {
+    pub posting: Posting,
+    pub button: WheelButton,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WheelGesture {
+    Button(ButtonAt, Preview),
+    Send(Sending, Preview),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,6 +57,7 @@ pub struct EntityView {
 pub struct FlightLine {
     pub from: Vec3,
     pub to: AsteroidId,
+    pub previewed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,12 +70,19 @@ pub struct AsteroidView {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct StripView {
+pub enum BarMark {
+    Cost(Materials),
+    Refund(Materials),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StockpileBarView {
     pub stockpile: Stockpile,
     pub income: Materials,
     pub spend: Materials,
     pub elapsed: Time,
     pub clock: Time,
+    pub marked: Option<BarMark>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,7 +124,7 @@ pub struct WheelView {
 pub struct Client<'a> {
     pub selection: Option<AsteroidId>,
     pub pointed: Option<AsteroidId>,
-    pub hover: Option<Hover>,
+    pub gesture: Option<WheelGesture>,
     pub fights: &'a Fights,
 }
 
@@ -124,11 +134,11 @@ pub struct Scene {
     pub entities: Vec<EntityView>,
     pub wheels: Vec<WheelView>,
     pub flights: Vec<FlightLine>,
-    pub strip: Option<StripView>,
+    pub stockpile_bar: Option<StockpileBarView>,
     pub zone: f64,
     pub seat: SeatId,
     pub selection: Option<AsteroidId>,
-    pub hover: Option<Hover>,
+    pub gesture: Option<WheelGesture>,
 }
 
 impl Scene {
@@ -148,11 +158,11 @@ impl Scene {
             entities: Vec::new(),
             wheels: Vec::new(),
             flights: Vec::new(),
-            strip: None,
+            stockpile_bar: None,
             zone: Belt::ZONE_RADIUS_METERS,
             seat: SeatId(0),
             selection: None,
-            hover: None,
+            gesture: None,
         }
     }
 
@@ -188,28 +198,21 @@ impl Scene {
                 })
                 .collect(),
             wheels: Sectors::of(view, client.fights, [client.selection, client.pointed])
-                .previewed(view, roster, client.hover.as_ref())
+                .previewing(view, client.gesture.as_ref())
                 .drawn(),
-            flights: view
-                .present
-                .iter()
-                .filter(|present| present.at.flying_from().is_some())
-                .map(|present| FlightLine {
-                    from: present.body.pos,
-                    to: present.home,
-                })
-                .collect(),
-            strip: Some(StripView {
+            flights: flight_lines(view, client.gesture.as_ref()),
+            stockpile_bar: Some(StockpileBarView {
                 stockpile: view.stockpile,
                 income: view.income,
                 spend: view.spend,
                 elapsed: view.time,
                 clock: view.length,
+                marked: marked_on_bar(roster, client.gesture.as_ref()),
             }),
             zone: view.zone,
             seat: view.seat,
             selection: client.selection,
-            hover: client.hover,
+            gesture: client.gesture,
         }
     }
 
@@ -267,26 +270,36 @@ impl Entry {
     }
 }
 
-impl WheelBand {
+impl WheelButton {
     pub fn step(self) -> u32 {
         match self {
-            WheelBand::Plus(step) | WheelBand::Minus(step) => step,
+            WheelButton::Plus(step) | WheelButton::Minus(step) => step,
         }
     }
 
     pub fn label(self) -> String {
         match self {
-            WheelBand::Plus(1) => "+".to_string(),
-            WheelBand::Minus(1) => "-".to_string(),
-            WheelBand::Plus(step) => format!("+{step}"),
-            WheelBand::Minus(step) => format!("-{step}"),
+            WheelButton::Plus(1) => "+".to_string(),
+            WheelButton::Minus(1) => "-".to_string(),
+            WheelButton::Plus(step) => format!("+{step}"),
+            WheelButton::Minus(step) => format!("-{step}"),
         }
     }
 
     pub fn wanted(self, from: u32) -> u32 {
         match self {
-            WheelBand::Plus(step) => from.saturating_add(step).min(MAX_WANT),
-            WheelBand::Minus(step) => from.saturating_sub(step),
+            WheelButton::Plus(step) => from.saturating_add(step),
+            WheelButton::Minus(step) => from.saturating_sub(step),
+        }
+    }
+}
+
+impl ButtonAt {
+    pub fn edit(self, want: u32) -> Command {
+        Command::Want {
+            asteroid: self.posting.asteroid(),
+            row: self.posting.row(),
+            count: self.button.wanted(want),
         }
     }
 }
@@ -303,130 +316,147 @@ fn reach(roster: &Roster, row: RowId, standing: bool) -> Option<f64> {
 type Rows = BTreeMap<RowId, Vec<Shown>>;
 
 struct Sectors {
-    rows: BTreeMap<(AsteroidId, SeatId), Rows>,
-    arcs: BTreeMap<(AsteroidId, SeatId), Arc>,
+    rows: BTreeMap<Post, Rows>,
+    arcs: BTreeMap<Post, Arc>,
 }
 
 impl Sectors {
     fn of(view: &View, fights: &Fights, full: [Option<AsteroidId>; 2]) -> Sectors {
-        let mut rows: BTreeMap<(AsteroidId, SeatId), Rows> = BTreeMap::new();
-        for composition in &view.compositions {
-            let sector = rows
-                .entry((composition.asteroid, composition.seat))
-                .or_default();
+        let mut rows: BTreeMap<Post, Rows> = BTreeMap::new();
+        for (post, composition) in &view.compositions {
+            let sector = rows.entry(*post).or_default();
             for (row, held) in &composition.rows {
-                let entries = entries_of(view, composition.asteroid, composition.seat, *row, *held);
+                let entries = entries_of(view, Posting::new(*post, *row), *held);
                 if !entries.is_empty() {
                     sector.insert(*row, entries);
                 }
             }
         }
-        let placements: Vec<(AsteroidId, SeatId, RowId)> = match view.draft.ended() {
+        let placements: Vec<Posting> = match view.draft.ended() {
             None => view
                 .draft
                 .stages()
                 .iter()
-                .filter_map(|stage| Some((stage.placed?, stage.seat, stage.row)))
+                .filter_map(|stage| Some(Posting::of(stage.placed?, stage.seat, stage.row)))
                 .collect(),
             Some(_) => Vec::new(),
         };
-        for plan in &view.plans {
+        for (posting, plan) in &view.plans {
             let entries = rows
-                .entry((plan.asteroid, view.seat))
+                .entry(posting.post())
                 .or_default()
-                .entry(plan.row)
+                .entry(posting.row())
                 .or_default();
             if let Some(building) = plan.building {
                 entries.push(shown(Entry::Building(building)));
             }
-            let short = plan.want.saturating_sub(
-                covered(view, plan.asteroid, plan.row) + wanted_frames(plan.building),
-            );
-            if short > 0 && !placements.contains(&(plan.asteroid, view.seat, plan.row)) {
+            let short = plan
+                .want
+                .saturating_sub(covered(view, *posting) + wanted_frames(plan.building));
+            if short > 0 && !placements.contains(posting) {
                 entries.push(shown(Entry::Wanted {
                     count: short,
-                    dashed: !builds_at(view, plan.asteroid, view.seat),
+                    dashed: !builds_at(view, posting.post()),
                 }));
             }
             entries.sort_by_key(order);
         }
-        for (asteroid, seat, row) in placements {
-            rows.entry((asteroid, seat))
+        for posting in placements {
+            rows.entry(posting.post())
                 .or_default()
-                .entry(row)
+                .entry(posting.row())
                 .or_default()
                 .push(shown(Entry::Placed));
         }
-        let arcs: BTreeMap<(AsteroidId, SeatId), Arc> = fights
+        let arcs: BTreeMap<Post, Arc> = fights
             .arcs()
-            .map(|(asteroid, arc)| ((asteroid, arc.seat), arc))
+            .map(|(asteroid, arc)| {
+                (
+                    Post {
+                        asteroid,
+                        seat: arc.seat,
+                    },
+                    arc,
+                )
+            })
             .collect();
-        for (asteroid, seat) in arcs.keys() {
-            rows.entry((*asteroid, *seat)).or_default();
+        for post in arcs.keys() {
+            rows.entry(*post).or_default();
         }
-        for asteroid in full.into_iter().flatten() {
-            rows.entry((asteroid, view.seat)).or_default();
+        for asteroid in full.into_iter().flatten().filter(|_| view.still_in) {
+            rows.entry(Post {
+                asteroid,
+                seat: view.seat,
+            })
+            .or_default();
         }
         Sectors { rows, arcs }
     }
 
-    fn previewed(mut self, view: &View, roster: &Roster, hover: Option<&Hover>) -> Sectors {
-        match hover {
-            None | Some(Hover::Wheel { .. }) => {}
-            Some(Hover::Send(sending)) => {
-                for (row, count) in sending.rows(view, roster) {
-                    self.moving(view.seat, *sending, row, count);
+    fn previewing(mut self, view: &View, gesture: Option<&WheelGesture>) -> Sectors {
+        let Some(WheelGesture::Send(_, sent)) = gesture else {
+            return self;
+        };
+        for (posting, filling) in &sent.shortfalls {
+            let arriving = self.entries(*posting);
+            for (from, count) in &filling.sent_from {
+                arriving.push(Shown {
+                    entry: Entry::Arriving {
+                        count: *count,
+                        from: *from,
+                    },
+                    previewed: true,
+                });
+            }
+            if filling.to_build > 0 {
+                arriving.push(Shown {
+                    entry: Entry::Wanted {
+                        count: filling.to_build,
+                        dashed: !builds_at(view, posting.post()),
+                    },
+                    previewed: true,
+                });
+            }
+            arriving.sort_by_key(order);
+            for from in filling.sent_from.keys() {
+                for shown in self
+                    .entries(Posting::of(*from, posting.seat(), posting.row()))
+                    .iter_mut()
+                    .filter(|shown| matches!(shown.entry, Entry::Present(_)))
+                {
+                    shown.previewed = true;
                 }
             }
         }
         self
     }
 
-    fn entries(&mut self, asteroid: AsteroidId, seat: SeatId, row: RowId) -> &mut Vec<Shown> {
+    fn entries(&mut self, posting: Posting) -> &mut Vec<Shown> {
         self.rows
-            .entry((asteroid, seat))
+            .entry(posting.post())
             .or_default()
-            .entry(row)
+            .entry(posting.row())
             .or_default()
-    }
-
-    fn moving(&mut self, seat: SeatId, sending: Sending, row: RowId, count: u32) {
-        for shown in self
-            .entries(sending.from, seat, row)
-            .iter_mut()
-            .filter(|shown| matches!(shown.entry, Entry::Present(_)))
-        {
-            shown.previewed = true;
-        }
-        let arriving = self.entries(sending.to, seat, row);
-        arriving.push(Shown {
-            entry: Entry::Arriving {
-                count,
-                from: sending.from,
-            },
-            previewed: true,
-        });
-        arriving.sort_by_key(order);
     }
 
     fn drawn(self) -> Vec<WheelView> {
         let mut wheels: BTreeMap<AsteroidId, WheelView> = BTreeMap::new();
-        for ((asteroid, seat), rows) in self.rows {
+        for (post, rows) in self.rows {
             wheels
-                .entry(asteroid)
+                .entry(post.asteroid)
                 .or_insert_with(|| WheelView {
-                    asteroid,
+                    asteroid: post.asteroid,
                     sectors: Vec::new(),
                 })
                 .sectors
                 .push(SectorView {
-                    seat,
+                    seat: post.seat,
                     rows: rows
                         .into_iter()
                         .filter(|(_, entries)| !entries.is_empty())
                         .map(|(row, entries)| RowView { row, entries })
                         .collect(),
-                    arc: self.arcs.get(&(asteroid, seat)).copied(),
+                    arc: self.arcs.get(&post).copied(),
                 });
         }
         wheels.into_values().collect()
@@ -455,25 +485,15 @@ fn wanted_frames(building: Option<Building>) -> u32 {
     u32::from(building.is_some())
 }
 
-fn entries_of(
-    view: &View,
-    asteroid: AsteroidId,
-    seat: SeatId,
-    row: RowId,
-    held: Held,
-) -> Vec<Shown> {
+fn entries_of(view: &View, posting: Posting, held: Held) -> Vec<Shown> {
     let mut entries = Vec::new();
     if held.present > 0 {
         entries.push(shown(Entry::Present(held.present)));
     }
-    let surplus = match seat == view.seat {
-        true => (held.present + held.arriving).saturating_sub(want_at(view, asteroid, row)),
-        false => 0,
-    };
-    if surplus > 0 {
-        entries.push(shown(Entry::Surplus(surplus)));
+    if held.surplus > 0 {
+        entries.push(shown(Entry::Surplus(held.surplus)));
     }
-    if let Some(to) = leaving_for(view, asteroid, seat, row)
+    if let Some(to) = leaving_for(view, posting)
         && held.leaving > 0
     {
         entries.push(shown(Entry::Leaving {
@@ -481,7 +501,7 @@ fn entries_of(
             to,
         }));
     }
-    if let Some(from) = arriving_from(view, asteroid, seat, row)
+    if let Some(from) = arriving_from(view, posting)
         && held.arriving > 0
     {
         entries.push(shown(Entry::Arriving {
@@ -492,23 +512,22 @@ fn entries_of(
     entries
 }
 
-fn leaving_for(view: &View, asteroid: AsteroidId, seat: SeatId, row: RowId) -> Option<AsteroidId> {
+fn leaving_for(view: &View, posting: Posting) -> Option<AsteroidId> {
+    let asteroid = posting.asteroid();
     view.present
         .iter()
-        .filter(|unit| unit.seat == seat && unit.row == row)
+        .filter(|unit| unit.seat == posting.seat() && unit.row == posting.row())
         .find(|unit| unit.at.standing() == Some(asteroid) && unit.home != asteroid)
         .map(|unit| unit.home)
 }
 
-fn arriving_from(
-    view: &View,
-    asteroid: AsteroidId,
-    seat: SeatId,
-    row: RowId,
-) -> Option<AsteroidId> {
+fn arriving_from(view: &View, posting: Posting) -> Option<AsteroidId> {
+    let asteroid = posting.asteroid();
     view.present
         .iter()
-        .filter(|unit| unit.seat == seat && unit.row == row && unit.home == asteroid)
+        .filter(|unit| {
+            unit.seat == posting.seat() && unit.row == posting.row() && unit.home == asteroid
+        })
         .find_map(|unit| match unit.at {
             Berth::Standing(from) if from != asteroid => Some(from),
             Berth::Flying { from } => Some(from),
@@ -516,23 +535,67 @@ fn arriving_from(
         })
 }
 
-fn covered(view: &View, asteroid: AsteroidId, row: RowId) -> u32 {
+fn covered(view: &View, posting: Posting) -> u32 {
     view.compositions
-        .iter()
-        .find(|composition| composition.asteroid == asteroid && composition.seat == view.seat)
-        .and_then(|composition| composition.rows.get(&row))
+        .get(&posting.post())
+        .and_then(|composition| composition.rows.get(&posting.row()))
         .map_or(0, |held| held.present + held.arriving)
 }
 
-fn want_at(view: &View, asteroid: AsteroidId, row: RowId) -> u32 {
-    view.plan_of(asteroid, row).map_or(0, |plan| plan.want)
+fn builds_at(view: &View, post: Post) -> bool {
+    view.compositions
+        .get(&post)
+        .is_some_and(|composition| composition.builder)
 }
 
-fn builds_at(view: &View, asteroid: AsteroidId, seat: SeatId) -> bool {
-    view.compositions
+fn flight_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> {
+    let flying = view
+        .present
         .iter()
-        .find(|composition| composition.asteroid == asteroid && composition.seat == seat)
-        .is_some_and(|composition| composition.builder)
+        .filter(|present| present.at.flying_from().is_some())
+        .map(|present| FlightLine {
+            from: present.body.pos,
+            to: present.home,
+            previewed: false,
+        });
+    flying.chain(previewed_lines(view, gesture)).collect()
+}
+
+fn previewed_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> {
+    let Some(WheelGesture::Send(_, sent)) = gesture else {
+        return Vec::new();
+    };
+    let routes: BTreeSet<Route> = sent
+        .shortfalls
+        .iter()
+        .flat_map(|(posting, filling)| {
+            filling.sent_from.keys().map(move |source| Route {
+                source: *source,
+                destination: posting.asteroid(),
+                seat: posting.seat(),
+            })
+        })
+        .collect();
+    routes
+        .into_iter()
+        .filter_map(|route| {
+            Some(FlightLine {
+                from: view.asteroid_body(route.source)?.pos,
+                to: route.destination,
+                previewed: true,
+            })
+        })
+        .collect()
+}
+
+fn marked_on_bar(roster: &Roster, gesture: Option<&WheelGesture>) -> Option<BarMark> {
+    let WheelGesture::Button(at, preview) = gesture? else {
+        return None;
+    };
+    match at.button {
+        WheelButton::Plus(_) => Some(BarMark::Cost(preview.cost_to_build(roster))),
+        WheelButton::Minus(_) => Some(BarMark::Refund(preview.refund)),
+    }
 }
 
 #[cfg(test)]
@@ -555,7 +618,7 @@ mod tests {
         local: &Local,
         fights: &Fights,
         selection: Option<AsteroidId>,
-        hover: Option<Hover>,
+        gesture: Option<WheelGesture>,
     ) -> Scene {
         Scene::from_view(
             &local.view(),
@@ -563,10 +626,28 @@ mod tests {
             Client {
                 selection,
                 pointed: None,
-                hover,
+                gesture,
                 fights,
             },
         )
+    }
+
+    fn dragging(local: &Local, sending: Sending) -> WheelGesture {
+        let edits = sending.commands(&local.view(), local.session().state().roster());
+        WheelGesture::Send(sending, previewed(local, &edits))
+    }
+
+    fn pressing(local: &Local, at: ButtonAt) -> WheelGesture {
+        let edit = at.edit(local.view().want_of(at.posting));
+        WheelGesture::Button(at, previewed(local, &[edit]))
+    }
+
+    fn previewed(local: &Local, wants: &[Command]) -> Preview {
+        local
+            .session()
+            .state()
+            .preview(PLAYER, wants)
+            .expect("the wants the pointer would issue stand")
     }
 
     fn entries(scene: &Scene, asteroid: AsteroidId, seat: SeatId, row: RowId) -> Vec<Shown> {
@@ -665,7 +746,7 @@ mod tests {
             Client {
                 selection: None,
                 pointed: Some(at(5)),
-                hover: None,
+                gesture: None,
                 fights: &Fights::default(),
             },
         );
@@ -817,32 +898,122 @@ mod tests {
     }
 
     #[test]
-    fn a_hovered_band_changes_no_entry() {
+    fn a_viewer_whose_seat_is_out_carries_no_sector_of_its_own_and_so_no_button() {
+        let local = Local::start(2);
+        let out = local.view_of(SeatId(9));
+        assert!(!out.still_in, "a seat the match lacks is not in it");
+
+        let scene = Scene::from_view(
+            &out,
+            local.session().state().roster(),
+            Client {
+                selection: Some(at(5)),
+                pointed: Some(at(5)),
+                gesture: None,
+                fights: &Fights::default(),
+            },
+        );
+
+        assert_eq!(
+            scene.wheel_of(at(5)),
+            None,
+            "the selection carries nothing for a seat that is out"
+        );
+        assert!(local.view().still_in, "a seated player is in the match");
+    }
+
+    #[test]
+    fn a_wheels_surplus_is_the_count_the_sim_would_send_and_never_the_client_arithmetic() {
+        let mut local = Local::start(2);
+        local.want(&[(at(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
+        local.want(&[(at(1), CONSTRUCTOR, 0)]);
+        let view = local.view();
+
+        let arriving = view
+            .compositions
+            .get(&Post {
+                asteroid: at(1),
+                seat: PLAYER,
+            })
+            .and_then(|composition| composition.rows.get(&CONSTRUCTOR))
+            .copied()
+            .expect("the constructor is homed at its destination");
+
+        assert_eq!(arriving.arriving, 1);
+        assert_eq!(arriving.present, 0);
+        assert_eq!(view.want_of(Posting::of(at(1), PLAYER, CONSTRUCTOR)), 0);
+        assert_eq!(
+            arriving.surplus, 0,
+            "a unit still on its way stands nowhere to be surplus"
+        );
+        assert!(
+            !entries(&scene(&local), at(1), PLAYER, CONSTRUCTOR)
+                .iter()
+                .any(|shown| matches!(shown.entry, Entry::Surplus(_))),
+            "the wheel says what the sim says"
+        );
+    }
+
+    #[test]
+    fn the_stockpile_bar_marks_the_cost_a_plus_would_pay_and_the_refund_a_minus_would_take() {
+        let mut local = Local::start(2);
+        local.want(&[(at(0), SHIPYARD, 1)]);
+        let roster = local.session().state().roster();
+        let button = |button| {
+            let at = ButtonAt {
+                posting: Posting::of(at(0), PLAYER, FRIGATE),
+                button,
+            };
+            drawn(
+                &local,
+                &Fights::default(),
+                Some(at.posting.asteroid()),
+                Some(pressing(&local, at)),
+            )
+            .stockpile_bar
+            .and_then(|bar| bar.marked)
+        };
+
+        assert_eq!(
+            button(WheelButton::Plus(1)),
+            Some(BarMark::Cost(roster[FRIGATE].cost)),
+            "one more frigate costs one frigate"
+        );
+        assert_eq!(
+            button(WheelButton::Minus(1)),
+            Some(BarMark::Refund(Materials::ZERO)),
+            "nothing is building to refund"
+        );
+    }
+
+    #[test]
+    fn a_hovered_button_changes_no_entry() {
         let mut local = Local::start(2);
         local.want(&[(at(0), SHIPYARD, 1)]);
         local.want(&[(at(0), SHIPYARD, 3)]);
-        let hover = |row, band| {
+        let hover = |row, button| {
+            let at = ButtonAt {
+                posting: Posting::of(at(0), PLAYER, row),
+                button,
+            };
             let scene = drawn(
                 &local,
                 &Fights::default(),
-                Some(at(0)),
-                Some(Hover::Wheel {
-                    asteroid: at(0),
-                    row,
-                    band,
-                }),
+                Some(at.posting.asteroid()),
+                Some(pressing(&local, at)),
             );
-            entries(&scene, at(0), PLAYER, row)
+            entries(&scene, at.posting.asteroid(), PLAYER, row)
         };
         let still = scene(&local);
 
         assert_eq!(
-            hover(SHIPYARD, WheelBand::Minus(1)),
+            hover(SHIPYARD, WheelButton::Minus(1)),
             entries(&still, at(0), PLAYER, SHIPYARD),
             "minus leaves what stands and what is wanted as they are"
         );
         assert!(
-            hover(FRIGATE, WheelBand::Plus(5)).is_empty(),
+            hover(FRIGATE, WheelButton::Plus(5)).is_empty(),
             "plus adds nothing until it is clicked"
         );
     }
@@ -857,7 +1028,12 @@ mod tests {
             count: 1,
         };
 
-        let scene = drawn(&local, &Fights::default(), None, Some(Hover::Send(sending)));
+        let scene = drawn(
+            &local,
+            &Fights::default(),
+            None,
+            Some(dragging(&local, sending)),
+        );
 
         let source = entries(&scene, at(0), PLAYER, CONSTRUCTOR);
         assert_eq!(source[0].entry, Entry::Present(1));
@@ -872,6 +1048,12 @@ mod tests {
             }
         );
         assert!(destination[0].previewed);
+        let line = scene
+            .flights
+            .iter()
+            .find(|flight| flight.previewed)
+            .expect("the drag draws its own flight line");
+        assert_eq!(line.to, at(1));
     }
 
     #[test]
@@ -899,12 +1081,15 @@ mod tests {
         let local = Local::start(2);
         let view = local.view();
 
-        let strip = scene(&local).strip.expect("a match has a strip");
-        assert_eq!(strip.stockpile, view.stockpile);
-        assert_eq!(strip.income, view.income);
-        assert_eq!(strip.spend, view.spend);
-        assert_eq!(strip.elapsed, view.time);
-        assert_eq!(strip.clock, view.length);
+        let bar = scene(&local)
+            .stockpile_bar
+            .expect("a match has a stockpile bar");
+        assert_eq!(bar.stockpile, view.stockpile);
+        assert_eq!(bar.income, view.income);
+        assert_eq!(bar.spend, view.spend);
+        assert_eq!(bar.elapsed, view.time);
+        assert_eq!(bar.clock, view.length);
+        assert_eq!(bar.marked, None, "an idle pointer marks no bar");
         assert!(
             scene(&local)
                 .asteroids
@@ -915,7 +1100,7 @@ mod tests {
         );
 
         let belt = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO);
-        assert_eq!(belt.strip, None);
+        assert_eq!(belt.stockpile_bar, None);
         assert!(
             belt.asteroids
                 .iter()

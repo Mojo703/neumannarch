@@ -8,10 +8,11 @@ pub use command::{
 pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
 pub(crate) use entity::{Entity, Motion};
 pub(crate) use frame::Frame;
+pub use preview::{Preview, ShortfallFilling};
 pub(crate) use ready::Ready;
 pub(crate) use schedule::{Flight, Schedule};
 pub use seat::Seat;
-pub use send::Send;
+pub use send::{Route, Send};
 pub use standings::Standings;
 pub(crate) use threat::{Aim, Assigned, Threat};
 pub(crate) use wants::Wants;
@@ -21,6 +22,7 @@ use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
+use crate::posting::Posting;
 use crate::roster::{Roster, Row};
 use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick, Time};
@@ -28,6 +30,7 @@ use crate::time::{Moment, Tick, Time};
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Held {
     pub present: u32,
+    pub surplus: u32,
     pub leaving: u32,
     pub arriving: u32,
 }
@@ -184,10 +187,27 @@ impl State {
         u32::try_from(counted).unwrap_or(u32::MAX)
     }
 
-    pub fn holdings(&self) -> BTreeMap<(AsteroidId, SeatId, RowId), Held> {
-        let mut holdings: BTreeMap<(AsteroidId, SeatId, RowId), Held> = BTreeMap::new();
+    pub fn surplus_at(&self, posting: Posting) -> Vec<EntityId> {
+        let (post, row) = (posting.post(), posting.row());
+        let covered = self
+            .wants(post)
+            .map_or(0, |wants| wants.get(row))
+            .saturating_sub(self.frames_of(post, row).count() as u32);
+        let mut held: Vec<EntityId> = self
+            .entities_at(post.asteroid)
+            .filter(|entity| entity.seat() == post.seat && entity.row() == row)
+            .filter(|entity| entity.flight().is_none())
+            .map(Entity::id)
+            .collect();
+        held.sort_unstable_by(|a, b| b.cmp(a));
+        held.truncate(self.count(post, row).saturating_sub(covered) as usize);
+        held
+    }
+
+    pub fn holdings(&self) -> BTreeMap<Posting, Held> {
+        let mut holdings: BTreeMap<Posting, Held> = BTreeMap::new();
         for entity in self.entities.values() {
-            let at = |asteroid: AsteroidId| (asteroid, entity.seat(), entity.row());
+            let at = |asteroid: AsteroidId| Posting::of(asteroid, entity.seat(), entity.row());
             match (entity.standing(self.time()), entity.flight()) {
                 (Some(asteroid), None) => holdings.entry(at(asteroid)).or_default().present += 1,
                 (Some(asteroid), Some(_)) => holdings.entry(at(asteroid)).or_default().leaving += 1,
@@ -375,6 +395,7 @@ mod draft;
 mod entity;
 mod frame;
 pub(crate) mod hash;
+mod preview;
 mod ready;
 mod schedule;
 mod seat;

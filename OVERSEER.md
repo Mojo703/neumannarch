@@ -14,6 +14,26 @@ for the one that talks to the owner. Project state lives in TODO.md.
   never answers a design question on the owner's behalf.
 - Ask questions only through the AskUserQuestion tool. Never leave a question,
   an "I would want to know X first", or an undecided option list in a response.
+- Plain words (owner, 2026-09-06). Define a thing before its name is
+  used, use one name per thing, and name it as the owner would: the
+  wheel's plus and minus buttons, the stockpile bar, the asteroid bars,
+  a hover preview. A term the code coined is not a term the owner
+  knows.
+- Name a duplicate as a duplicate (overseer's lesson, 2026-09-06). An
+  option that keeps one fact in two places is put to the owner as
+  that, never as latency or cost; the owner ruled on "one tick of lag"
+  and found the duplicate by play. One owner per fact, and the option
+  with two is not offered.
+- Read the tree, not the report. Before answering an agent's claim or
+  the owner's worry, read the diff and say what is there; the owner
+  asks "is the old logic still living" and expects the answer from the
+  files.
+- Stop an agent that runs a mutating git command and say so to the
+  owner; the index is the owner's. An agent with a long context is
+  replaced by a fresh one with a consolidated brief and the
+  critique-first rule.
+- The owner judges a naming or cleanup pass from the diff; the overseer
+  chooses the structure of the agents.
 - Push back on every decision where a better option exists, even a slightly
   better one. Give harsh, direct assessments. Verify a claim by running the
   code or a throwaway test before making it.

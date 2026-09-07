@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use neumannarch_sim::roster::{Kind, Roster};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
-use neumannarch_sim::{AsteroidId, RowId};
+use neumannarch_sim::{AsteroidId, Posting, RowId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sending {
@@ -12,24 +12,33 @@ pub struct Sending {
     pub count: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Moving {
+    pub row: RowId,
+    pub count: u32,
+}
+
 impl Sending {
     pub fn present(view: &View, asteroid: AsteroidId, roster: &Roster) -> u32 {
-        run(view, asteroid, roster)
+        standing_units(view, asteroid, roster)
             .iter()
-            .map(|(_, held)| held)
+            .map(|moving| moving.count)
             .sum()
     }
 
-    pub fn rows(&self, view: &View, roster: &Roster) -> Vec<(RowId, u32)> {
+    pub fn rows(&self, view: &View, roster: &Roster) -> Vec<Moving> {
         let mut left = self.count;
-        let mut moving: Vec<(RowId, u32)> = Vec::new();
-        for (row, held) in run(view, self.from, roster).into_iter().rev() {
+        let mut moving: Vec<Moving> = Vec::new();
+        for standing in standing_units(view, self.from, roster).into_iter().rev() {
             if left == 0 {
                 break;
             }
-            let taken = held.min(left);
-            left -= taken;
-            moving.push((row, taken));
+            let count = standing.count.min(left);
+            left -= count;
+            moving.push(Moving {
+                row: standing.row,
+                count,
+            });
         }
         moving.reverse();
         moving
@@ -38,17 +47,21 @@ impl Sending {
     pub fn commands(&self, view: &View, roster: &Roster) -> Vec<Command> {
         self.rows(view, roster)
             .into_iter()
-            .flat_map(|(row, count)| {
+            .flat_map(|moving| {
+                let Moving { row, count } = moving;
                 [
                     Command::Want {
                         asteroid: self.from,
                         row,
-                        count: wanted(view, self.from, row).saturating_sub(count),
+                        count: view
+                            .want_of(Posting::of(self.from, view.seat, row))
+                            .saturating_sub(count),
                     },
                     Command::Want {
                         asteroid: self.to,
                         row,
-                        count: (wanted(view, self.to, row) + count).min(MAX_WANT),
+                        count: (view.want_of(Posting::of(self.to, view.seat, row)) + count)
+                            .min(MAX_WANT),
                     },
                 ]
             })
@@ -56,7 +69,7 @@ impl Sending {
     }
 }
 
-fn run(view: &View, asteroid: AsteroidId, roster: &Roster) -> Vec<(RowId, u32)> {
+fn standing_units(view: &View, asteroid: AsteroidId, roster: &Roster) -> Vec<Moving> {
     let mut held: BTreeMap<RowId, u32> = BTreeMap::new();
     for unit in view
         .present
@@ -67,19 +80,18 @@ fn run(view: &View, asteroid: AsteroidId, roster: &Roster) -> Vec<(RowId, u32)> 
     {
         *held.entry(unit.row).or_insert(0) += 1;
     }
-    let mut rows: Vec<(RowId, u32)> = held.into_iter().collect();
-    rows.sort_by(|(a, _), (b, _)| {
-        roster[*b]
+    let mut rows: Vec<Moving> = held
+        .into_iter()
+        .map(|(row, count)| Moving { row, count })
+        .collect();
+    rows.sort_by(|a, b| {
+        roster[b.row]
             .cost
             .total()
-            .total_cmp(&roster[*a].cost.total())
-            .then(a.cmp(b))
+            .total_cmp(&roster[a.row].cost.total())
+            .then(a.row.cmp(&b.row))
     });
     rows
-}
-
-fn wanted(view: &View, asteroid: AsteroidId, row: RowId) -> u32 {
-    view.plan_of(asteroid, row).map_or(0, |plan| plan.want)
 }
 
 #[cfg(test)]
@@ -152,7 +164,13 @@ mod tests {
             count: 9,
         };
 
-        assert_eq!(sending.rows(&local.view(), roster), vec![(CONSTRUCTOR, 1)]);
+        assert_eq!(
+            sending.rows(&local.view(), roster),
+            vec![Moving {
+                row: CONSTRUCTOR,
+                count: 1
+            }]
+        );
     }
 
     #[test]
@@ -180,7 +198,10 @@ mod tests {
 
         assert_eq!(
             sending.rows(&local.view(), local.session().state().roster()),
-            vec![(CONSTRUCTOR, 1)],
+            vec![Moving {
+                row: CONSTRUCTOR,
+                count: 1
+            }],
             "a surplus unit is still on the run, so a drag can move it"
         );
     }

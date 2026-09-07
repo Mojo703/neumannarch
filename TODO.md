@@ -9,41 +9,19 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The hover preview, ruled 2026-09-06 and not yet briefed. One sim and
-display unit, scope:
-- The sim answers what a seat's would-be wants would do this tick: a
-  query that applies them to a copy and reads fulfilment's assignment,
-  reporting per post and row what the reserve places, what surplus is
-  sent from where, the frames still to come, and the refund of the
-  frames cancelled. Fulfilment is split into an assignment stage the
-  query reads and the schedule solve the step alone runs; a send no
-  schedule exists for is the one thing the preview does not know, and
-  the next tick draws it.
-- The stockpile bar marks a plus hover's cost, frames to come times the
-  row's cost, and a minus hover's refund, from that answer; DISPLAY's
-  "the row's cost" is amended to the sim's answer.
-- The send drag's preview is the answer's sends, drawn as a straight
-  line from source to destination through the one flight-line type the
-  real flight uses, so the two share a style by construction.
-- The view carries surplus as the sim computes it, deleting the wheel's
-  own formula, which disagrees with the sim where a frame is open.
-- One pick check on the state that apply and the wheel's refused
-  buttons both call; one want-at lookup on the view for the three
-  copies in scene.rs, send.rs and play.rs.
-- The code takes the owner's names: the wheel's bands are buttons, the
-  strip is the stockpile bar, the asteroid's bars are asteroid bars.
-- The preview refreshes on every hover change and once per tick while
-  held; one state clone per refresh, recorded against the per-tick
-  clone item below.
+Nothing is in flight.
 
-Next, in order: a small
-view and display unit for the asteroid's bars and the flight line (an
-extractor wanted or building shows its coming yield on the asteroid's
-bar; the small state is bars alone, tight to the asteroid; the line
-ahead of a ship follows its schedule's path; all three DISPLAY
-sentences written, on the ledger below); then the belt, plan item 3.
-Ships should move faster: the movement limit is a belt number and is
-set in the belt unit with the spacing and the schedule bound.
+Next: the belt and the star, plan item 3, pulled ahead of every
+cleanup pass (owner, 2026-09-07: visual and gameplay changes first,
+the plan's order bent for them). Its design is ruled with the owner
+as mechanism before a brief carries it. The starfield is an engine
+feature the owner adds in parallel (owner, 2026-09-07); the game unit
+draws the star and the belt and takes the sky when it lands. Ships
+should move faster: the movement limit is a belt number and is set in
+the belt unit with the spacing and the schedule bound. After it, the
+next visual and gameplay units in the owner's order: ship speed and
+combat feel through the harness; the asteroid bars and flight line
+unit (Docs ahead of code, below); camera and hotkeys.
 
 Open from the time split: extraction, construction and fulfilment act
 per tick with a fixed second's worth of work rather than integrating
@@ -62,6 +40,27 @@ Open from the draft unit:
 
 ## Open, each for a ruling or a unit
 
+- The naming pass over the sim crate (owner, 2026-09-06), the owner
+  judging it from the diff: read-only Haiku surveyors in parallel, one
+  per module group (state, step, orbit and roster, history and the
+  rest), each returning a table of symbol, file, one sentence of what
+  it holds, and the proposed name under the naming rule; the overseer
+  filters, the owner rules on the list, one Sonnet applier renames
+  workspace-wide under the gate, one commit; the other crates follow
+  if the sim's proposals read well, else the survey moves to Sonnet.
+  Deferred behind the visual and gameplay units (owner, 2026-09-07).
+- No look scene hovers a plus or minus button over the stockpile bar,
+  so the cost and refund segments are pinned by test and unseen; a
+  look scene for each is a small display item, after the owner's play
+  has judged them.
+- Tuple keys outside the preview unit's files, about thirty maps: an
+  asteroid with a seat as a bare pair in `step/fire.rs`,
+  `step/extraction.rs` (`Income`), `display/fights.rs`; a row at a
+  post as a pair or triple in `agents/plan.rs` (`targets`,
+  `standing`); and tuple returns in `display/glyph.rs`, `icon.rs`,
+  `glyph_quad.rs`, `personality.rs`, `harness.rs`. One Sonnet sweep
+  under the tuples rule, deferred behind the visual and gameplay
+  units.
 - Second derivations in the agents, found 2026-09-06: `survey.rs`
   tallies the seat's holdings from `view.present` where the view
   already carries `compositions` from `State::holdings`; with the four
@@ -125,9 +124,6 @@ code does not yet do, naming the unit that lands it. A brief quotes its
 lines from here; landing deletes them; the overseer reads this section
 against the code at every session start.
 
-- DISPLAY The stockpile and the clock: a hovered plus band marks the
-  row's cost on each bar and a minus band the refund; not drawn. The
-  hover preview unit.
 - DISPLAY Resources: an extractor wanted or building at an asteroid shows
   its coming yield on the asteroid's bar; not drawn. The extractor-coming
   unit.
@@ -152,14 +148,16 @@ against the code at every session start.
 
 ## Plan, in order
 
-Priority: the readings the owner needs to judge by play, then the
-contraction, then the belt since its asteroid and ship counts set every
-other number, then measurement before any store rewrite, then the
-screens, then the programme.
+Priority (owner, 2026-09-07): visual and gameplay changes first, the
+belt since its asteroid and ship counts set every other number, then
+the readings the owner needs to judge by play, then the contraction,
+then measurement before any store rewrite, then the screens, then the
+programme.
 
-1. The hover preview asked of the sim with the cost on the stockpile
-   bars, then the asteroid bars and flight line unit (In flight,
-   above), then the belt (item 3), before the contraction audit.
+1. The belt and the star (item 3), then ship speed and combat feel
+   through the harness, then the asteroid bars and flight line unit
+   (Docs ahead of code), then camera and hotkeys, before the
+   contraction audit.
 1e. Contraction audit, read-only then units: the codebase is much
    larger than it has any right to be for this amount of game. Survey
    for types whose fields copy another type's, parallel indexes over
@@ -271,7 +269,17 @@ screens, then the programme.
   words, never `of`, `get`, `handle`, `process`, `run`, `update`,
   `helper`, `util` or a suffix; a type is a noun the design documents
   use; a test is named as the guarantee sentence, never with `test`,
-  `works`, `should`, `check`. A confused agent is a naming defect.
+  `works`, `should`, `check`. A confused agent is a naming defect. A
+  name has as many words as a design-document reader needs to know
+  what it holds without opening it, usually two, never capped; a
+  design noun stands alone; a coined single word is a defect, for
+  fields and methods too (owner, 2026-09-06).
+- Tuples (owner, 2026-09-06): a tuple of three or more members is
+  always a defect, and any tuple that keys a map, is a field, or
+  crosses a function boundary becomes a struct with methods and its
+  fields private where it can; a tuple inside one expression, such as
+  a sort key, is fine. An asteroid with a seat is `Post`; a row at a
+  post is `Posting`.
 - Placement: a computation lives on the type that is its subject and
   there is one computation of each fact; before writing a derivation an
   agent searches for the type that owns the fact and extends it; a

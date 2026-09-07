@@ -54,7 +54,7 @@ mod tests {
     use mirage_engine::headless::Session as Offscreen;
     use mirage_engine::math::Vec2;
     use neumannarch_game::display::ease;
-    use neumannarch_game::display::scene::WheelBand;
+    use neumannarch_game::display::scene::WheelButton;
     use neumannarch_game::display::viewport::Viewport;
     use neumannarch_game::display::wheels::Still;
     use neumannarch_game::screens::flow::Screen;
@@ -333,8 +333,8 @@ mod tests {
         );
         settled(session);
 
-        let band = band_of(session, centre, SHIPYARD);
-        click_at(session, band);
+        let button = button_of(session, centre, SHIPYARD);
+        click_at(session, button);
         while play(session).session().state().drafting() {
             session.tick();
         }
@@ -355,14 +355,14 @@ mod tests {
         save(session, "wheel");
     }
 
-    fn band_of(session: &Offscreen<Probe>, pointer: egui::Pos2, row: RowId) -> egui::Pos2 {
-        let wheels = play(session).wheels(&viewport(session), Some(pointer), false, &mut Still);
+    fn button_of(session: &Offscreen<Probe>, pointer: egui::Pos2, row: RowId) -> egui::Pos2 {
+        let wheels = play(session).wheels(&viewport(session), Some(pointer), &mut Still);
         wheels
             .iter()
             .find(|wheel| wheel.asteroid() == ASTEROID)
             .expect("the selected asteroid carries a wheel")
-            .band(row, WheelBand::Plus(1))
-            .expect("the row's band is on the wheel")
+            .button(row, WheelButton::Plus(1))
+            .expect("the row's button is on the wheel")
     }
 
     fn paused(session: &mut Offscreen<Probe>) {

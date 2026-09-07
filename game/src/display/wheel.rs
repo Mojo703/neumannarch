@@ -2,14 +2,17 @@ use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
 use neumannarch_sim::roster::{Kind, Roster, Row};
-use neumannarch_sim::state::Command;
+use neumannarch_sim::state::Rejected;
 use neumannarch_sim::state::view::Building;
-use neumannarch_sim::{AsteroidId, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId};
 
 use crate::display::glyph::{self, Glyph};
 use crate::display::glyph_quad::seat_color32;
 use crate::display::hue;
-use crate::display::scene::{Arc, Entry, Fill, SectorView, Shown, WheelBand, WheelView};
+use crate::display::label;
+use crate::display::scene::{
+    Arc, ButtonAt, Entry, Fill, SectorView, Shown, WheelButton, WheelView,
+};
 use crate::display::stencil::{self, Cell, Stencil};
 use crate::display::wheels::Spoken;
 use crate::screens::panel;
@@ -50,7 +53,7 @@ const COLUMN_GAP: f32 = 8.0;
 
 const STEP_WIDTH: f32 = GAP + 2.0 * CHARACTER_WIDTH + GAP;
 
-const BAND_WIDTH: f32 = 24.0;
+const BUTTON_WIDTH: f32 = 24.0;
 
 const BAR_LENGTH: f32 = 1.5 * SECTION_HEIGHT;
 
@@ -74,7 +77,7 @@ const SIGN_SIZE: f32 = 15.0;
 
 const STEP_SIZE: f32 = 12.0;
 
-const PREVIEW_ALPHA: f32 = 0.5;
+pub const PREVIEW_ALPHA: f32 = 0.5;
 
 pub(crate) const MARK_STROKE: f32 = 1.2;
 
@@ -88,11 +91,32 @@ pub enum Detail {
     Small,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Bands {
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ButtonRefusals {
+    pub adding: Option<Rejected>,
+    pub removing: Option<Rejected>,
+}
+
+impl ButtonRefusals {
+    fn of(self, button: WheelButton) -> Option<Rejected> {
+        match button {
+            WheelButton::Plus(_) => self.adding,
+            WheelButton::Minus(_) => self.removing,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Buttons {
     pub step: u32,
     pub wants: BTreeMap<RowId, u32>,
-    pub refused: BTreeMap<RowId, String>,
+    pub refusals: BTreeMap<RowId, ButtonRefusals>,
+}
+
+impl Buttons {
+    fn refusal_of(&self, row: RowId, button: WheelButton) -> Option<Rejected> {
+        self.refusals.get(&row)?.of(button)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -119,11 +143,12 @@ pub struct Footprint {
 
 pub struct Wheel {
     asteroid: AsteroidId,
+    viewer: SeatId,
     centre: Pos2,
     scale: f32,
     alpha: f32,
     sectors: Vec<Sector>,
-    bands: Option<Bands>,
+    buttons: Option<Buttons>,
 }
 
 struct Sector {
@@ -195,7 +220,7 @@ impl Wheel {
         view: &WheelView,
         roster: &Roster,
         seat: SeatId,
-        bands: Option<Bands>,
+        buttons: Option<Buttons>,
     ) -> Wheel {
         let Placed {
             asteroid,
@@ -205,11 +230,12 @@ impl Wheel {
         } = placed;
         Wheel {
             asteroid,
+            viewer: seat,
             centre,
             scale: sizing.scale,
             alpha,
-            sectors: stacked(centre, view, roster, seat, sizing, bands.is_some()),
-            bands,
+            sectors: stacked(centre, view, roster, seat, sizing, buttons.is_some()),
+            buttons,
         }
     }
 
@@ -249,20 +275,20 @@ impl Wheel {
         self.slots().map(|slot| slot.frame)
     }
 
-    pub fn band(&self, row: RowId, band: WheelBand) -> Option<Pos2> {
+    pub fn button(&self, row: RowId, button: WheelButton) -> Option<Pos2> {
         let slot = self
             .sectors
             .iter()
             .filter(|sector| sector.edits)
             .flat_map(|sector| &sector.slots)
             .find(|slot| slot.row == row)?;
-        Some(slot.band(band, self.scale).center())
+        Some(slot.button(button, self.scale).center())
     }
 
-    pub fn band_at(&self, at: Pos2) -> Option<(RowId, WheelBand)> {
-        let bands = self.bands.as_ref()?;
-        self.band_under(at)
-            .filter(|(row, _)| !bands.refused.contains_key(row))
+    pub fn button_at(&self, at: Pos2) -> Option<ButtonAt> {
+        let buttons = self.buttons.as_ref()?;
+        self.button_under(at)
+            .filter(|at| buttons.refusal_of(at.posting.row(), at.button).is_none())
     }
 
     pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
@@ -292,31 +318,37 @@ impl Wheel {
     }
 
     fn refusal_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
-        let bands = self.bands.as_ref()?;
-        let (row, _) = self.band_under(at)?;
-        let why = bands.refused.get(&row)?;
+        let buttons = self.buttons.as_ref()?;
+        let under = self.button_under(at)?;
+        let row = under.posting.row();
+        let why = label::refusal(buttons.refusal_of(row, under.button)?)?;
         let slot = self.slots().find(|slot| slot.row == row)?;
         Some((
             egui::pos2(slot.frame.right(), slot.frame.center().y),
-            Spoken::Refused { why: why.clone() },
+            Spoken::Refused {
+                why: why.to_string(),
+            },
         ))
     }
 
-    fn band_under(&self, at: Pos2) -> Option<(RowId, WheelBand)> {
-        let step = self.bands.as_ref()?.step;
+    fn button_under(&self, at: Pos2) -> Option<ButtonAt> {
+        let step = self.buttons.as_ref()?.step;
         self.sectors
             .iter()
             .filter(|sector| sector.edits)
             .flat_map(|sector| &sector.slots)
             .find_map(|slot| {
-                [WheelBand::Plus(step), WheelBand::Minus(step)]
+                [WheelButton::Plus(step), WheelButton::Minus(step)]
                     .into_iter()
-                    .find(|band| slot.band(*band, self.scale).contains(at))
-                    .map(|band| (slot.row, band))
+                    .find(|button| slot.button(*button, self.scale).contains(at))
+                    .map(|button| ButtonAt {
+                        posting: Posting::of(self.asteroid, self.viewer, slot.row),
+                        button,
+                    })
             })
     }
 
-    pub fn paint(&self, painter: &egui::Painter, hovered: Option<(RowId, WheelBand)>) {
+    pub fn paint(&self, painter: &egui::Painter, hovered: Option<ButtonAt>) {
         for sector in &self.sectors {
             self.paint_spine(painter, sector);
             if let Some(arc) = sector.arc {
@@ -325,7 +357,7 @@ impl Wheel {
             for slot in &sector.slots {
                 self.paint_slot(painter, slot, sector.seat);
                 if sector.edits {
-                    self.paint_bands(painter, slot, hovered);
+                    self.paint_buttons(painter, slot, hovered);
                 }
             }
         }
@@ -502,24 +534,24 @@ impl Wheel {
         }
     }
 
-    fn paint_bands(
-        &self,
-        painter: &egui::Painter,
-        slot: &Slot,
-        hovered: Option<(RowId, WheelBand)>,
-    ) {
-        let Some(bands) = &self.bands else {
+    fn paint_buttons(&self, painter: &egui::Painter, slot: &Slot, hovered: Option<ButtonAt>) {
+        let Some(buttons) = &self.buttons else {
             return;
         };
-        let want = bands.wants.get(&slot.row).copied().unwrap_or(0);
-        let refused = bands.refused.contains_key(&slot.row);
-        for band in [WheelBand::Plus(bands.step), WheelBand::Minus(bands.step)] {
-            let at = slot.band(band, self.scale);
-            let spent = refused || band.wanted(want) == want;
-            let over = hovered == Some((slot.row, band));
+        let want = buttons.wants.get(&slot.row).copied().unwrap_or(0);
+        for button in [
+            WheelButton::Plus(buttons.step),
+            WheelButton::Minus(buttons.step),
+        ] {
+            let at = slot.button(button, self.scale);
+            let spent = buttons.refusal_of(slot.row, button).is_some()
+                || (matches!(button, WheelButton::Minus(_)) && button.wanted(want) == want);
+            let over = hovered.is_some_and(|hovered| {
+                hovered.button == button && hovered.posting.row() == slot.row
+            });
             if over && !spent {
                 painter.rect_filled(at, 0.0, self.faded(panel::HOVER_FILL));
-                self.paint_delta(painter, slot, band);
+                self.paint_delta(painter, slot, button);
             }
             painter.rect_stroke(
                 at,
@@ -532,25 +564,25 @@ impl Wheel {
                 (false, true) => Color32::WHITE,
                 (false, false) => panel::INK,
             };
-            let size = match band.step() {
+            let size = match button.step() {
                 1 => SIGN_SIZE,
                 _ => STEP_SIZE,
             };
             painter.text(
                 at.center(),
                 Align2::CENTER_CENTER,
-                band.label(),
+                button.label(),
                 FontId::monospace(size * self.scale),
                 self.faded(ink),
             );
         }
     }
 
-    fn paint_delta(&self, painter: &egui::Painter, slot: &Slot, band: WheelBand) {
+    fn paint_delta(&self, painter: &egui::Painter, slot: &Slot, button: WheelButton) {
         painter.text(
             egui::pos2(slot.frame.right() + GAP * self.scale, slot.frame.center().y),
             Align2::LEFT_CENTER,
-            band.delta(),
+            button.delta(),
             FontId::monospace(LINE_HEIGHT * self.scale),
             self.faded(Color32::WHITE),
         );
@@ -595,16 +627,16 @@ impl Slot {
         )
     }
 
-    fn band(&self, band: WheelBand, scale: f32) -> Rect {
+    fn button(&self, button: WheelButton, scale: f32) -> Rect {
         let left = self.frame.left() + (PAD + GLYPH_SLOT + GAP) * scale;
         let pad = PAD * scale;
-        let (top, bottom) = match band {
-            WheelBand::Plus(_) => (self.frame.top() + pad, self.frame.center().y),
-            WheelBand::Minus(_) => (self.frame.center().y, self.frame.bottom() - pad),
+        let (top, bottom) = match button {
+            WheelButton::Plus(_) => (self.frame.top() + pad, self.frame.center().y),
+            WheelButton::Minus(_) => (self.frame.center().y, self.frame.bottom() - pad),
         };
         Rect::from_min_max(
             egui::pos2(left, top),
-            egui::pos2(left + BAND_WIDTH * scale, bottom),
+            egui::pos2(left + BUTTON_WIDTH * scale, bottom),
         )
     }
 }
@@ -632,19 +664,11 @@ impl Line {
     }
 }
 
-impl WheelBand {
-    pub fn edit(self, asteroid: AsteroidId, row: RowId, want: u32) -> Command {
-        Command::Want {
-            asteroid,
-            row,
-            count: self.wanted(want),
-        }
-    }
-
+impl WheelButton {
     pub fn delta(self) -> String {
         match self {
-            WheelBand::Plus(step) => format!("+{step}"),
-            WheelBand::Minus(step) => format!("-{step}"),
+            WheelButton::Plus(step) => format!("+{step}"),
+            WheelButton::Minus(step) => format!("-{step}"),
         }
     }
 }
@@ -784,11 +808,11 @@ struct Unlaid {
 
 impl Unlaid {
     fn lead(scale: f32, edits: bool) -> f32 {
-        let bands = match edits {
-            true => BAND_WIDTH + GAP,
+        let buttons = match edits {
+            true => BUTTON_WIDTH + GAP,
             false => 0.0,
         };
-        (PAD + GLYPH_SLOT + GAP + bands) * scale
+        (PAD + GLYPH_SLOT + GAP + buttons) * scale
     }
 
     fn cells(&self) -> impl Iterator<Item = (Mark, &[Shown], u32, f32)> {
@@ -928,7 +952,7 @@ const _: () = assert!(GLYPH_SLOT < SECTION_HEIGHT);
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::roster::{FRIGATE, SHIPYARD};
-    use neumannarch_sim::state::MAX_WANT;
+    use neumannarch_sim::state::{Command, MAX_WANT};
 
     use super::*;
     use crate::display::scene::RowView;
@@ -963,7 +987,7 @@ mod tests {
         }
     }
 
-    fn wheel(sectors: Vec<SectorView>, detail: Detail, bands: Option<Bands>) -> Wheel {
+    fn wheel(sectors: Vec<SectorView>, detail: Detail, buttons: Option<Buttons>) -> Wheel {
         let roster = Roster::shipped();
         Wheel::over(
             Placed {
@@ -978,15 +1002,15 @@ mod tests {
             },
             &roster,
             MINE,
-            bands,
+            buttons,
         )
     }
 
-    fn selected() -> Bands {
-        Bands {
+    fn selected() -> Buttons {
+        Buttons {
             step: 1,
             wants: BTreeMap::from([(FRIGATE, 2)]),
-            refused: BTreeMap::new(),
+            refusals: BTreeMap::new(),
         }
     }
 
@@ -1328,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_selected_wheels_own_sections_take_a_band() {
+    fn only_a_selected_wheels_own_sections_take_a_button() {
         let sectors = || {
             vec![
                 sector(MINE, Vec::new()),
@@ -1336,53 +1360,65 @@ mod tests {
             ]
         };
         let open = wheel(sectors(), Detail::Full, Some(selected()));
+        let mine = |button| ButtonAt {
+            posting: Posting::of(ASTEROID, MINE, FRIGATE),
+            button,
+        };
 
         let plus = open
-            .band(FRIGATE, WheelBand::Plus(1))
-            .expect("the frigate's own section takes a band");
+            .button(FRIGATE, WheelButton::Plus(1))
+            .expect("the frigate's own section takes a button");
         let minus = open
-            .band(FRIGATE, WheelBand::Minus(1))
-            .expect("and both bands");
+            .button(FRIGATE, WheelButton::Minus(1))
+            .expect("and both buttons");
         assert!(plus.y < minus.y, "plus stands above minus");
-        assert_eq!(open.band_at(plus), Some((FRIGATE, WheelBand::Plus(1))));
-        assert_eq!(open.band_at(minus), Some((FRIGATE, WheelBand::Minus(1))));
+        assert_eq!(open.button_at(plus), Some(mine(WheelButton::Plus(1))));
+        assert_eq!(open.button_at(minus), Some(mine(WheelButton::Minus(1))));
 
         let slot = slot_of(&open, FRIGATE);
         assert_eq!(
-            open.band_at(slot.glyph_rect(1.0).center()),
+            open.button_at(slot.glyph_rect(1.0).center()),
             None,
-            "the glyph itself is no band"
+            "the glyph itself is no button"
         );
         let theirs = slots(&open)
             .find(|(sector, slot)| slot.row == FRIGATE && sector.seat == THEIRS)
             .map(|(_, slot)| slot)
             .expect("the rival holds the same rows");
         assert_eq!(
-            open.band_at(theirs.band(WheelBand::Plus(1), 1.0).center()),
+            open.button_at(theirs.button(WheelButton::Plus(1), 1.0).center()),
             None,
             "a rival's section takes no edit"
         );
 
         let shut = wheel(sectors(), Detail::Full, None);
-        assert_eq!(shut.band_at(plus), None, "an unselected wheel takes none");
-        assert_eq!(shut.band(FRIGATE, WheelBand::Plus(1)), None);
+        assert_eq!(shut.button_at(plus), None, "an unselected wheel takes none");
+        assert_eq!(shut.button(FRIGATE, WheelButton::Plus(1)), None);
     }
 
     #[test]
-    fn a_band_bears_its_step_and_a_band_that_would_change_nothing_wants_the_same() {
-        assert_eq!(WheelBand::Plus(1).label(), "+");
-        assert_eq!(WheelBand::Minus(1).label(), "-");
-        assert_eq!(WheelBand::Plus(5).label(), "+5");
-        assert_eq!(WheelBand::Minus(5).label(), "-5");
-        assert_eq!(WheelBand::Plus(1).delta(), "+1");
-        assert_eq!(WheelBand::Minus(5).delta(), "-5");
+    fn a_button_bears_its_step_and_the_count_its_click_would_leave() {
+        assert_eq!(WheelButton::Plus(1).label(), "+");
+        assert_eq!(WheelButton::Minus(1).label(), "-");
+        assert_eq!(WheelButton::Plus(5).label(), "+5");
+        assert_eq!(WheelButton::Minus(5).label(), "-5");
+        assert_eq!(WheelButton::Plus(1).delta(), "+1");
+        assert_eq!(WheelButton::Minus(5).delta(), "-5");
 
-        assert_eq!(WheelBand::Plus(5).wanted(2), 7);
-        assert_eq!(WheelBand::Minus(5).wanted(2), 0);
-        assert_eq!(WheelBand::Plus(1).wanted(MAX_WANT), MAX_WANT);
-        assert_eq!(WheelBand::Minus(1).wanted(0), 0);
+        assert_eq!(WheelButton::Plus(5).wanted(2), 7);
+        assert_eq!(WheelButton::Minus(5).wanted(2), 0);
         assert_eq!(
-            WheelBand::Plus(1).edit(ASTEROID, FRIGATE, 2),
+            WheelButton::Plus(1).wanted(MAX_WANT),
+            MAX_WANT + 1,
+            "past the cap is the sim's refusal to make"
+        );
+        assert_eq!(WheelButton::Minus(1).wanted(0), 0);
+        assert_eq!(
+            ButtonAt {
+                posting: Posting::of(ASTEROID, SeatId(0), FRIGATE),
+                button: WheelButton::Plus(1),
+            }
+            .edit(2),
             Command::Want {
                 asteroid: ASTEROID,
                 row: FRIGATE,
@@ -1422,19 +1458,25 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_band_takes_no_click_and_says_why_beside_its_strip() {
-        let refused = Bands {
-            refused: BTreeMap::from([(FRIGATE, "Not yet".to_string())]),
+    fn a_refused_button_takes_no_click_and_says_why_beside_its_strip() {
+        let refused = Buttons {
+            refusals: BTreeMap::from([(
+                FRIGATE,
+                ButtonRefusals {
+                    adding: Some(Rejected::NotYet),
+                    removing: Some(Rejected::NotYet),
+                },
+            )]),
             ..selected()
         };
         let wheel = wheel(vec![sector(MINE, Vec::new())], Detail::Full, Some(refused));
         let slot = slot_of(&wheel, FRIGATE);
-        let plus = slot.band(WheelBand::Plus(1), 1.0).center();
+        let plus = slot.button(WheelButton::Plus(1), 1.0).center();
 
         assert_eq!(
-            wheel.band_at(plus),
+            wheel.button_at(plus),
             None,
-            "a refused band is no band to click"
+            "a refused button is no button to click"
         );
         assert_eq!(
             wheel.spoken_at(plus),
@@ -1447,10 +1489,16 @@ mod tests {
         );
 
         let live = slot_of(&wheel, SHIPYARD)
-            .band(WheelBand::Plus(1), 1.0)
+            .button(WheelButton::Plus(1), 1.0)
             .center();
-        assert_eq!(wheel.band_at(live), Some((SHIPYARD, WheelBand::Plus(1))));
-        assert_eq!(wheel.spoken_at(live), None, "a live band says nothing");
+        assert_eq!(
+            wheel.button_at(live),
+            Some(ButtonAt {
+                posting: Posting::of(ASTEROID, MINE, SHIPYARD),
+                button: WheelButton::Plus(1),
+            })
+        );
+        assert_eq!(wheel.spoken_at(live), None, "a live button says nothing");
     }
 
     #[test]
@@ -1488,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn a_section_of_a_rival_seat_shows_what_it_holds_and_takes_no_band() {
+    fn a_section_of_a_rival_seat_shows_what_it_holds_and_takes_no_button() {
         let wheel = wheel(
             vec![sector(THEIRS, vec![row(SHIPYARD, vec![Entry::Present(1)])])],
             Detail::Small,
@@ -1522,8 +1570,8 @@ mod tests {
             "the small footprint is not the full one"
         );
         assert!(
-            full.holds(slot.band(WheelBand::Plus(1), 1.0).center()),
-            "a wheel holds its own bands"
+            full.holds(slot.button(WheelButton::Plus(1), 1.0).center()),
+            "a wheel holds its own buttons"
         );
     }
 }

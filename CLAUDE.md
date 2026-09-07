@@ -70,6 +70,13 @@ off on without comments.
   that pins it; a unit, a default or a `None` case lives in a newtype, a
   constant's name or the return type. Anything a comment would have said
   belongs in the design docs or in a name, or is not worth saying.
+- A name is as many words as a reader of the design documents needs to
+  know what it holds without opening it (owner, 2026-09-06): usually
+  two, sometimes three, never capped. A noun the design documents use
+  stands alone (`Post`, `Frame`, `Send`, `Wheel`); a coined single word
+  (`Filling`, `Held`) is a defect. The same test applies to fields and
+  methods: `placed`, `sent` and `building` say nothing; `from_reserve`,
+  `sent_from` and `to_build` do.
 - A confused agent is a naming defect (owner, 2026-09-05): when an agent
   misreads a type, a function or a field, the fix is a more descriptive
   name, or a new type so the thing can be named at all; never a comment,

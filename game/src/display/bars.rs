@@ -255,11 +255,11 @@ mod tests {
             entities: Vec::new(),
             wheels: Vec::new(),
             flights: Vec::new(),
-            strip: None,
+            stockpile_bar: None,
             zone: 1.0,
             seat: neumannarch_sim::SeatId(0),
             selection: None,
-            hover: None,
+            gesture: None,
         }
     }
 

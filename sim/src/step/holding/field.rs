@@ -152,7 +152,7 @@ mod tests {
     use crate::ids::{AsteroidId, SeatId, TeamId};
     use crate::orbit::body::Gravity;
     use crate::roster::{CONSTRUCTOR, FRIGATE};
-    use crate::state::{Flight, Send};
+    use crate::state::{Flight, Route, Send};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -285,8 +285,16 @@ mod tests {
         let reader = world.hold(0, FRIGATE, HOME, 0.0);
         let flier = world.hold(0, FRIGATE, HOME, 2.0);
         let together = Fields::of(&world.state).at(reader).own;
-        let send = Send::joining(&world.state, HOME, AsteroidId(1), SeatId(0), &[flier])
-            .expect("a send across the ring");
+        let send = Send::joining(
+            &world.state,
+            Route {
+                source: HOME,
+                destination: AsteroidId(1),
+                seat: SeatId(0),
+            },
+            &[flier],
+        )
+        .expect("a send across the ring");
         world.launch(flier, HOME, 2.0, Flight::new(HOME, send.schedule));
 
         assert_eq!(

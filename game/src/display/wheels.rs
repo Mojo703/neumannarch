@@ -2,58 +2,52 @@ use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Pos2, Rect};
 use neumannarch_sim::roster::Roster;
-use neumannarch_sim::state::Draft;
-use neumannarch_sim::{AsteroidId, Material, RowId, SeatId};
+use neumannarch_sim::state::State;
+use neumannarch_sim::state::view::View;
+use neumannarch_sim::{AsteroidId, Material, Posting, RowId, SeatId};
 
 use crate::display::bars::Bars;
 use crate::display::ease::{self, Span};
 use crate::display::label::{self, titled};
-use crate::display::scene::{Hover, Scene, Shown, WheelBand};
+use crate::display::scene::{ButtonAt, Scene, Shown, WheelButton, WheelGesture};
 use crate::display::viewport::Viewport;
-use crate::display::wheel::{Bands, Detail, Footprint, Placed, Sizing, Wheel};
+use crate::display::wheel::{ButtonRefusals, Buttons, Detail, Footprint, Placed, Sizing, Wheel};
 
 pub const RESTING_ALPHA: f32 = 0.7;
 
 const HOVER_MARGIN: f32 = 48.0;
 
-pub const NOT_YET: &str = "Not yet";
-
-pub const ASTEROID_TAKEN: &str = "Asteroid taken";
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Aim<'a> {
     pub viewer: SeatId,
     pub pointer: Option<Pos2>,
     pub hovered: Option<AsteroidId>,
     pub step: u32,
-    pub wants: BTreeMap<(AsteroidId, RowId), u32>,
-    pub draft: Option<&'a Draft>,
+    pub view: &'a View,
+    pub state: &'a State,
 }
 
 impl Aim<'_> {
-    pub fn refusal(&self, asteroid: AsteroidId, row: RowId) -> Option<&'static str> {
-        let draft = self.draft.filter(|draft| draft.ended().is_none())?;
-        match draft.awaits(self.viewer, row) {
-            None => None,
-            Some(false) => Some(NOT_YET),
-            Some(true) if draft.took(asteroid).is_some() => Some(ASTEROID_TAKEN),
-            Some(true) => None,
+    fn buttons_at(&self, asteroid: AsteroidId, roster: &Roster) -> Buttons {
+        let mut wants = BTreeMap::new();
+        let mut refusals = BTreeMap::new();
+        for (row, _) in roster.iter() {
+            let posting = Posting::of(asteroid, self.viewer, row);
+            let want = self.view.want_of(posting);
+            let refused = |count: u32| self.state.admits_want(posting, count).err();
+            wants.insert(row, want);
+            refusals.insert(
+                row,
+                ButtonRefusals {
+                    adding: refused(WheelButton::Plus(self.step).wanted(want)),
+                    removing: refused(WheelButton::Minus(self.step).wanted(want)),
+                },
+            );
         }
-    }
-
-    fn bands_at(&self, asteroid: AsteroidId, roster: &Roster) -> Bands {
-        Bands {
+        Buttons {
             step: self.step,
-            wants: self
-                .wants
-                .iter()
-                .filter(|((at, _), _)| *at == asteroid)
-                .map(|((_, row), want)| (*row, *want))
-                .collect(),
-            refused: roster
-                .iter()
-                .filter_map(|(row, _)| Some((row, self.refusal(asteroid, row)?.to_string())))
-                .collect(),
+            wants,
+            refusals,
         }
     }
 }
@@ -190,9 +184,9 @@ impl Wheels {
             .iter()
             .filter_map(|placed| {
                 let view = scene.wheel_of(placed.asteroid)?;
-                let bands = (placed.sizing.detail == Detail::Full)
-                    .then(|| aim.bands_at(placed.asteroid, roster));
-                let wheel = Wheel::over(*placed, view, roster, aim.viewer, bands);
+                let buttons = (placed.sizing.detail == Detail::Full)
+                    .then(|| aim.buttons_at(placed.asteroid, roster));
+                let wheel = Wheel::over(*placed, view, roster, aim.viewer, buttons);
                 wheel.draws().then_some(wheel)
             })
             .collect();
@@ -236,12 +230,8 @@ impl Wheels {
             .map(Wheel::asteroid)
     }
 
-    pub fn band_at(&self, at: Pos2) -> Option<(AsteroidId, RowId, WheelBand)> {
-        self.wheels.iter().find_map(|wheel| {
-            wheel
-                .band_at(at)
-                .map(|(row, band)| (wheel.asteroid(), row, band))
-        })
+    pub fn button_at(&self, at: Pos2) -> Option<ButtonAt> {
+        self.wheels.iter().find_map(|wheel| wheel.button_at(at))
     }
 
     pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
@@ -264,10 +254,10 @@ impl Wheels {
             })
     }
 
-    pub fn paint(&self, painter: &egui::Painter, hover: Option<&Hover>) {
+    pub fn paint(&self, painter: &egui::Painter, gesture: Option<&WheelGesture>) {
         self.bars.paint(painter);
         for wheel in self.wheels.iter().rev() {
-            wheel.paint(painter, band_of(hover, wheel.asteroid()));
+            wheel.paint(painter, button_of(gesture, wheel.asteroid()));
         }
     }
 }
@@ -294,13 +284,9 @@ impl Placed {
     }
 }
 
-fn band_of(hover: Option<&Hover>, asteroid: AsteroidId) -> Option<(RowId, WheelBand)> {
-    match hover {
-        Some(Hover::Wheel {
-            asteroid: over,
-            row,
-            band,
-        }) if *over == asteroid => Some((*row, *band)),
+fn button_of(gesture: Option<&WheelGesture>, asteroid: AsteroidId) -> Option<ButtonAt> {
+    match gesture {
+        Some(WheelGesture::Button(at, _)) if at.posting.asteroid() == asteroid => Some(*at),
         _ => None,
     }
 }
@@ -390,16 +376,23 @@ fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<As
 
 #[cfg(test)]
 mod tests {
+    use std::sync::LazyLock;
+
     use neumannarch_sim::roster::FRIGATE;
-    use neumannarch_sim::state::Command;
+    use neumannarch_sim::state::view::View;
+    use neumannarch_sim::state::{Command, Rejected};
+    use neumannarch_sim::step::fire::Shots;
     use neumannarch_sim::{Retention, Sequence, Session, Setup, TeamId, Tick};
 
     use super::*;
+    use crate::display::local::Local;
     use crate::display::scene::{Entry, RowView, SectorView, WheelView};
 
     const A: AsteroidId = AsteroidId(0);
 
     const B: AsteroidId = AsteroidId(1);
+
+    static WATCHING: LazyLock<Watching> = LazyLock::new(Watching::of);
 
     fn view(asteroid: AsteroidId) -> WheelView {
         WheelView {
@@ -428,14 +421,27 @@ mod tests {
             .collect()
     }
 
+    struct Watching {
+        local: Local,
+        view: View,
+    }
+
+    impl Watching {
+        fn of() -> Watching {
+            let local = Local::start(2);
+            let view = local.view();
+            Watching { local, view }
+        }
+    }
+
     fn aim(pointer: Pos2, hovered: Option<AsteroidId>) -> Aim<'static> {
         Aim {
             viewer: SeatId(0),
             pointer: Some(pointer),
             hovered,
             step: 1,
-            wants: BTreeMap::new(),
-            draft: None,
+            view: &WATCHING.view,
+            state: WATCHING.local.session().state(),
         }
     }
 
@@ -487,11 +493,11 @@ mod tests {
             entities: Vec::new(),
             wheels: vec![view(A)],
             flights: Vec::new(),
-            strip: None,
+            stockpile_bar: None,
             zone: 1.0,
             seat: SeatId(0),
             selection: Some(A),
-            hover: None,
+            gesture: None,
         };
         let roster = Roster::shipped();
         let centre = viewport.point_of(Vec3::ZERO).expect("on screen");
@@ -500,26 +506,26 @@ mod tests {
             .frames()
             .fold(Rect::NOTHING, |bounds, frame| bounds.union(frame))
             .top();
-        let strip = Rect::from_min_max(
+        let bar = Rect::from_min_max(
             egui::pos2(centre.x - 400.0, top - 10.0),
             egui::pos2(centre.x + 400.0, top + 20.0),
         );
         assert!(
-            whole.frames().any(|frame| frame.intersects(strip)),
-            "the wheel and its bars reach into the strip"
+            whole.frames().any(|frame| frame.intersects(bar)),
+            "the wheel and its bars reach into the stockpile bar"
         );
         let crossing = whole
             .frames()
-            .find(|frame| frame.intersects(strip))
-            .expect("a frame under the strip");
+            .find(|frame| frame.intersects(bar))
+            .expect("a frame under the stockpile bar");
 
-        let cleared = Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still)
-            .clear_of(strip);
+        let cleared =
+            Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still).clear_of(bar);
 
-        assert!(cleared.frames().all(|frame| !frame.intersects(strip)));
+        assert!(cleared.frames().all(|frame| !frame.intersects(bar)));
         assert!(cleared.frames().count() < whole.frames().count());
         assert_eq!(
-            cleared.band_at(crossing.center()),
+            cleared.button_at(crossing.center()),
             None,
             "what is not drawn takes no click"
         );
@@ -527,40 +533,11 @@ mod tests {
     }
 
     #[test]
-    fn a_band_during_the_draft_is_refused_by_the_drafts_own_rule_and_live_after_it() {
+    fn a_wheels_buttons_carry_the_refusals_the_view_reports_for_its_own_asteroid() {
         let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(600)).expect("two teams");
         let mut session =
             Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)]).expect("seated");
-        let stages = session.state().draft().stages().to_vec();
-        let (first, later) = (stages[0], stages[1]);
-        assert_ne!(
-            first.seat, later.seat,
-            "the second stage is the other seat's"
-        );
-        fn aim(seat: SeatId, draft: &Draft) -> Aim<'_> {
-            Aim {
-                viewer: seat,
-                pointer: None,
-                hovered: None,
-                step: 1,
-                wants: BTreeMap::new(),
-                draft: Some(draft),
-            }
-        }
-
-        let draft = session.state().draft().clone();
-        assert_eq!(aim(first.seat, &draft).refusal(A, first.row), None);
-        assert_eq!(
-            aim(later.seat, &draft).refusal(A, later.row),
-            Some(NOT_YET),
-            "its stage has not begun"
-        );
-        assert_eq!(
-            aim(first.seat, &draft).refusal(A, FRIGATE),
-            None,
-            "a frigate is no pick and its want stands as a ghost"
-        );
-
+        let first = session.state().draft().stages()[0];
         let stamped = Sequence::new(first.seat).stamp(
             session.state().tick(),
             Command::Want {
@@ -571,30 +548,35 @@ mod tests {
         );
         session.insert(stamped).expect("the pick is taken");
         assert!(session.advance().rejected.is_empty());
-        let draft = session.state().draft().clone();
-        let next = draft.running().expect("the next stage runs");
-        assert_eq!(
-            aim(next.seat, &draft).refusal(A, next.row),
-            Some(ASTEROID_TAKEN)
-        );
-        assert_eq!(aim(next.seat, &draft).refusal(B, next.row), None);
-        assert_eq!(
-            aim(first.seat, &draft).refusal(B, first.row),
-            None,
-            "a placed row is no pick"
-        );
-        assert_eq!(
-            aim(next.seat, &draft).refusal(A, FRIGATE),
-            None,
-            "a want that is no pick stands at a taken asteroid"
-        );
+        let next = session
+            .state()
+            .draft()
+            .running()
+            .expect("the next stage runs");
+        let view = View::of(session.state(), next.seat, &Shots::default());
+        let aim = Aim {
+            viewer: next.seat,
+            pointer: None,
+            hovered: None,
+            step: 1,
+            view: &view,
+            state: session.state(),
+        };
+        let roster = session.state().roster();
 
-        while session.state().drafting() {
-            session.advance();
-        }
-        let draft = session.state().draft().clone();
-        assert_eq!(aim(first.seat, &draft).refusal(A, FRIGATE), None);
-        assert_eq!(aim(later.seat, &draft).refusal(A, later.row), None);
+        let taken = aim.buttons_at(A, roster);
+        let free = aim.buttons_at(B, roster);
+
+        assert_eq!(
+            taken.refusals[&next.row].adding,
+            Some(Rejected::AsteroidTaken),
+            "a pick at a taken asteroid is refused"
+        );
+        assert_eq!(free.refusals[&next.row].adding, None);
+        assert_eq!(
+            taken.refusals[&FRIGATE].adding, None,
+            "a frigate is no pick and stands at a taken asteroid"
+        );
     }
 
     #[test]

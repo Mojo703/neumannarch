@@ -4,7 +4,7 @@ use crate::fixture::World;
 use crate::ids::{SeatId, TeamId};
 use crate::orbit::body::Gravity;
 use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER};
-use crate::state::{Flight, Send};
+use crate::state::{Flight, Route, Send};
 use crate::time::Tick;
 
 const FAST: Gravity = Gravity::new(4.4e17);
@@ -14,6 +14,14 @@ const SLOW: Gravity = Gravity::new(4.0e13);
 const HOME: AsteroidId = AsteroidId(0);
 
 const AWAY: AsteroidId = AsteroidId(1);
+
+fn home_to_away() -> Route {
+    Route {
+        source: HOME,
+        destination: AWAY,
+        seat: SeatId(0),
+    }
+}
 
 fn seconds(count: u64) -> u64 {
     count * u64::from(TICKS_PER_SECOND)
@@ -216,8 +224,8 @@ fn a_group_closes_on_its_fire_target_as_one_body() {
 fn a_flight_ends_at_the_tick_its_schedule_arrives() {
     let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
     let flier = world.hold(0, FRIGATE, AWAY, 0.0);
-    let send = Send::joining(&world.state, HOME, AWAY, SeatId(0), &[flier])
-        .expect("a send across the ring");
+    let send =
+        Send::joining(&world.state, home_to_away(), &[flier]).expect("a send across the ring");
     world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
     let arrive = send.schedule.arrive();
 
@@ -236,8 +244,7 @@ fn an_arrived_send_holds_inside_its_destinations_zone() {
         .into_iter()
         .map(|row| world.hold(0, row, AWAY, 0.0))
         .collect();
-    let send =
-        Send::joining(&world.state, HOME, AWAY, SeatId(0), &force).expect("a send across the ring");
+    let send = Send::joining(&world.state, home_to_away(), &force).expect("a send across the ring");
     for (at, one) in force.iter().enumerate() {
         world.launch(
             *one,
@@ -260,8 +267,8 @@ fn an_arrived_send_holds_inside_its_destinations_zone() {
 fn a_flying_unit_thrusts_by_its_schedule_and_by_separation_alone() {
     let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
     let flier = world.hold(0, FRIGATE, AWAY, 0.0);
-    let send = Send::joining(&world.state, HOME, AWAY, SeatId(0), &[flier])
-        .expect("a send across the ring");
+    let send =
+        Send::joining(&world.state, home_to_away(), &[flier]).expect("a send across the ring");
     world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
     while !world.state[flier].is_flying(world.state.time()) {
         world.state.advance();

@@ -118,8 +118,9 @@ mod tests {
             income: Materials::ZERO,
             spend: Materials::ZERO,
             reserve: BTreeMap::new(),
-            compositions: Vec::new(),
-            plans: Vec::new(),
+            compositions: BTreeMap::new(),
+            plans: BTreeMap::new(),
+            still_in: true,
             present: vec![Present {
                 id: EntityId(0),
                 row: RowId(0),

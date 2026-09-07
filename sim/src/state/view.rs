@@ -7,6 +7,8 @@ use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
+use crate::post::Post;
+use crate::posting::Posting;
 use crate::state::draft::Draft;
 use crate::state::entity::Entity;
 use crate::state::standings::Standings;
@@ -46,18 +48,14 @@ pub struct Building {
     pub starved_of: Option<Material>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Composition {
-    pub asteroid: AsteroidId,
-    pub seat: SeatId,
     pub builder: bool,
     pub rows: BTreeMap<RowId, Held>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Plan {
-    pub asteroid: AsteroidId,
-    pub row: RowId,
     pub want: u32,
     pub building: Option<Building>,
 }
@@ -74,13 +72,14 @@ pub struct View {
     pub income: Materials,
     pub spend: Materials,
     pub reserve: BTreeMap<RowId, u32>,
-    pub compositions: Vec<Composition>,
-    pub plans: Vec<Plan>,
+    pub compositions: BTreeMap<Post, Composition>,
+    pub plans: BTreeMap<Posting, Plan>,
     pub present: Vec<Present>,
     pub teams: Box<[TeamId]>,
     pub exchanges: Vec<Exchange>,
     pub terrain: Vec<Terrain>,
     pub zone: f64,
+    pub still_in: bool,
     pub standings: Standings,
 }
 
@@ -105,6 +104,7 @@ impl View {
             exchanges: shots.exchanges(state),
             terrain: terrain(state),
             zone: Belt::ZONE_RADIUS_METERS,
+            still_in: seated.is_some_and(Seat::alive),
             standings: state.standings(),
         }
     }
@@ -129,10 +129,12 @@ impl View {
             .map(|terrain| terrain.orbit.at(self.time, self.gravity))
     }
 
-    pub fn plan_of(&self, asteroid: AsteroidId, row: RowId) -> Option<&Plan> {
-        self.plans
-            .iter()
-            .find(|plan| plan.asteroid == asteroid && plan.row == row)
+    pub fn plan_of(&self, posting: Posting) -> Option<&Plan> {
+        self.plans.get(&posting)
+    }
+
+    pub fn want_of(&self, posting: Posting) -> u32 {
+        self.plans.get(&posting).map_or(0, |plan| plan.want)
     }
 }
 
@@ -162,22 +164,28 @@ impl Berth {
     }
 }
 
-fn compositions(state: &State, seat: SeatId) -> Vec<Composition> {
-    let mut rows: BTreeMap<(AsteroidId, SeatId), BTreeMap<RowId, Held>> = BTreeMap::new();
-    for ((asteroid, at, row), held) in state.holdings() {
-        rows.entry((asteroid, at)).or_default().insert(row, held);
+fn compositions(state: &State, seat: SeatId) -> BTreeMap<Post, Composition> {
+    let mut compositions: BTreeMap<Post, Composition> = BTreeMap::new();
+    for (posting, held) in state.holdings() {
+        compositions
+            .entry(posting.post())
+            .or_default()
+            .rows
+            .insert(posting.row(), held);
     }
     for (post, _) in state.posts().filter(|(post, _)| post.seat == seat) {
-        rows.entry((post.asteroid, post.seat)).or_default();
+        compositions.entry(post).or_default();
     }
-    rows.into_iter()
-        .map(|((asteroid, at), rows)| Composition {
-            asteroid,
-            seat: at,
-            builder: builds_at(state, asteroid, at),
-            rows,
-        })
-        .collect()
+    for (post, composition) in &mut compositions {
+        composition.builder = builds_at(state, post.asteroid, post.seat);
+        if post.seat != seat {
+            continue;
+        }
+        for (row, held) in &mut composition.rows {
+            held.surplus = state.surplus_at(Posting::new(*post, *row)).len() as u32;
+        }
+    }
+    compositions
 }
 
 fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
@@ -187,11 +195,11 @@ fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
         .any(|entity| state[entity.row()].builds().next().is_some())
 }
 
-fn plans(state: &State, seat: SeatId) -> Vec<Plan> {
-    let mut plans: BTreeMap<(AsteroidId, RowId), Plan> = BTreeMap::new();
+fn plans(state: &State, seat: SeatId) -> BTreeMap<Posting, Plan> {
+    let mut plans: BTreeMap<Posting, Plan> = BTreeMap::new();
     for (post, wants) in state.posts().filter(|(post, _)| post.seat == seat) {
         for (row, want) in wants.iter() {
-            planned(&mut plans, post.asteroid, row).want = want;
+            planned(&mut plans, Posting::new(post, row)).want = want;
         }
     }
     for frame in state
@@ -199,23 +207,14 @@ fn plans(state: &State, seat: SeatId) -> Vec<Plan> {
         .iter()
         .filter(|frame| frame.post().seat == seat)
     {
-        let post = frame.post();
-        planned(&mut plans, post.asteroid, frame.row()).building = Some(building(state, frame));
+        planned(&mut plans, Posting::new(frame.post(), frame.row())).building =
+            Some(building(state, frame));
     }
-    plans.into_values().collect()
+    plans
 }
 
-fn planned(
-    plans: &mut BTreeMap<(AsteroidId, RowId), Plan>,
-    asteroid: AsteroidId,
-    row: RowId,
-) -> &mut Plan {
-    plans.entry((asteroid, row)).or_insert(Plan {
-        asteroid,
-        row,
-        want: 0,
-        building: None,
-    })
+fn planned(plans: &mut BTreeMap<Posting, Plan>, posting: Posting) -> &mut Plan {
+    plans.entry(posting).or_default()
 }
 
 fn building(state: &State, frame: &Frame) -> Building {
@@ -288,9 +287,9 @@ mod tests {
 
     fn holding(view: &View, asteroid: AsteroidId, seat: u8, row: RowId) -> Held {
         view.compositions
-            .iter()
-            .find(|composition| {
-                composition.asteroid == asteroid && composition.seat == SeatId(seat)
+            .get(&Post {
+                asteroid,
+                seat: SeatId(seat),
             })
             .and_then(|composition| composition.rows.get(&row).copied())
             .unwrap_or_default()
@@ -322,15 +321,52 @@ mod tests {
             "another seat's holdings are visible"
         );
         assert_eq!(
-            view.plan_of(ASTEROID, FRIGATE).map(|plan| plan.want),
+            view.plan_of(Posting::of(ASTEROID, SeatId(0), FRIGATE))
+                .map(|plan| plan.want),
             Some(2),
             "the viewer's own want is in the view"
         );
         assert!(
-            view.plans.iter().all(|plan| plan.asteroid == ASTEROID),
+            view.plans
+                .keys()
+                .all(|posting| posting.asteroid() == ASTEROID),
             "another seat's wants are its own to see"
         );
         assert_eq!(view.reserve[&SHIPYARD], 1);
+    }
+
+    #[test]
+    fn a_surplus_is_what_stands_at_the_asteroid_above_the_want_its_frames_leave_uncovered() {
+        let mut world = world();
+        world.hold(0, FRIGATE, ASTEROID, 0.0);
+        world.tick(&[]);
+
+        assert_eq!(
+            holding(&world.view(0), ASTEROID, 0, FRIGATE).surplus,
+            1,
+            "a unit no want covers is surplus where it stands"
+        );
+        assert_eq!(
+            holding(&world.view(1), ASTEROID, 0, FRIGATE).present,
+            1,
+            "what stands there is visible to every seat"
+        );
+        assert_eq!(
+            holding(&world.view(1), ASTEROID, 0, FRIGATE).surplus,
+            0,
+            "a surplus would tell another seat the want behind it"
+        );
+
+        world.tick(&[Issued::want(0, AWAY, FRIGATE, 1)]);
+        world.tick(&[Issued::want(0, AWAY, FRIGATE, 0)]);
+        let flying = world.view(0);
+
+        assert_eq!(holding(&flying, AWAY, 0, FRIGATE).arriving, 1);
+        assert_eq!(
+            holding(&flying, AWAY, 0, FRIGATE).surplus,
+            0,
+            "a unit still on its way stands nowhere to be surplus"
+        );
     }
 
     #[test]
@@ -343,9 +379,9 @@ mod tests {
         let view = world.view(0);
         let builder = |asteroid: AsteroidId| {
             view.compositions
-                .iter()
-                .find(|composition| {
-                    composition.asteroid == asteroid && composition.seat == SeatId(0)
+                .get(&Post {
+                    asteroid,
+                    seat: SeatId(0),
                 })
                 .map(|composition| composition.builder)
         };
@@ -393,7 +429,7 @@ mod tests {
 
         let plan = world
             .view(0)
-            .plan_of(ASTEROID, FRIGATE)
+            .plan_of(Posting::of(ASTEROID, SeatId(0), FRIGATE))
             .copied()
             .expect("the frigate is wanted");
 
@@ -476,9 +512,7 @@ mod tests {
         assert!(view.plans.is_empty());
         assert!(view.reserve.is_empty());
         assert!(
-            view.compositions
-                .iter()
-                .all(|composition| composition.seat == SeatId(0)),
+            view.compositions.keys().all(|post| post.seat == SeatId(0)),
             "only the seats that hold anything carry a composition"
         );
         assert_eq!(view.terrain.len(), 21);
