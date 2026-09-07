@@ -17,7 +17,7 @@ use crate::step::propagation::Propagation;
 use crate::time::{Tick, Time};
 use crate::vec3::Vec3;
 
-pub(crate) const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
+pub const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
 const RING_RADIUS_METERS: f64 = 1.0e7;
 
@@ -28,7 +28,7 @@ const ASTEROID_RADIUS_METERS: f64 = 1.5;
 const RING_CAPS: Materials = Materials::new(1.0, 1.0, 1.0);
 
 pub(crate) struct World {
-    pub state: State,
+    pub(crate) state: State,
 }
 
 impl World {
@@ -49,11 +49,11 @@ impl World {
         }
     }
 
-    pub fn seated(seats: Vec<Seat>) -> World {
+    pub(crate) fn seated(seats: Vec<Seat>) -> World {
         World::crewed(Roster::shipped(), seats)
     }
 
-    pub fn crewed(roster: Roster, seats: Vec<Seat>) -> World {
+    pub(crate) fn crewed(roster: Roster, seats: Vec<Seat>) -> World {
         let mut world = World {
             state: State::new(
                 CLOCK,
@@ -81,7 +81,7 @@ impl World {
         self.tick(&picks);
     }
 
-    pub fn start_the_clock(&mut self) {
+    pub(crate) fn start_the_clock(&mut self) {
         while !self.state.draft().over(self.state.tick()) {
             self.tick(&[]);
         }
@@ -120,13 +120,13 @@ impl World {
         self.state = next;
     }
 
-    pub fn run(&mut self, ticks: u64) {
+    pub(crate) fn run(&mut self, ticks: u64) {
         for _ in 0..ticks {
             self.tick(&[]);
         }
     }
 
-    pub fn steers(&mut self, ticks: u64) {
+    pub(crate) fn steers(&mut self, ticks: u64) {
         for _ in 0..ticks {
             let sweep = self.state.sweep();
             let thrusts = Holding::of(&self.state, &sweep).run();
@@ -153,7 +153,7 @@ impl World {
         self.state.spawn(SeatId(seat), row, asteroid, Motion::Fixed)
     }
 
-    pub fn hold(
+    pub(crate) fn hold(
         &mut self,
         seat: u8,
         row: RowId,
@@ -219,7 +219,7 @@ impl World {
             .distance(self.state.asteroid_body(asteroid).pos)
     }
 
-    pub fn shots(&self) -> Shots {
+    pub(crate) fn shots(&self) -> Shots {
         Fire::of(&self.state, &self.state.sweep()).run()
     }
 
@@ -241,7 +241,7 @@ impl World {
         None
     }
 
-    pub fn view(&self, seat: u8) -> View {
+    pub(crate) fn view(&self, seat: u8) -> View {
         View::of(&self.state, SeatId(seat), &Shots::default())
     }
 
@@ -254,7 +254,7 @@ impl World {
 }
 
 impl Batch {
-    pub(crate) fn of(issued: &[Issued]) -> Batch {
+    pub fn of(issued: &[Issued]) -> Batch {
         let mut batch = Batch::new();
         for issued in issued {
             assert_eq!(batch.insert(*issued), Ok(()));
@@ -264,7 +264,7 @@ impl Batch {
 }
 
 impl Issued {
-    pub(crate) fn want(seat: u8, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
+    pub fn want(seat: u8, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
         Issued::numbered(seat, 0, asteroid, row, count)
     }
 
@@ -288,7 +288,7 @@ impl Issued {
 }
 
 impl Post {
-    pub(crate) fn of(seat: u8, asteroid: AsteroidId) -> Post {
+    pub fn of(seat: u8, asteroid: AsteroidId) -> Post {
         Post {
             asteroid,
             seat: SeatId(seat),

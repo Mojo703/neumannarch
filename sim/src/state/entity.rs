@@ -15,13 +15,13 @@ pub struct Entity {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Motion {
+pub(crate) enum Motion {
     Fixed,
     Steered { body: Body, flight: Option<Flight> },
 }
 
 impl Entity {
-    pub fn new(
+    pub(crate) fn new(
         id: EntityId,
         seat: SeatId,
         row: RowId,
@@ -55,11 +55,11 @@ impl Entity {
         self.home
     }
 
-    pub fn hp(&self) -> f64 {
+    pub(crate) fn hp(&self) -> f64 {
         self.hp.0
     }
 
-    pub fn motion(&self) -> Motion {
+    pub(crate) fn motion(&self) -> Motion {
         self.motion
     }
 
@@ -71,7 +71,7 @@ impl Entity {
         self.hp.0 = (self.hp.0 + hp).min(full);
     }
 
-    pub(crate) fn set_home(&mut self, home: AsteroidId) {
+    pub fn set_home(&mut self, home: AsteroidId) {
         self.home = home;
     }
 
@@ -79,7 +79,7 @@ impl Entity {
         self.motion = motion;
     }
 
-    pub fn flight(&self) -> Option<Flight> {
+    pub(crate) fn flight(&self) -> Option<Flight> {
         match self.motion {
             Motion::Fixed | Motion::Steered { flight: None, .. } => None,
             Motion::Steered {

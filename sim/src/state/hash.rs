@@ -4,7 +4,7 @@ const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 
 const PRIME: u64 = 0x0000_0100_0000_01b3;
 
-pub fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
+pub(crate) fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     let mut fnv = Fnv(OFFSET_BASIS);
     value.hash(&mut fnv);
     fnv.finish()

@@ -200,7 +200,7 @@ fn spawn(next: &mut State, post: Post, row: RowId) {
     next.spawn(post.seat, row, post.asteroid, motion);
 }
 
-pub(crate) fn spawn_body(state: &State, asteroid: AsteroidId, at: Time) -> Body {
+pub fn spawn_body(state: &State, asteroid: AsteroidId, at: Time) -> Body {
     let home = state[asteroid].orbit().at(at, state.gravity());
     let already = state
         .standing_at(asteroid)
@@ -241,12 +241,12 @@ fn share(cost: Materials, progress: f64) -> Materials {
     }
 }
 
-pub mod construction;
-pub mod extraction;
+pub(crate) mod construction;
+pub(crate) mod extraction;
 pub mod fire;
-pub mod fulfilment;
-pub mod holding;
-pub mod propagation;
+pub(crate) mod fulfilment;
+pub(crate) mod holding;
+pub(crate) mod propagation;
 
 #[cfg(test)]
 mod tests {

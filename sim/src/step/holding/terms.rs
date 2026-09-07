@@ -29,11 +29,11 @@ pub fn separation(body: Body, row: &Row, neighbours: impl Iterator<Item = Vec3>)
         * row.steering.separation.0
 }
 
-pub fn cohesion(row: &Row, sample: Sample) -> Vec3 {
+pub(crate) fn cohesion(row: &Row, sample: Sample) -> Vec3 {
     sample.own_lean() * row.steering.cohesion.0
 }
 
-pub fn caution(row: &Row, sample: Sample) -> Vec3 {
+pub(crate) fn caution(row: &Row, sample: Sample) -> Vec3 {
     sample.retreat() * row.steering.caution.0
 }
 

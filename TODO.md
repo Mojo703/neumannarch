@@ -9,11 +9,34 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Nothing is in flight.
+The hover preview, ruled 2026-09-06 and not yet briefed. One sim and
+display unit, scope:
+- The sim answers what a seat's would-be wants would do this tick: a
+  query that applies them to a copy and reads fulfilment's assignment,
+  reporting per post and row what the reserve places, what surplus is
+  sent from where, the frames still to come, and the refund of the
+  frames cancelled. Fulfilment is split into an assignment stage the
+  query reads and the schedule solve the step alone runs; a send no
+  schedule exists for is the one thing the preview does not know, and
+  the next tick draws it.
+- The stockpile bar marks a plus hover's cost, frames to come times the
+  row's cost, and a minus hover's refund, from that answer; DISPLAY's
+  "the row's cost" is amended to the sim's answer.
+- The send drag's preview is the answer's sends, drawn as a straight
+  line from source to destination through the one flight-line type the
+  real flight uses, so the two share a style by construction.
+- The view carries surplus as the sim computes it, deleting the wheel's
+  own formula, which disagrees with the sim where a frame is open.
+- One pick check on the state that apply and the wheel's refused
+  buttons both call; one want-at lookup on the view for the three
+  copies in scene.rs, send.rs and play.rs.
+- The code takes the owner's names: the wheel's bands are buttons, the
+  strip is the stockpile bar, the asteroid's bars are asteroid bars.
+- The preview refreshes on every hover change and once per tick while
+  held; one state clone per refresh, recorded against the per-tick
+  clone item below.
 
-Next, in order: the hover preview asked of the sim (a sim and display
-unit), which also draws the preview's cost on the stockpile bars
-(DISPLAY The stockpile: segments only, never a numeral); then a small
+Next, in order: a small
 view and display unit for the asteroid's bars and the flight line (an
 extractor wanted or building shows its coming yield on the asteroid's
 bar; the small state is bars alone, tight to the asteroid; the line
@@ -39,12 +62,10 @@ Open from the draft unit:
 
 ## Open, each for a ruling or a unit
 
-- The hover preview of a want is computed on the client and is wrong
-  for the first shipyard and constructor, which the reserve places
-  free. The fix: a preview asks the sim what the command would do, an
-  apply on a copy of the state that answers placement and cost, and the
-  display draws that answer; the client keeps no rule. A sim and
-  display unit.
+- Second derivations in the agents, found 2026-09-06: `survey.rs`
+  tallies the seat's holdings from `view.present` where the view
+  already carries `compositions` from `State::holdings`; with the four
+  rank sorts under 1e. A Sonnet unit after the preview.
 - Ship glyphs stairstep: the quads use an alpha-test cutout MSAA cannot
   soften. Ruled: a coverage-sampled glyph rasteriser, edge coverage in
   the sheet's alpha, no material change. A small display unit.
@@ -68,14 +89,11 @@ Open from the draft unit:
   (plan 5): stores whose ids are minted only by the store, so an id in
   hand is valid by construction and no lookup can fail.
 - Dead `pub` items rustc cannot see: a `pub` item in a library crate is
-  never flagged unused, so the sim's, agents' and protocol's surfaces
-  hide dead code from the gate. Found by a name scan 2026-09-06, called
-  only from tests: `Entry::dim` (display/scene.rs); `is_a_phrase` and
-  `moving_at` are now test-only and `RIVAL` lives in a test module.
-  The structural fix, into the contraction audit (1e):
-  every `pub` outside ARCHITECTURE.md's stated surface becomes
-  `pub(crate)`, after which rustc's own lint finds the rest for good;
-  `check.sh` gains the scan until then.
+  never flagged unused, so a crate's surface hides dead code from the
+  gate. The sim is done: every item outside `lib.rs`'s re-exports is
+  `pub(crate)` and rustc's lint now finds the rest. Remaining, by
+  count of `pub` items: protocol 64, agents 38, game 375. Into the
+  contraction audit (1e); `check.sh` gains the scan until then.
 - No panics anywhere in the game or the sim (owner, 2026-09-06,
   distant): every panic path becomes error propagation and handling;
   with the id-minting stores above and the raw-index item. A crate-wide

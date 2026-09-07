@@ -21,7 +21,15 @@ pub struct Orbit {
 }
 
 impl Orbit {
-    pub fn new(a: f64, h: f64, k: f64, p: f64, q: f64, lambda0: f64, epoch: Time) -> Option<Orbit> {
+    pub(crate) fn new(
+        a: f64,
+        h: f64,
+        k: f64,
+        p: f64,
+        q: f64,
+        lambda0: f64,
+        epoch: Time,
+    ) -> Option<Orbit> {
         let elliptic = a > 0.0 && h * h + k * k < 1.0;
         (elliptic && p.is_finite() && q.is_finite() && lambda0.is_finite()).then(|| Orbit {
             a: Real(a),
@@ -82,16 +90,19 @@ impl Orbit {
         TAU * (a * a * a / gravity.mu()).sqrt()
     }
 
-    pub fn semi_major_axis(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn semi_major_axis(&self) -> f64 {
         self.a.0
     }
 
-    pub fn eccentricity(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn eccentricity(&self) -> f64 {
         let (h, k) = (self.h.0, self.k.0);
         (h * h + k * k).sqrt()
     }
 
-    pub fn epoch(&self) -> Time {
+    #[cfg(test)]
+    pub(crate) fn epoch(&self) -> Time {
         self.epoch
     }
 

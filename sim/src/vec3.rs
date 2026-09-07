@@ -15,7 +15,7 @@ impl Vec3 {
         Vec3 { x, y, z }
     }
 
-    pub fn dot(self, other: Vec3) -> f64 {
+    pub(crate) fn dot(self, other: Vec3) -> f64 {
         self.x * other.x + self.y * other.y + self.z * other.z
     }
 
@@ -27,15 +27,15 @@ impl Vec3 {
         )
     }
 
-    pub fn length_squared(self) -> f64 {
+    pub(crate) fn length_squared(self) -> f64 {
         self.dot(self)
     }
 
-    pub fn length(self) -> f64 {
+    pub(crate) fn length(self) -> f64 {
         self.length_squared().sqrt()
     }
 
-    pub fn normalized(self) -> Option<Vec3> {
+    pub(crate) fn normalized(self) -> Option<Vec3> {
         let length = self.length();
         (length > 0.0).then(|| self * (1.0 / length))
     }
@@ -44,7 +44,7 @@ impl Vec3 {
         (self - other).length()
     }
 
-    pub fn capped(self, limit: f64) -> Vec3 {
+    pub(crate) fn capped(self, limit: f64) -> Vec3 {
         let length = self.length();
         match length > limit {
             true => self * (limit / length),

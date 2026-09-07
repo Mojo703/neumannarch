@@ -8,9 +8,9 @@ use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
-    pub shooter: EntityId,
-    pub weapon: u8,
-    pub target: EntityId,
+    pub(crate) shooter: EntityId,
+    pub(crate) weapon: u8,
+    pub(crate) target: EntityId,
     pub damage: f64,
 }
 
@@ -25,20 +25,20 @@ pub struct Exchange {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shots {
     pub hits: Vec<Hit>,
-    pub ready: Vec<Ready>,
+    pub(crate) ready: Vec<Ready>,
 }
 
-pub struct Fire<'a> {
+pub(crate) struct Fire<'a> {
     state: &'a State,
     sweep: &'a Sweep,
 }
 
 impl<'a> Fire<'a> {
-    pub fn of(state: &'a State, sweep: &'a Sweep) -> Fire<'a> {
+    pub(crate) fn of(state: &'a State, sweep: &'a Sweep) -> Fire<'a> {
         Fire { state, sweep }
     }
 
-    pub fn run(self) -> Shots {
+    pub(crate) fn run(self) -> Shots {
         let mut shots = Shots::default();
         let mut assigned = Assigned::default();
         for ready in self.ready() {
@@ -126,7 +126,7 @@ impl Shots {
         damage
     }
 
-    pub fn exchanges(&self, state: &State) -> Vec<Exchange> {
+    pub(crate) fn exchanges(&self, state: &State) -> Vec<Exchange> {
         let mut found: BTreeMap<(AsteroidId, SeatId), (bool, bool)> = BTreeMap::new();
         let mut note = |id: EntityId, landed: bool| {
             let Some(entity) = state.entity(id) else {

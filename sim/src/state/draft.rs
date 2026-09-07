@@ -27,7 +27,7 @@ pub struct Draft {
 }
 
 impl Draft {
-    pub fn of(seed: u64, seats: &[Seat], roster: &Roster) -> Draft {
+    pub(crate) fn of(seed: u64, seats: &[Seat], roster: &Roster) -> Draft {
         let mut order: Vec<SeatId> = (0..seats.len())
             .filter_map(|at| u8::try_from(at).ok())
             .map(SeatId)
@@ -116,7 +116,7 @@ impl Draft {
             .position(|stage| stage.seat == seat && stage.row == row && stage.placed.is_none())
     }
 
-    pub(crate) fn place(&mut self, asteroid: AsteroidId, seat: SeatId, row: RowId, tick: Tick) {
+    pub fn place(&mut self, asteroid: AsteroidId, seat: SeatId, row: RowId, tick: Tick) {
         let Some(at) = self.waiting(seat, row) else {
             return;
         };
@@ -127,14 +127,14 @@ impl Draft {
         }
     }
 
-    pub(crate) fn pass(&mut self, tick: Tick) {
+    pub fn pass(&mut self, tick: Tick) {
         if self.running < self.stages.len() && tick.0 >= self.began.0 + STAGE_SPAN.0 {
             self.running += 1;
             self.began = tick;
         }
     }
 
-    pub(crate) fn end(&mut self, tick: Tick) {
+    pub fn end(&mut self, tick: Tick) {
         self.ended = Some(tick);
     }
 }

@@ -5,28 +5,28 @@ use crate::materials::{Material, Materials, Stockpile};
 use crate::state::{Entity, State};
 use crate::time::Tick;
 
-pub struct Construction<'a> {
+pub(crate) struct Construction<'a> {
     state: &'a State,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Repair {
-    pub entity: EntityId,
+pub(crate) struct Repair {
+    pub(crate) entity: EntityId,
     pub hp: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Progress {
-    pub spends: Vec<Spend>,
-    pub repairs: Vec<Repair>,
+pub(crate) struct Progress {
+    pub(crate) spends: Vec<Spend>,
+    pub(crate) repairs: Vec<Repair>,
 }
 
 impl<'a> Construction<'a> {
-    pub fn of(state: &'a State) -> Construction<'a> {
+    pub(crate) fn of(state: &'a State) -> Construction<'a> {
         Construction { state }
     }
 
-    pub fn run(self) -> Progress {
+    pub(crate) fn run(self) -> Progress {
         let mut progress = Progress::default();
         let dt = Tick(1).seconds();
         for seat in self.seats() {
@@ -149,23 +149,23 @@ impl<'a> Construction<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Work {
+pub(crate) struct Work {
     pub cost: Materials,
     pub progress: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Effort {
-    pub frame: usize,
-    pub amount: f64,
+pub(crate) struct Effort {
+    pub(crate) frame: usize,
+    pub(crate) amount: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Spend {
-    pub frame: usize,
-    pub materials: Materials,
-    pub completed: bool,
-    pub short: Option<Material>,
+pub(crate) struct Spend {
+    pub(crate) frame: usize,
+    pub(crate) materials: Materials,
+    pub(crate) completed: bool,
+    pub(crate) short: Option<Material>,
 }
 
 struct Want {
@@ -215,7 +215,7 @@ impl Want {
     }
 }
 
-pub fn assign(rates: &[f64], frames: usize, dt: f64) -> Vec<Effort> {
+pub(crate) fn assign(rates: &[f64], frames: usize, dt: f64) -> Vec<Effort> {
     let combined = rates.iter().sum::<f64>() * dt;
     if frames == 0 || combined <= 0.0 {
         return Vec::new();

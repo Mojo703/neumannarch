@@ -6,16 +6,15 @@ pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
 pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
-pub use entity::{Entity, Motion};
-pub use frame::Frame;
-pub use ready::Ready;
-pub use schedule::{Flight, Schedule};
+pub(crate) use entity::{Entity, Motion};
+pub(crate) use frame::Frame;
+pub(crate) use ready::Ready;
+pub(crate) use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use send::Send;
 pub use standings::Standings;
-pub use threat::{Aim, Assigned, Threat};
-pub use view::View;
-pub use wants::Wants;
+pub(crate) use threat::{Aim, Assigned, Threat};
+pub(crate) use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
 use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
@@ -130,7 +129,7 @@ impl State {
         &self.seats
     }
 
-    pub fn seat(&self, id: SeatId) -> Option<&Seat> {
+    pub(crate) fn seat(&self, id: SeatId) -> Option<&Seat> {
         self.seats.get(usize::from(id.0))
     }
 
@@ -158,7 +157,7 @@ impl State {
             .filter(move |entity| entity.standing(self.time()) == Some(asteroid))
     }
 
-    pub fn ready(&self) -> &[Ready] {
+    pub(crate) fn ready(&self) -> &[Ready] {
         &self.ready
     }
 
@@ -212,7 +211,7 @@ impl State {
         }
     }
 
-    pub fn sweep(&self) -> Sweep {
+    pub(crate) fn sweep(&self) -> Sweep {
         Sweep::build(
             self.entities()
                 .map(|entity| (entity.id(), self.body_of(entity).pos)),
@@ -260,7 +259,7 @@ impl State {
         }
     }
 
-    pub(crate) fn remove_entity(&mut self, id: EntityId) {
+    pub fn remove_entity(&mut self, id: EntityId) {
         if self.entities.remove(&id).is_some() {
             self.ready.retain(|ready| ready.entity() != id);
         }
@@ -270,7 +269,7 @@ impl State {
         self.seats.get_mut(usize::from(id.0))
     }
 
-    pub(crate) fn entity_mut(&mut self, id: EntityId) -> Option<&mut Entity> {
+    pub fn entity_mut(&mut self, id: EntityId) -> Option<&mut Entity> {
         self.entities.get_mut(&id)
     }
 
@@ -297,11 +296,11 @@ impl State {
         self.frames.retain(|frame| frame.post().seat != seat);
     }
 
-    pub(crate) fn close_post(&mut self, post: Post) {
+    pub fn close_post(&mut self, post: Post) {
         self.wants.remove(&post);
     }
 
-    pub(crate) fn set_ready(&mut self, entity: EntityId, weapon: u8, at: Moment) {
+    pub fn set_ready(&mut self, entity: EntityId, weapon: u8, at: Moment) {
         if let Some(ready) = self
             .ready
             .iter_mut()
@@ -375,13 +374,13 @@ mod command;
 mod draft;
 mod entity;
 mod frame;
-pub mod hash;
+pub(crate) mod hash;
 mod ready;
 mod schedule;
 mod seat;
 mod send;
 pub mod standings;
-pub mod sweep;
+pub(crate) mod sweep;
 mod threat;
 pub mod view;
 mod wants;

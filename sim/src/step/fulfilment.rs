@@ -6,34 +6,34 @@ use crate::roster::Kind;
 use crate::state::{Entity, Send, State};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Placement {
-    pub post: Post,
+pub(crate) struct Placement {
+    pub(crate) post: Post,
     pub row: RowId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Opening {
-    pub post: Post,
+pub(crate) struct Opening {
+    pub(crate) post: Post,
     pub row: RowId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Cancellation {
-    pub frame: usize,
+pub(crate) struct Cancellation {
+    pub(crate) frame: usize,
     pub row: RowId,
     pub seat: SeatId,
     pub progress: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Assigned {
-    pub placements: Vec<Placement>,
-    pub sends: Vec<Send>,
-    pub openings: Vec<Opening>,
-    pub cancellations: Vec<Cancellation>,
+pub(crate) struct Assigned {
+    pub(crate) placements: Vec<Placement>,
+    pub(crate) sends: Vec<Send>,
+    pub(crate) openings: Vec<Opening>,
+    pub(crate) cancellations: Vec<Cancellation>,
 }
 
-pub struct Fulfilment<'a> {
+pub(crate) struct Fulfilment<'a> {
     state: &'a State,
     surplus: BTreeMap<(SeatId, RowId), Vec<Surplus>>,
 }
@@ -45,7 +45,7 @@ struct Surplus {
 }
 
 impl<'a> Fulfilment<'a> {
-    pub fn of(state: &'a State) -> Fulfilment<'a> {
+    pub(crate) fn of(state: &'a State) -> Fulfilment<'a> {
         let mut surplus: BTreeMap<(SeatId, RowId), Vec<Surplus>> = BTreeMap::new();
         for (post, row, over) in surpluses(state) {
             if state[row].kind() == Kind::Unit {
@@ -61,7 +61,7 @@ impl<'a> Fulfilment<'a> {
         Fulfilment { state, surplus }
     }
 
-    pub fn run(mut self) -> Assigned {
+    pub(crate) fn run(mut self) -> Assigned {
         let mut assigned = Assigned::default();
         let mut reserved: BTreeMap<(SeatId, RowId), u32> = BTreeMap::new();
         let mut moving: BTreeMap<(AsteroidId, AsteroidId, SeatId), Vec<EntityId>> = BTreeMap::new();

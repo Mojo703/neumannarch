@@ -45,11 +45,12 @@ impl Roster {
         }
     }
 
-    pub fn movement_limit(&self) -> Real {
+    pub(crate) fn movement_limit(&self) -> Real {
         self.movement_limit
     }
 
-    pub fn add(&mut self, row: Row) -> RowId {
+    #[cfg(test)]
+    pub(crate) fn add(&mut self, row: Row) -> RowId {
         let id = RowId(u16::try_from(self.rows.len()).expect("a roster holds at most 65536 rows"));
         self.rows.push(row);
         id
@@ -63,11 +64,13 @@ impl Roster {
         (0..=u16::MAX).map(RowId).zip(&self.rows)
     }
 
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.rows.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
 }

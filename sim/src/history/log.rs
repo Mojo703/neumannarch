@@ -11,18 +11,18 @@ pub(crate) struct Log {
 }
 
 impl Log {
-    pub(crate) fn insert(&mut self, stamped: Stamped) -> Result<(), Refused> {
+    pub fn insert(&mut self, stamped: Stamped) -> Result<(), Refused> {
         self.ticks
             .entry(stamped.tick)
             .or_default()
             .insert(stamped.issued)
     }
 
-    pub(crate) fn at(&self, tick: Tick) -> &Batch {
+    pub fn at(&self, tick: Tick) -> &Batch {
         self.ticks.get(&tick).unwrap_or(&NOTHING)
     }
 
-    pub(crate) fn until(&self, until: Tick) -> Log {
+    pub fn until(&self, until: Tick) -> Log {
         Log {
             ticks: self
                 .ticks
@@ -32,7 +32,7 @@ impl Log {
         }
     }
 
-    pub(crate) fn stamped(&self) -> impl Iterator<Item = Stamped> + '_ {
+    pub fn stamped(&self) -> impl Iterator<Item = Stamped> + '_ {
         self.ticks.iter().flat_map(|(tick, batch)| {
             batch.iter().map(move |issued| Stamped {
                 tick: *tick,

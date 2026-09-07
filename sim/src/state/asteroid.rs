@@ -45,7 +45,7 @@ impl Asteroid {
         (distance - Belt::ZONE_RADIUS_METERS).max(0.0) - (floor - distance).max(0.0)
     }
 
-    pub(crate) fn extract(&mut self, taken: Materials) {
+    pub fn extract(&mut self, taken: Materials) {
         self.pull.fill(taken);
     }
 

@@ -31,7 +31,7 @@ impl Seat {
         self.team
     }
 
-    pub fn alive(&self) -> bool {
+    pub(crate) fn alive(&self) -> bool {
         self.alive
     }
 
@@ -51,7 +51,7 @@ impl Seat {
         self.spend.completed()
     }
 
-    pub fn reserve(&self) -> &BTreeMap<RowId, u32> {
+    pub(crate) fn reserve(&self) -> &BTreeMap<RowId, u32> {
         &self.reserve
     }
 
@@ -59,24 +59,24 @@ impl Seat {
         self.reserve.get(&row).copied().unwrap_or(0)
     }
 
-    pub fn reserve_is_empty(&self) -> bool {
+    pub(crate) fn reserve_is_empty(&self) -> bool {
         self.reserve.is_empty()
     }
 
-    pub(crate) fn stockpile_mut(&mut self) -> &mut Stockpile {
+    pub fn stockpile_mut(&mut self) -> &mut Stockpile {
         &mut self.stockpile
     }
 
-    pub(crate) fn refund(&mut self, materials: Materials) {
+    pub fn refund(&mut self, materials: Materials) {
         self.stockpile.add(materials);
     }
 
-    pub(crate) fn earn(&mut self, income: Materials) {
+    pub fn earn(&mut self, income: Materials) {
         self.stockpile.add(income);
         self.income.fill(income);
     }
 
-    pub(crate) fn drain(&mut self, cost: Materials) {
+    pub fn drain(&mut self, cost: Materials) {
         let taken = self.stockpile.spend(cost);
         self.spend.fill(taken);
     }

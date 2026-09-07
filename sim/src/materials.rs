@@ -38,7 +38,7 @@ impl Materials {
         self.0.iter().sum()
     }
 
-    pub(crate) fn map(self, f: impl Fn(f64) -> f64) -> Materials {
+    pub fn map(self, f: impl Fn(f64) -> f64) -> Materials {
         Materials(self.0.map(f))
     }
 
@@ -50,14 +50,14 @@ impl Materials {
         self.zip(other, f64::min)
     }
 
-    pub(crate) fn covers(self, demand: Materials) -> Materials {
+    pub fn covers(self, demand: Materials) -> Materials {
         self.zip(demand, |have, need| match need > 0.0 {
             true => (have / need).min(1.0),
             false => 1.0,
         })
     }
 
-    pub(crate) fn binding(self, ratios: Materials) -> Option<(Material, f64)> {
+    pub fn binding(self, ratios: Materials) -> Option<(Material, f64)> {
         self.amounts()
             .filter(|(_, amount)| *amount > 0.0)
             .map(|(material, _)| (material, ratios[material]))
@@ -132,11 +132,11 @@ impl SubAssign for Materials {
 }
 
 impl PerSecond {
-    pub(crate) fn completed(&self) -> Materials {
+    pub fn completed(&self) -> Materials {
         self.completed
     }
 
-    pub(crate) fn fill(&mut self, materials: Materials) {
+    pub fn fill(&mut self, materials: Materials) {
         self.filling += materials;
     }
 

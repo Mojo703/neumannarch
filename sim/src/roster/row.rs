@@ -70,7 +70,7 @@ impl Row {
         self.weapons.iter().any(|weapon| weapon.range().is_some())
     }
 
-    pub fn standoff(&self) -> Option<f64> {
+    pub(crate) fn standoff(&self) -> Option<f64> {
         let range = self.max_damage_range();
         (range > 0.0).then_some(0.5 * range)
     }
@@ -89,7 +89,7 @@ impl Row {
             .sum()
     }
 
-    pub fn damage_weapons(&self) -> impl Iterator<Item = u8> + '_ {
+    pub(crate) fn damage_weapons(&self) -> impl Iterator<Item = u8> + '_ {
         self.weapons
             .iter()
             .enumerate()

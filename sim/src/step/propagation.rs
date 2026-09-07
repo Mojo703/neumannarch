@@ -5,26 +5,26 @@ use crate::step::holding::Thrusts;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Move {
-    pub entity: EntityId,
+pub(crate) struct Move {
+    pub(crate) entity: EntityId,
     pub body: Body,
-    pub flight: Option<Flight>,
+    pub(crate) flight: Option<Flight>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Moved(Vec<Move>);
+pub(crate) struct Moved(Vec<Move>);
 
-pub struct Propagation<'a> {
+pub(crate) struct Propagation<'a> {
     state: &'a State,
     thrusts: &'a Thrusts,
 }
 
 impl<'a> Propagation<'a> {
-    pub fn of(state: &'a State, thrusts: &'a Thrusts) -> Propagation<'a> {
+    pub(crate) fn of(state: &'a State, thrusts: &'a Thrusts) -> Propagation<'a> {
         Propagation { state, thrusts }
     }
 
-    pub fn run(self) -> Moved {
+    pub(crate) fn run(self) -> Moved {
         Moved(
             self.state
                 .entities()
@@ -58,7 +58,7 @@ impl<'a> Propagation<'a> {
 }
 
 impl Moved {
-    pub fn iter(&self) -> impl Iterator<Item = Move> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Move> + '_ {
         self.0.iter().copied()
     }
 }

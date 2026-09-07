@@ -8,7 +8,7 @@ use crate::time::Time;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Body {
     pub pos: Vec3,
-    pub vel: Vec3,
+    pub(crate) vel: Vec3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24,11 +24,12 @@ impl Body {
         propagate(Body::new(self.pos, self.vel + thrust * span), gravity, span)
     }
 
-    pub fn radius(self) -> f64 {
+    pub(crate) fn radius(self) -> f64 {
         self.pos.length()
     }
 
-    pub fn speed(self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn speed(self) -> f64 {
         self.vel.length()
     }
 
@@ -36,7 +37,7 @@ impl Body {
         self.vel.length_squared() / 2.0 - gravity.mu() / self.radius()
     }
 
-    pub fn angular_momentum(self) -> Vec3 {
+    pub(crate) fn angular_momentum(self) -> Vec3 {
         self.pos.cross(self.vel)
     }
 

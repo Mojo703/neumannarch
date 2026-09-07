@@ -39,7 +39,7 @@ impl Retention {
 }
 
 impl Snapshots {
-    pub(crate) fn new(retention: Retention) -> Snapshots {
+    pub fn new(retention: Retention) -> Snapshots {
         Snapshots {
             retention,
             kept: BTreeMap::new(),
@@ -56,15 +56,15 @@ impl Snapshots {
         }
     }
 
-    pub(crate) fn at_or_before(&self, tick: Tick) -> Option<&State> {
+    pub fn at_or_before(&self, tick: Tick) -> Option<&State> {
         self.kept.range(..=tick).next_back().map(|(_, kept)| kept)
     }
 
-    pub(crate) fn discard_after(&mut self, tick: Tick) {
+    pub fn discard_after(&mut self, tick: Tick) {
         self.kept.retain(|kept, _| *kept <= tick);
     }
 
-    pub(crate) fn prune(&mut self, oldest: Tick) {
+    pub fn prune(&mut self, oldest: Tick) {
         let floor = self
             .kept
             .range(..=oldest)

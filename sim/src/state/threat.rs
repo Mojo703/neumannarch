@@ -6,15 +6,15 @@ use crate::ids::{AsteroidId, EntityId, TeamId};
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Aim {
-    pub target: EntityId,
-    pub distance: f64,
+pub(crate) struct Aim {
+    pub(crate) target: EntityId,
+    pub(crate) distance: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Assigned(BTreeMap<EntityId, f64>);
 
-pub struct Threat<'a> {
+pub(crate) struct Threat<'a> {
     state: &'a State,
     here: AsteroidId,
     team: TeamId,
@@ -23,7 +23,7 @@ pub struct Threat<'a> {
 }
 
 impl<'a> Threat<'a> {
-    pub fn of(state: &'a State, shooter: &Entity) -> Option<Threat<'a>> {
+    pub(crate) fn of(state: &'a State, shooter: &Entity) -> Option<Threat<'a>> {
         let plating = state[shooter.row()].plating.0;
         Some(Threat {
             state,
@@ -38,7 +38,7 @@ impl<'a> Threat<'a> {
         })
     }
 
-    pub fn best<'e>(
+    pub(crate) fn best<'e>(
         &self,
         candidates: impl Iterator<Item = &'e Entity>,
         assigned: &Assigned,

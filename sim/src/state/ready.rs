@@ -2,7 +2,7 @@ use crate::ids::EntityId;
 use crate::time::Moment;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Ready {
+pub(crate) struct Ready {
     entity: EntityId,
     weapon: u8,
     at: Moment,
@@ -17,7 +17,7 @@ impl Ready {
         self.entity
     }
 
-    pub fn weapon(&self) -> u8 {
+    pub(crate) fn weapon(&self) -> u8 {
         self.weapon
     }
 
@@ -25,7 +25,7 @@ impl Ready {
         self.at
     }
 
-    pub(crate) fn arm(&mut self, at: Moment) {
+    pub fn arm(&mut self, at: Moment) {
         self.at = at;
     }
 }

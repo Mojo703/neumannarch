@@ -10,7 +10,7 @@ use crate::state::sweep::Sweep;
 use crate::state::{Assigned, Entity, Motion, State, Threat};
 use crate::vec3::Vec3;
 
-pub struct Holding<'a> {
+pub(crate) struct Holding<'a> {
     state: &'a State,
     sweep: &'a Sweep,
 }
@@ -19,11 +19,11 @@ pub struct Holding<'a> {
 pub struct Thrusts(BTreeMap<EntityId, Vec3>);
 
 impl<'a> Holding<'a> {
-    pub fn of(state: &'a State, sweep: &'a Sweep) -> Holding<'a> {
+    pub(crate) fn of(state: &'a State, sweep: &'a Sweep) -> Holding<'a> {
         Holding { state, sweep }
     }
 
-    pub fn run(self) -> Thrusts {
+    pub(crate) fn run(self) -> Thrusts {
         let fields = Fields::of(self.state);
         Thrusts(
             self.state

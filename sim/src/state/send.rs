@@ -9,10 +9,10 @@ const SEARCH_BOUND: u64 = 600 * TICKS_PER_SECOND as u64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Send {
-    pub source: AsteroidId,
-    pub destination: AsteroidId,
-    pub schedule: Schedule,
-    pub members: Vec<EntityId>,
+    pub(crate) source: AsteroidId,
+    pub(crate) destination: AsteroidId,
+    pub(crate) schedule: Schedule,
+    pub(crate) members: Vec<EntityId>,
 }
 
 impl Send {

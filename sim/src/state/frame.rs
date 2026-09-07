@@ -34,28 +34,28 @@ impl Frame {
         self.post
     }
 
-    pub fn row(&self) -> RowId {
+    pub(crate) fn row(&self) -> RowId {
         self.row
     }
 
-    pub fn progress(&self) -> f64 {
+    pub(crate) fn progress(&self) -> f64 {
         self.progress.0
     }
 
-    pub fn fraction(&self, cost: f64) -> f64 {
+    pub(crate) fn fraction(&self, cost: f64) -> f64 {
         match cost > 0.0 {
             true => (self.progress.0 / cost).clamp(0.0, 1.0),
             false => 1.0,
         }
     }
 
-    pub(crate) fn build(&mut self, units: f64, at: Time) {
+    pub fn build(&mut self, units: f64, at: Time) {
         self.progress.0 += units;
         self.fed = at;
         self.short = None;
     }
 
-    pub(crate) fn short_of(&mut self, material: Option<Material>) {
+    pub fn short_of(&mut self, material: Option<Material>) {
         self.short = material;
     }
 }

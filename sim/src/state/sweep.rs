@@ -2,7 +2,7 @@ use crate::ids::EntityId;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Debug)]
-pub struct Sweep {
+pub(crate) struct Sweep {
     items: Vec<Item>,
 }
 
@@ -13,7 +13,7 @@ struct Item {
 }
 
 impl Sweep {
-    pub fn build(items: impl IntoIterator<Item = (EntityId, Vec3)>) -> Sweep {
+    pub(crate) fn build(items: impl IntoIterator<Item = (EntityId, Vec3)>) -> Sweep {
         let mut items: Vec<Item> = items
             .into_iter()
             .map(|(id, pos)| Item { id, pos })
@@ -22,18 +22,20 @@ impl Sweep {
         Sweep { items }
     }
 
-    pub fn within(&self, center: Vec3, range: f64) -> impl Iterator<Item = EntityId> + '_ {
+    pub(crate) fn within(&self, center: Vec3, range: f64) -> impl Iterator<Item = EntityId> + '_ {
         self.window(center, range)
             .iter()
             .filter(move |item| item.pos.distance(center) <= range)
             .map(|item| item.id)
     }
 
-    pub fn len(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.items.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 

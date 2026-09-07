@@ -2,7 +2,7 @@ const SERIES_BOUND: f64 = 1.0;
 
 const SERIES_TERMS: u32 = 10;
 
-pub fn c2(z: f64) -> f64 {
+pub(crate) fn c2(z: f64) -> f64 {
     if z.abs() < SERIES_BOUND {
         series(z, 2)
     } else if z > 0.0 {
@@ -12,7 +12,7 @@ pub fn c2(z: f64) -> f64 {
     }
 }
 
-pub fn c3(z: f64) -> f64 {
+pub(crate) fn c3(z: f64) -> f64 {
     if z.abs() < SERIES_BOUND {
         series(z, 3)
     } else if z > 0.0 {

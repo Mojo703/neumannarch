@@ -7,21 +7,21 @@ use crate::state::{Entity, Motion, State};
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Sample {
-    pub own: f64,
-    pub enemy: f64,
-    pub own_gradient: Vec3,
-    pub enemy_gradient: Vec3,
+pub(crate) struct Sample {
+    pub(crate) own: f64,
+    pub(crate) enemy: f64,
+    pub(crate) own_gradient: Vec3,
+    pub(crate) enemy_gradient: Vec3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Fraction(f64);
+pub(crate) struct Fraction(f64);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fields(BTreeMap<EntityId, Sample>);
 
 impl Fields {
-    pub fn of(state: &State) -> Fields {
+    pub(crate) fn of(state: &State) -> Fields {
         let mut rolls: BTreeMap<AsteroidId, Vec<&Entity>> = BTreeMap::new();
         for entity in state.entities() {
             if entity.motion() == Motion::Fixed {
@@ -115,18 +115,18 @@ fn kernel(distance: f64) -> (f64, f64) {
 }
 
 impl Sample {
-    pub fn hostile(&self) -> Option<Fraction> {
+    pub(crate) fn hostile(&self) -> Option<Fraction> {
         Fraction::of(self.enemy, self.own + self.enemy)
     }
 
-    pub fn own_lean(&self) -> Vec3 {
+    pub(crate) fn own_lean(&self) -> Vec3 {
         match self.own > 0.0 {
             true => (self.own_gradient * (Belt::FIELD_SCALE_METERS / self.own)).capped(1.0),
             false => Vec3::ZERO,
         }
     }
 
-    pub fn retreat(&self) -> Vec3 {
+    pub(crate) fn retreat(&self) -> Vec3 {
         self.hostile().map_or(Vec3::ZERO, |hostile| {
             (-self.enemy_gradient)
                 .normalized()
@@ -136,11 +136,11 @@ impl Sample {
 }
 
 impl Fraction {
-    pub fn of(part: f64, whole: f64) -> Option<Fraction> {
+    pub(crate) fn of(part: f64, whole: f64) -> Option<Fraction> {
         (whole > 0.0).then(|| Fraction((part / whole).clamp(0.0, 1.0)))
     }
 
-    pub fn get(self) -> f64 {
+    pub(crate) fn get(self) -> f64 {
         self.0
     }
 }

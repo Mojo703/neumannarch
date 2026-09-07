@@ -1,14 +1,14 @@
 use crate::roster::Row;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
-pub struct Power(f64);
+pub(crate) struct Power(f64);
 
 impl Power {
-    pub fn of(row: &Row, hp: f64) -> Power {
+    pub(crate) fn of(row: &Row, hp: f64) -> Power {
         Power(row.dps_through(0.0) * hp)
     }
 
-    pub fn get(self) -> f64 {
+    pub(crate) fn get(self) -> f64 {
         self.0
     }
 }

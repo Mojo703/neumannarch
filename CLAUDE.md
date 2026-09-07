@@ -18,11 +18,14 @@ the document; do not silently deviate.
   platform code, no floats but `f64`. Builds on both targets.
 - `game/` — the playable: the Mirage `Game`, rendering, input, UI, the
   relay client. The only crate that draws.
-- `harness/` — balance matrices, scripted agents and determinism checks
-  over `sim`. Native only. Lands with the first sim system.
+- `protocol/` — every value two machines exchange. No io.
+- `agents/` — the scripted opponents, and the `harness` binary: balance
+  matrices and determinism checks over `sim`. Native only.
+- `server/` — the match server: rooms, lobby authority, forwarding.
 
-Dependencies point one way: `game` and `harness` depend on `sim`; `sim`
-depends on nothing in this repo and never on the engine.
+Dependencies point one way: `protocol` depends on `sim`; `agents` on
+`sim` and `protocol`; `game` and `server` on all three; `sim` depends on
+nothing in this repo and never on the engine.
 
 ## Invariants (every change, no exceptions)
 

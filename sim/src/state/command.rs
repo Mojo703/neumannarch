@@ -105,7 +105,8 @@ impl Batch {
         self.0.iter().copied()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
@@ -115,7 +116,7 @@ impl Batch {
 }
 
 impl State {
-    pub(crate) fn apply(&mut self, issued: Issued) -> Result<(), Rejected> {
+    pub fn apply(&mut self, issued: Issued) -> Result<(), Rejected> {
         let Command::Want {
             asteroid,
             row,

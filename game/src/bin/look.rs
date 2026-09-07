@@ -639,7 +639,7 @@ fn draft_camera(scene: &Scene) -> BeltCamera {
             .pos
     };
     let (taken, bare) = (at(TAKEN), at(BARE));
-    let apart = (bare - taken).length();
+    let apart = bare.distance(taken);
     BeltCamera::new(
         bare + (taken - bare) * DRAFT_FOCUS_TOWARD_TAKEN,
         apart * DRAFT_ZOOM_PER_METER_APART,

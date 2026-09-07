@@ -12,13 +12,13 @@ const CORRECTIONS: u32 = 3;
 const BURN_SHARE_OF_SPAN: f64 = 0.08;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Flight {
+pub(crate) struct Flight {
     source: AsteroidId,
     schedule: Schedule,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Schedule {
+pub(crate) struct Schedule {
     burns: [Burn; 2],
     arrive: Time,
 }
@@ -35,7 +35,7 @@ impl Flight {
         Flight { source, schedule }
     }
 
-    pub fn source(self) -> AsteroidId {
+    pub(crate) fn source(self) -> AsteroidId {
         self.source
     }
 
@@ -43,27 +43,27 @@ impl Flight {
         self.schedule
     }
 
-    pub fn arrive(self) -> Time {
+    pub(crate) fn arrive(self) -> Time {
         self.schedule.arrive
     }
 
-    pub fn departs(self) -> Time {
+    pub(crate) fn departs(self) -> Time {
         self.schedule.departs()
     }
 
-    pub fn has_departed(self, now: Time) -> bool {
+    pub(crate) fn has_departed(self, now: Time) -> bool {
         self.departs() <= now
     }
 
-    pub fn thrust(self, tick: Time) -> Vec3 {
+    pub(crate) fn thrust(self, tick: Time) -> Vec3 {
         self.schedule.thrust(tick)
     }
 }
 
 impl Schedule {
-    pub const ARRIVAL_POSITION_METERS: f64 = 0.25;
+    pub(crate) const ARRIVAL_POSITION_METERS: f64 = 0.25;
 
-    pub const ARRIVAL_SPEED_METERS_PER_SECOND: f64 = 0.02;
+    pub(crate) const ARRIVAL_SPEED_METERS_PER_SECOND: f64 = 0.02;
 
     pub(crate) fn between(
         source: Body,
@@ -90,11 +90,12 @@ impl Schedule {
         None
     }
 
-    pub fn arrive(self) -> Time {
+    #[cfg(test)]
+    pub(crate) fn arrive(self) -> Time {
         self.arrive
     }
 
-    pub fn departs(self) -> Time {
+    pub(crate) fn departs(self) -> Time {
         self.burns[0].from
     }
 

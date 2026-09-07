@@ -16,7 +16,7 @@ struct Extractor {
 }
 
 impl Income {
-    pub fn extracted(state: &State) -> Income {
+    pub(crate) fn extracted(state: &State) -> Income {
         let dt = Tick(1).seconds();
         let mut taken = Income::default();
         for (id, asteroid) in state.asteroids() {
@@ -27,7 +27,7 @@ impl Income {
         taken
     }
 
-    pub fn apply(&self, state: &mut State) {
+    pub(crate) fn apply(&self, state: &mut State) {
         for ((asteroid, seat), taken) in &self.0 {
             state[*seat].earn(*taken);
             state[*asteroid].extract(*taken);

@@ -6,7 +6,7 @@ use crate::ids::RowId;
 pub struct Wants(BTreeMap<RowId, u32>);
 
 impl Wants {
-    pub fn set(&mut self, row: RowId, count: u32) {
+    pub(crate) fn set(&mut self, row: RowId, count: u32) {
         if count == 0 {
             self.0.remove(&row);
         } else {
@@ -14,15 +14,15 @@ impl Wants {
         }
     }
 
-    pub fn get(&self, row: RowId) -> u32 {
+    pub(crate) fn get(&self, row: RowId) -> u32 {
         self.0.get(&row).copied().unwrap_or(0)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (RowId, u32)> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (RowId, u32)> + '_ {
         self.0.iter().map(|(row, count)| (*row, *count))
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }

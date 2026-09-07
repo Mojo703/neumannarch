@@ -38,11 +38,11 @@ impl Belt {
 
     pub const ZONE_RADIUS_METERS: f64 = 30.0;
 
-    pub const FIELD_SCALE_METERS: f64 = 15.0;
+    pub(crate) const FIELD_SCALE_METERS: f64 = 15.0;
 
-    pub const ARRIVAL_METERS: f64 = 7.5;
+    pub(crate) const ARRIVAL_METERS: f64 = 7.5;
 
-    pub const SPACING_METERS: f64 = 0.5;
+    pub(crate) const SPACING_METERS: f64 = 0.5;
 
     pub fn fixed(gravity: Gravity) -> Vec<Asteroid> {
         (0..3 * REGION).map(|at| asteroid(at, gravity)).collect()
