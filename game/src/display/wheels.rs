@@ -376,6 +376,8 @@ fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<As
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::belt::Belt;
+
     use std::sync::LazyLock;
 
     use neumannarch_sim::roster::FRIGATE;
@@ -478,7 +480,7 @@ mod tests {
         use neumannarch_sim::{Materials, Vec3};
 
         let viewport = Viewport::of(
-            &BeltCamera::new(Vec3::ZERO, 2_000.0),
+            &BeltCamera::new(Vec3::ZERO, 2_000.0, 14_000.0, 25_000.0),
             mirage_engine::math::UVec2::new(1280, 720),
             1.0,
         );
@@ -495,6 +497,10 @@ mod tests {
             flights: Vec::new(),
             stockpile_bar: None,
             zone: 1.0,
+            star_radius: Belt::STAR_RADIUS_METERS,
+            star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+            belt_inner_radius: Belt::inner_radius_meters(),
+            belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             seat: SeatId(0),
             selection: Some(A),
             gesture: None,

@@ -24,8 +24,9 @@ use neumannarch_game::screens::order::Order;
 use neumannarch_game::screens::panel::Panel;
 use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
 use neumannarch_sim::Session as Match;
+use neumannarch_sim::belt::Belt;
 use neumannarch_sim::roster::{
-    ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD, STORAGE,
+    ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD,
 };
 use neumannarch_sim::state::view::{Building, View};
 use neumannarch_sim::state::{Command, STAGE_SPAN, State};
@@ -45,7 +46,7 @@ const YOU: SeatId = SeatId(0);
 
 const TAKEN: AsteroidId = AsteroidId(0);
 
-const BARE: AsteroidId = AsteroidId(1);
+const HOME: Vec3 = Vec3::new(20_000.0, 0.0, 0.0);
 
 const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
 
@@ -60,17 +61,27 @@ fn main() {
     fs::create_dir_all(&out).expect("game/look is writable");
 
     let watched = Watched::wanting();
+    let belt = belt_scene();
+    let framing_the_belt = BeltCamera::framing(belt.belt_inner_radius, belt.belt_outer_radius);
     for (name, scene, camera) in [
-        ("region", region_scene(&watched), region_camera()),
-        ("fight", fight_scene(), fight_camera()),
-        ("stockpile", stockpile_scene(), stockpile_camera()),
-        ("belt", belt_scene(), belt_camera()),
+        (
+            "region",
+            on_the_ring(region_scene(&watched)),
+            region_camera(),
+        ),
+        ("fight", on_the_ring(fight_scene()), fight_camera()),
+        (
+            "stockpile",
+            on_the_ring(stockpile_scene()),
+            stockpile_camera(),
+        ),
+        ("belt", belt, framing_the_belt),
     ] {
         let pixels = render(scene, camera, None, watched.clone());
         save(&out.join(format!("{name}.png")), &pixels);
     }
     let (scene, drafting, watched) = draft_scene();
-    let camera = draft_camera(&scene);
+    let camera = draft_camera(&scene, drafting.bare);
     let pixels = render(scene, camera, Some(drafting), watched);
     save(&out.join("draft.png"), &pixels);
 }
@@ -120,6 +131,7 @@ impl Watched {
 struct Drafting {
     names: Vec<String>,
     button: Posting,
+    bare: AsteroidId,
 }
 
 struct Looker {
@@ -414,6 +426,10 @@ fn region_scene(watched: &Watched) -> Scene {
         }],
         stockpile_bar: None,
         zone: ZONE,
+        star_radius: Belt::STAR_RADIUS_METERS,
+        star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+        belt_inner_radius: Belt::inner_radius_meters(),
+        belt_outer_radius: Belt::OUTER_RADIUS_METERS,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
         gesture: Some(watched.previewing(ButtonAt {
@@ -424,7 +440,12 @@ fn region_scene(watched: &Watched) -> Scene {
 }
 
 fn region_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::new(10.0, 0.0, 30.0), 620.0)
+    BeltCamera::new(
+        HOME + Vec3::new(10.0, 0.0, 30.0),
+        620.0,
+        Belt::inner_radius_meters(),
+        Belt::OUTER_RADIUS_METERS,
+    )
 }
 
 fn fight_scene() -> Scene {
@@ -477,6 +498,10 @@ fn fight_scene() -> Scene {
         flights: Vec::new(),
         stockpile_bar: None,
         zone: ZONE,
+        star_radius: Belt::STAR_RADIUS_METERS,
+        star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+        belt_inner_radius: Belt::inner_radius_meters(),
+        belt_outer_radius: Belt::OUTER_RADIUS_METERS,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
         gesture: None,
@@ -484,7 +509,12 @@ fn fight_scene() -> Scene {
 }
 
 fn fight_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::ZERO, 60.0)
+    BeltCamera::new(
+        HOME,
+        60.0,
+        Belt::inner_radius_meters(),
+        Belt::OUTER_RADIUS_METERS,
+    )
 }
 
 fn stockpile_scene() -> Scene {
@@ -548,6 +578,10 @@ fn stockpile_scene() -> Scene {
             marked: None,
         }),
         zone: ZONE,
+        star_radius: Belt::STAR_RADIUS_METERS,
+        star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+        belt_inner_radius: Belt::inner_radius_meters(),
+        belt_outer_radius: Belt::OUTER_RADIUS_METERS,
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
         gesture: None,
@@ -555,70 +589,29 @@ fn stockpile_scene() -> Scene {
 }
 
 fn stockpile_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::new(120.0, 0.0, -40.0), 500.0)
+    BeltCamera::new(
+        HOME + Vec3::new(120.0, 0.0, -40.0),
+        500.0,
+        Belt::inner_radius_meters(),
+        Belt::OUTER_RADIUS_METERS,
+    )
+}
+
+fn on_the_ring(mut scene: Scene) -> Scene {
+    for asteroid in &mut scene.asteroids {
+        asteroid.pos += HOME;
+    }
+    for entity in &mut scene.entities {
+        entity.pos += HOME;
+    }
+    for flight in &mut scene.flights {
+        flight.from += HOME;
+    }
+    scene
 }
 
 fn belt_scene() -> Scene {
-    let positions = [
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(1_400.0, 0.0, 400.0),
-        Vec3::new(-1_200.0, 0.0, 800.0),
-        Vec3::new(600.0, 0.0, -1_500.0),
-        Vec3::new(-900.0, 0.0, -1_000.0),
-    ];
-    let asteroids: Vec<AsteroidView> = positions
-        .iter()
-        .enumerate()
-        .map(|(index, &pos)| asteroid(index as u32, pos, 6.0))
-        .collect();
-
-    let seats = [0, 1, 0, 1, 0];
-    let flight_from = Vec3::new(700.0, 0.0, 200.0);
-    let mut entities: Vec<EntityView> = positions
-        .iter()
-        .zip(seats)
-        .map(|(&pos, seat)| ship(seat, FRIGATE, pos + Vec3::new(4.0, 0.0, 0.0)))
-        .collect();
-    entities.push(flier(1, RAIDER, flight_from));
-
-    let wheels = positions
-        .iter()
-        .zip(seats)
-        .enumerate()
-        .map(|(index, (_, seat))| {
-            wheel(
-                index as u32,
-                vec![sector(
-                    seat,
-                    vec![
-                        row(STORAGE, vec![Entry::Present(1)]),
-                        row(FRIGATE, vec![Entry::Present(1)]),
-                    ],
-                    None,
-                )],
-            )
-        })
-        .collect();
-
-    Scene {
-        asteroids,
-        entities,
-        wheels,
-        flights: vec![FlightLine {
-            from: flight_from,
-            to: AsteroidId(1),
-            previewed: false,
-        }],
-        stockpile_bar: None,
-        zone: ZONE,
-        seat: SeatId(0),
-        selection: None,
-        gesture: None,
-    }
-}
-
-fn belt_camera() -> BeltCamera {
-    BeltCamera::new(Vec3::new(0.0, 0.0, -200.0), 4_200.0)
+    Scene::of_belt(&Belt::from_seed(0), Belt::GRAVITY, Time::ZERO)
 }
 
 fn skirmish_where_you_go_first() -> (Match, Vec<String>) {
@@ -661,21 +654,43 @@ fn draft_scene() -> (Scene, Drafting, Watched) {
         .iter()
         .find(|stage| stage.seat == YOU && stage.placed.is_none())
         .expect("your second stage waits");
-    let button = Posting::of(BARE, YOU, waiting.row);
+    let bare = nearest_free(&watched.state);
+    let button = Posting::of(bare, YOU, waiting.row);
     let scene = Scene::from_view(
         view,
         session.state().roster(),
         Client {
-            selection: Some(BARE),
-            pointed: Some(BARE),
+            selection: Some(bare),
+            pointed: Some(bare),
             gesture: None,
             fights: &Fights::default(),
         },
     );
-    (scene, Drafting { names, button }, watched)
+    (
+        scene,
+        Drafting {
+            names,
+            button,
+            bare,
+        },
+        watched,
+    )
 }
 
-fn draft_camera(scene: &Scene) -> BeltCamera {
+fn nearest_free(state: &State) -> AsteroidId {
+    let taken = state.asteroid_body(TAKEN).pos;
+    state
+        .asteroids()
+        .filter(|(id, _)| *id != TAKEN && state.draft().took(*id).is_none())
+        .min_by(|(one, _), (other, _)| {
+            let apart = |id: AsteroidId| state.asteroid_body(id).pos.distance(taken);
+            apart(*one).total_cmp(&apart(*other))
+        })
+        .map(|(id, _)| id)
+        .expect("a free asteroid beside the one taken")
+}
+
+fn draft_camera(scene: &Scene, bare: AsteroidId) -> BeltCamera {
     let at = |id: AsteroidId| {
         scene
             .asteroids
@@ -684,10 +699,12 @@ fn draft_camera(scene: &Scene) -> BeltCamera {
             .expect("the asteroid is on the belt")
             .pos
     };
-    let (taken, bare) = (at(TAKEN), at(BARE));
+    let (taken, bare) = (at(TAKEN), at(bare));
     let apart = bare.distance(taken);
     BeltCamera::new(
         bare + (taken - bare) * DRAFT_FOCUS_TOWARD_TAKEN,
         apart * DRAFT_ZOOM_PER_METER_APART,
+        scene.belt_inner_radius,
+        scene.belt_outer_radius,
     )
 }

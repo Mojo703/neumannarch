@@ -30,8 +30,6 @@ use crate::screens::panning::Panning;
 use crate::screens::pause::{self, Pause};
 use crate::screens::{Playable, results};
 
-const OPENING_ZOOM: f64 = 6_000.0;
-
 const REPEAT_DELAY: f32 = 1.0 / 3.0;
 
 const REPEAT_INTERVAL: f32 = 0.1;
@@ -93,20 +91,17 @@ pub struct Play {
 impl Play {
     pub fn of(lobby: Lobby, machine: Machine) -> Play {
         let view = machine.view();
-        let camera = BeltCamera::new(
-            Scene::from_view(
-                &view,
-                machine.session().state().roster(),
-                Client {
-                    selection: None,
-                    pointed: None,
-                    gesture: None,
-                    fights: &Fights::default(),
-                },
-            )
-            .centre(),
-            OPENING_ZOOM,
+        let opening = Scene::from_view(
+            &view,
+            machine.session().state().roster(),
+            Client {
+                selection: None,
+                pointed: None,
+                gesture: None,
+                fights: &Fights::default(),
+            },
         );
+        let camera = BeltCamera::framing(opening.belt_inner_radius, opening.belt_outer_radius);
         Play {
             lobby,
             names: seat_names(

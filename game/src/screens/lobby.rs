@@ -23,8 +23,6 @@ use crate::screens::field::{Allow, Field, MAX_SEED, Typed};
 use crate::screens::panel::{self, Panel};
 use crate::screens::panning::Panning;
 
-pub const PREVIEW_ZOOM: f64 = 12_000.0;
-
 pub(crate) const NO_SEAT: &str = "No seat";
 
 pub(crate) const ALREADY_READY: &str = "Already ready";
@@ -118,7 +116,7 @@ impl LobbyScreen {
     pub fn of(lobby: Lobby, me: PlayerId) -> LobbyScreen {
         let laid = lobby.seed();
         let scene = belt_from(laid);
-        let camera = BeltCamera::new(scene.centre(), PREVIEW_ZOOM);
+        let camera = BeltCamera::framing(scene.belt_inner_radius, scene.belt_outer_radius);
         LobbyScreen {
             lobby,
             me,
@@ -581,8 +579,8 @@ pub(crate) fn refusal_phrase(why: Refused) -> String {
     }
 }
 
-fn belt_from(_seed: u64) -> Scene {
-    Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO)
+fn belt_from(seed: u64) -> Scene {
+    Scene::of_belt(&Belt::from_seed(seed), Belt::GRAVITY, Time::ZERO)
 }
 
 #[cfg(test)]

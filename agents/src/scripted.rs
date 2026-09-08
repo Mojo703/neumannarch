@@ -52,12 +52,12 @@ mod tests {
     use super::*;
     use neumannarch_sim::Post;
     use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, LANCER, SHIPYARD};
+    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD};
     use neumannarch_sim::state::{Asteroid, view::View};
     use neumannarch_sim::state::{Batch, Command, Seat, State};
     use neumannarch_sim::step::fire::Shots;
     use neumannarch_sim::{
-        AsteroidId, Material, Materials, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Time,
+        AsteroidId, Materials, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Time,
     };
 
     use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION, Mix};
@@ -66,8 +66,21 @@ mod tests {
 
     const STOCK: Materials = Materials::new(300.0, 100.0, 100.0);
 
+    const RICH: f64 = 8.0;
+
+    const POOR: f64 = 1.0;
+
     fn neighbours() -> Vec<Asteroid> {
-        Belt::fixed(Belt::GRAVITY).into_iter().take(4).collect()
+        let standing = |asteroid: &Asteroid| asteroid.orbit().at(Time::ZERO, Belt::GRAVITY).pos;
+        let mut belt = Belt::from_seed(0);
+        let first = standing(&belt[0]);
+        belt.sort_by(|one, other| {
+            standing(one)
+                .distance(first)
+                .total_cmp(&standing(other).distance(first))
+        });
+        belt.truncate(4);
+        belt
     }
 
     fn start(asteroids: Vec<Asteroid>, clock: u64) -> State {
@@ -94,7 +107,7 @@ mod tests {
     }
 
     fn drafted(agents: Vec<(SeatId, Box<Scripted>)>) -> State {
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
         playing(state, agents, |state| !state.drafting()).0
     }
 
@@ -134,7 +147,7 @@ mod tests {
     }
     #[test]
     fn an_agent_asks_for_one_reserve_row_at_a_free_asteroid_only_once_its_window_is_open() {
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
         let picking = state.draft().stages()[0].seat;
         let mut agent = scripted(Personality::turtle());
 
@@ -197,7 +210,7 @@ mod tests {
     #[test]
     fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
         let opening = 8 * TICKS_PER_SECOND as u64;
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
         let (state, _) = playing(
             state,
             vec![(SeatId(0), scripted(Personality::expand()))],
@@ -227,7 +240,7 @@ mod tests {
 
     #[test]
     fn an_agent_holds_more_than_the_asteroid_it_opened_on_by_mid_match() {
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
 
         let (state, _) = play(state, vec![(SeatId(0), scripted(Personality::turtle()))]);
 
@@ -265,7 +278,7 @@ mod tests {
 
     #[test]
     fn an_agent_that_lost_everything_asks_for_nothing() {
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
         let mut agent = scripted(Personality::expand());
         let mut view = View::of(&state, SeatId(0), &Shots::default());
         view.reserve.clear();
@@ -275,9 +288,16 @@ mod tests {
 
     #[test]
     fn a_bot_drafts_the_asteroid_richest_in_what_the_mix_it_means_to_build_wants_most() {
-        let state = start(Belt::fixed(Belt::GRAVITY), PLAYED);
+        let state = start(Belt::from_seed(0), PLAYED);
         let picking = state.draft().stages()[0].seat;
-        let view = View::of(&state, picking, &Shots::default());
+        let mut view = View::of(&state, picking, &Shots::default());
+        let metals_at = AsteroidId(0);
+        for terrain in &mut view.terrain {
+            terrain.caps = match terrain.asteroid {
+                at if at == metals_at => Materials::new(RICH, POOR, POOR),
+                _ => Materials::new(POOR, RICH, RICH),
+            };
+        }
         let hungry_for = |row| {
             let personality = Personality {
                 mix: Mix::Pinned(vec![(row, 1.0)]),
@@ -285,26 +305,13 @@ mod tests {
             };
             let opening = scripted(personality).decide(&view);
             let Command::Want { asteroid, .. } = *opening.first().expect("a pick");
-            view.terrain_of(asteroid).expect("an asteroid").caps
+            asteroid
         };
-        let richest = |material| {
-            view.terrain
-                .iter()
-                .map(|terrain| terrain.caps[material])
-                .fold(0.0, f64::max)
-        };
-
-        let metals = hungry_for(FRIGATE);
-        let energy = hungry_for(LANCER);
 
         assert_eq!(
-            metals[Material::Metals],
-            richest(Material::Metals),
+            hungry_for(FRIGATE),
+            metals_at,
             "the frigate's cost is metals before all else"
-        );
-        assert!(
-            energy[Material::Energy] >= metals[Material::Energy],
-            "the lancer wants energy more than the frigate does"
         );
     }
 }

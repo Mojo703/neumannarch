@@ -70,8 +70,12 @@ mod tests {
 
     const FAR: Vec3 = Vec3::new(1e7, 0.0, 0.0);
 
+    const INNER: f64 = 14_000.0;
+
+    const OUTER: f64 = 25_000.0;
+
     fn over_the_belt() -> BeltCamera {
-        BeltCamera::new(Vec3::new(3000.0, 0.0, -2000.0), 400.0)
+        BeltCamera::new(Vec3::new(3000.0, 0.0, -2000.0), 400.0, INNER, OUTER)
     }
 
     fn viewport(camera: &BeltCamera) -> Viewport {
@@ -84,7 +88,7 @@ mod tests {
 
     #[test]
     fn local_at_the_focus_is_zero() {
-        let camera = BeltCamera::new(FAR, 400.0);
+        let camera = BeltCamera::new(FAR, 400.0, INNER, OUTER);
         let viewport = viewport(&camera);
 
         assert_eq!(viewport.local(camera.focus()), math::Vec3::ZERO);
@@ -94,8 +98,8 @@ mod tests {
     fn a_tenth_of_a_metre_shift_moves_the_projection_by_less_than_a_tenth_of_a_pixel() {
         let apart = Vec3::new(2000.0, 0.0, 0.0);
         let step = Vec3::new(0.1, 0.0, 0.0);
-        let camera = BeltCamera::new(FAR, 8000.0);
-        let shifted = BeltCamera::new(FAR + step, 8000.0);
+        let camera = BeltCamera::new(FAR, 8000.0, INNER, OUTER);
+        let shifted = BeltCamera::new(FAR + step, 8000.0, INNER, OUTER);
 
         let before = viewport(&camera).pixel_of(FAR + apart).expect("on screen");
         let after = viewport(&shifted)
@@ -111,8 +115,8 @@ mod tests {
     #[test]
     fn absolute_position_does_not_move_the_projection() {
         let apart = Vec3::new(2000.0, 0.0, 0.0);
-        let far = BeltCamera::new(FAR, 8000.0);
-        let near = BeltCamera::new(Vec3::ZERO, 8000.0);
+        let far = BeltCamera::new(FAR, 8000.0, INNER, OUTER);
+        let near = BeltCamera::new(Vec3::ZERO, 8000.0, INNER, OUTER);
 
         let from_far = viewport(&far).pixel_of(FAR + apart).expect("on screen");
         let from_near = viewport(&near).pixel_of(apart).expect("on screen");
@@ -148,8 +152,8 @@ mod tests {
 
     #[test]
     fn a_point_behind_the_eye_lands_nowhere() {
-        let camera = BeltCamera::new(Vec3::ZERO, 100.0);
-        let behind = Vec3::new(0.0, 0.0, 10.0 * camera.distance());
+        let camera = BeltCamera::new(Vec3::ZERO, 100.0, INNER, OUTER);
+        let behind = camera.outward() * (10.0 * camera.distance());
 
         assert_eq!(viewport(&camera).pixel_of(behind), None);
         assert_eq!(viewport(&camera).point_of(behind), None);
@@ -164,7 +168,7 @@ mod tests {
         let Some(near) = viewport.pixels_per_meter(camera.focus()) else {
             panic!("the focus is in front of the eye");
         };
-        let farther = camera.focus() + Vec3::new(0.0, 0.0, -camera.distance());
+        let farther = camera.focus() - camera.outward() * camera.distance();
 
         let Some(far) = viewport.pixels_per_meter(farther) else {
             panic!("farther along the plane is still in front of the eye");

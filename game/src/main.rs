@@ -383,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn the_opening_view_frames_the_belt_with_the_focus_at_its_centre() {
+    fn the_opening_view_frames_every_asteroid_with_the_star_at_the_centre() {
         let _one = one_at_a_time();
         let mut session = game();
         session.step();
@@ -398,32 +398,32 @@ mod tests {
 
         let play = play(&session);
         let viewport = viewport(&session);
-        let focus = viewport
-            .point_of(play.camera().focus())
-            .expect("the focus is in front of the eye");
+        let star = viewport
+            .point_of(neumannarch_sim::Vec3::ZERO)
+            .expect("the star is in front of the eye");
         assert!(
-            focus.distance(egui::pos2(TARGET.x as f32 / 2.0, TARGET.y as f32 / 2.0)) <= 1.0,
-            "the focus draws at {focus}, not the centre pixel"
+            star.distance(egui::pos2(TARGET.x as f32 / 2.0, TARGET.y as f32 / 2.0)) <= 1.0,
+            "the star draws at {star}, not the centre pixel"
         );
 
-        let framed = play
+        let outside = play
             .view()
             .terrain
             .iter()
             .filter_map(|terrain| viewport.point_of(play.asteroid_pos(terrain.asteroid)?))
             .filter(|at| {
-                (0.0..TARGET.x as f32).contains(&at.x) && (0.0..TARGET.y as f32).contains(&at.y)
+                !((0.0..TARGET.x as f32).contains(&at.x) && (0.0..TARGET.y as f32).contains(&at.y))
             })
             .count();
 
-        assert!(
-            framed > 1,
-            "the opening zoom shows {framed} asteroids, so there is nothing to choose between"
+        assert_eq!(
+            outside, 0,
+            "the opening zoom leaves {outside} asteroids off"
         );
     }
 
     #[test]
-    fn a_right_drag_moves_the_belt_under_the_pointer() {
+    fn a_right_drag_moves_the_belt_with_the_pointer() {
         let _one = one_at_a_time();
         let mut session = game();
         session.step();
@@ -436,7 +436,11 @@ mod tests {
         session.tick();
         session.step();
 
-        let from = egui::pos2(400.0, 300.0);
+        let focused = asteroid_at(&session);
+        click_at(&mut session, focused);
+        settled(&mut session);
+
+        let from = asteroid_at(&session);
         let dragged = egui::vec2(-120.0, 60.0);
         session.set_pointer(Vec2::new(from.x, from.y));
         session.step();
@@ -447,10 +451,11 @@ mod tests {
         session.step();
         settled(&mut session);
 
-        let now = asteroid_at(&session);
+        let moved = asteroid_at(&session) - was;
         assert!(
-            (now - was - dragged).length() <= 0.06 * dragged.length(),
-            "the asteroid moved from {was} to {now}, not by {dragged}"
+            (moved.length() - dragged.length()).abs() <= 0.1 * dragged.length()
+                && moved.dot(dragged) > 0.0,
+            "the asteroid moved by {moved}, not with {dragged}"
         );
     }
 

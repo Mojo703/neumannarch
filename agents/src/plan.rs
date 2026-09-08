@@ -649,7 +649,7 @@ mod tests {
             0,
             Belt::GRAVITY,
             Roster::shipped(),
-            Belt::fixed(Belt::GRAVITY),
+            Belt::from_seed(0),
             vec![seat(0), seat(0), seat(1)],
         )
     }

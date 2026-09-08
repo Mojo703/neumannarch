@@ -79,6 +79,10 @@ pub struct View {
     pub exchanges: Vec<Exchange>,
     pub terrain: Vec<Terrain>,
     pub zone: f64,
+    pub star_radius: f64,
+    pub star_light_range: f64,
+    pub belt_inner_radius: f64,
+    pub belt_outer_radius: f64,
     pub still_in: bool,
     pub standings: Standings,
 }
@@ -104,6 +108,10 @@ impl View {
             exchanges: shots.exchanges(state),
             terrain: terrain(state),
             zone: Belt::ZONE_RADIUS_METERS,
+            star_radius: Belt::STAR_RADIUS_METERS,
+            star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+            belt_inner_radius: Belt::inner_radius_meters(),
+            belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             still_in: seated.is_some_and(Seat::alive),
             standings: state.standings(),
         }
@@ -275,6 +283,19 @@ mod tests {
 
     fn close(got: Materials, wanted: Materials) -> bool {
         (got - wanted).map(f64::abs).total() < 1e-9
+    }
+
+    fn extracted(world: &World, extractors: u32) -> Materials {
+        let caps = world.state[ASTEROID].caps();
+        let mut pulled = Materials::ZERO;
+        for (row, material) in [
+            (METALS_EXTRACTOR, Material::Metals),
+            (VOLATILES_EXTRACTOR, Material::Volatiles),
+        ] {
+            let rate = f64::from(extractors) * world.state[row].extracts_of(material);
+            pulled[material] = rate.min(caps[material]);
+        }
+        pulled
     }
 
     fn pulled(world: &World, seat: u8) -> Materials {
@@ -515,7 +536,7 @@ mod tests {
             view.compositions.keys().all(|post| post.seat == SeatId(0)),
             "only the seats that hold anything carry a composition"
         );
-        assert_eq!(view.terrain.len(), 21);
+        assert_eq!(view.terrain.len(), world.state.asteroids().count());
     }
 
     #[test]
@@ -544,8 +565,8 @@ mod tests {
             Some(at)
         );
         assert_eq!(view.asteroid_body(at), Some(world.state.asteroid_body(at)));
-        assert_eq!(view.terrain_of(AsteroidId(99)), None);
-        assert_eq!(view.asteroid_body(AsteroidId(99)), None);
+        assert_eq!(view.terrain_of(AsteroidId(u32::MAX)), None);
+        assert_eq!(view.asteroid_body(AsteroidId(u32::MAX)), None);
     }
 
     #[test]
@@ -560,7 +581,7 @@ mod tests {
 
         assert_eq!(brimming.stockpile.stock(), full, "nothing was kept");
         assert!(
-            close(brimming.income, Materials::new(2.0, 1.0, 0.0)),
+            close(brimming.income, extracted(&world, 1)),
             "each extractor pulls its own material, gross"
         );
         assert_eq!(world.view(1).income, Materials::ZERO, "its own extractors");
@@ -607,7 +628,7 @@ mod tests {
 
         let pull = pulled(&world, 1);
 
-        assert!(close(pull, Materials::new(4.0, 1.0, 0.0)), "{pull:?}");
+        assert!(close(pull, extracted(&world, 2)), "{pull:?}");
         assert_eq!(
             pull.min(world.state[ASTEROID].caps()),
             pull,

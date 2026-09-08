@@ -85,7 +85,19 @@ probe; the win is holding the system when the clock runs out.
 
 ## World
 
-- True 3D. A thin, near-planar belt of asteroids around one central mass.
+- True 3D. A thin, near-planar belt of asteroids around one central mass,
+  the star.
+- The seed lays the belt. Candidates are drawn across a ring about the
+  star, each on its own orbit, and a smooth field of density over the
+  ring keeps or drops each one, so the belt has crowded regions and
+  sparse ones and two seeds never lay the same belt. A smooth field per
+  material gives every asteroid its cap, so neighbours run rich or poor
+  together, in the same materials, and a region is worth holding for what
+  it yields. A third smooth field gives every orbit its eccentricity, and
+  the seed gives each its own periapsis direction, so a region is stirred
+  or calm and neighbours drift together or apart at the same rate. Every
+  orbit rises and falls by the belt's thickness, which is small against
+  the ring.
 - One law of motion for every body, asteroid or ship: the central mass's
   gravity, time-compressed, and nothing else. Between thrust impulses a
   body's motion is exact two-body motion, so an unpowered body keeps its
@@ -219,8 +231,9 @@ sets one count.
   it, the same radius for every asteroid, one constant of the belt. A unit at
   an asteroid holds inside the zone, a builder reaches
   everything inside it, a unit chases any enemy inside it, and the
-  display draws it. Zones are small against the spacing of asteroids, so no
-  two overlap.
+  display draws it. Zones are small against the spacing of asteroids, so
+  two rarely meet, and where two do the rules read no distance: a unit is
+  at its home and nowhere else.
 - **Sends.** Units re-homed in one tick from one place to another make
   one send; units re-homed within a stated window of ticks join the send
   that is forming. A send is one schedule of thrust, solved when the

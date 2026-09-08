@@ -61,3 +61,80 @@ impl Send {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TICKS_PER_SECOND;
+    use crate::fixture::World;
+
+    const NEIGHBOUR_METERS: core::ops::Range<f64> = 1_800.0..2_200.0;
+
+    fn hops(state: &State) -> Vec<f64> {
+        let asteroids = state.asteroids().count();
+        let body = |at: usize| state.asteroid_body(AsteroidId(at as u32));
+        let mut hops = Vec::new();
+        for source in 0..asteroids {
+            for destination in 0..asteroids {
+                if source == destination
+                    || !NEIGHBOUR_METERS.contains(&body(source).pos.distance(body(destination).pos))
+                {
+                    continue;
+                }
+                hops.push(flown(state, source, destination).expect("a neighbour is reachable"));
+            }
+        }
+        hops.sort_by(f64::total_cmp);
+        hops
+    }
+
+    fn flown(state: &State, source: usize, destination: usize) -> Option<f64> {
+        Send::solved(
+            state,
+            AsteroidId(source as u32),
+            AsteroidId(destination as u32),
+        )
+        .map(|schedule| (schedule.arrive().0 - state.time().0) as f64 / f64::from(TICKS_PER_SECOND))
+    }
+
+    fn farthest(state: &State) -> (usize, usize) {
+        let asteroids = state.asteroids().count();
+        let apart = |source: usize, destination: usize| {
+            state
+                .asteroid_body(AsteroidId(source as u32))
+                .pos
+                .distance(state.asteroid_body(AsteroidId(destination as u32)).pos)
+        };
+        (0..asteroids)
+            .flat_map(|source| {
+                (source + 1..asteroids).map(move |destination| (source, destination))
+            })
+            .max_by(|one, other| apart(one.0, one.1).total_cmp(&apart(other.0, other.1)))
+            .expect("the belt holds two asteroids")
+    }
+
+    #[test]
+    fn a_hop_between_asteroids_two_kilometers_apart_arrives_in_about_twenty_seconds() {
+        let world = World::seated(Vec::new());
+        let hops = hops(&world.state);
+        let middling = hops
+            .get(hops.len() / 2)
+            .copied()
+            .expect("the belt holds two kilometer hops");
+        assert!(
+            (15.0..=25.0).contains(&middling),
+            "half the two kilometer hops take longer than {middling} seconds"
+        );
+    }
+
+    #[test]
+    fn the_widest_transfer_across_the_belt_arrives_inside_the_search_bound() {
+        let world = World::seated(Vec::new());
+        let (source, destination) = farthest(&world.state);
+        let seconds = flown(&world.state, source, destination).expect("the widest transfer flies");
+        assert!(
+            seconds * f64::from(TICKS_PER_SECOND) < SEARCH_BOUND as f64,
+            "the widest transfer takes {seconds} seconds"
+        );
+    }
+}

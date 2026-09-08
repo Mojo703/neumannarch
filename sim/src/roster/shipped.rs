@@ -15,7 +15,7 @@ pub const LANCER: RowId = RowId(8);
 
 const STORE: Materials = Materials::new(500.0, 500.0, 500.0);
 
-pub(super) const MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED: f64 = 4.0;
+pub(super) const MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED: f64 = 80.0;
 
 const HELD: Weights = Weights {
     wander: Real(0.3),

@@ -9,7 +9,7 @@ use crate::vec3::Vec3;
 
 const CORRECTIONS: u32 = 3;
 
-const BURN_SHARE_OF_SPAN: f64 = 0.08;
+const BURN_SHARE_OF_SPAN: f64 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Flight {

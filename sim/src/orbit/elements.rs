@@ -42,6 +42,28 @@ impl Orbit {
         })
     }
 
+    pub(crate) fn tilted_ellipse(
+        semi_major_axis_meters: f64,
+        eccentricity: f64,
+        periapsis_radians: f64,
+        node_radians: f64,
+        excursion_meters: f64,
+        longitude_radians: f64,
+        epoch: Time,
+    ) -> Option<Orbit> {
+        let rise = excursion_meters / semi_major_axis_meters;
+        let half_tilt = rise / (1.0 + (1.0 - rise * rise).sqrt());
+        Orbit::new(
+            semi_major_axis_meters,
+            eccentricity * libm::sin(periapsis_radians),
+            eccentricity * libm::cos(periapsis_radians),
+            half_tilt * libm::sin(node_radians),
+            half_tilt * libm::cos(node_radians),
+            longitude_radians,
+            epoch,
+        )
+    }
+
     pub fn from_body(body: Body, tick: Time, gravity: Gravity) -> Option<Orbit> {
         if body.specific_energy(gravity) >= 0.0 {
             return None;
@@ -192,6 +214,12 @@ mod tests {
         )
     }
 
+    fn sampled(orbit: &Orbit) -> impl Iterator<Item = Body> + '_ {
+        let ticks = orbit.period(MU) * f64::from(crate::TICKS_PER_SECOND);
+        (0..64)
+            .map(move |part| orbit.at(Time(EPOCH.0 + (ticks * f64::from(part) / 64.0) as u64), MU))
+    }
+
     fn assert_same_body(found: Body, expected: Body, what: &str) {
         assert!(
             found.pos.distance(expected.pos) < 1e-8 * expected.radius(),
@@ -302,5 +330,46 @@ mod tests {
     fn the_mean_longitude_is_stated_within_one_turn() {
         let orbit = Orbit::new(RADIUS, 0.0, 0.0, 0.0, 0.0, -TAU * 3.25, EPOCH).expect("elliptic");
         assert!((orbit.lambda0.0 - 0.75 * TAU).abs() < 1e-12, "{orbit:?}");
+    }
+
+    #[test]
+    fn a_tilted_orbit_rises_by_its_excursion() {
+        const EXCURSION: f64 = 4.0e5;
+        let orbit = Orbit::tilted_ellipse(RADIUS, 0.0, 0.0, 0.7 * TAU, EXCURSION, 0.2 * TAU, EPOCH)
+            .expect("elliptic");
+
+        let rise = sampled(&orbit)
+            .map(|body| body.pos.y.abs())
+            .fold(0.0, f64::max);
+
+        assert!(
+            (rise - EXCURSION).abs() < 0.02 * EXCURSION,
+            "it rises {rise} of {EXCURSION}"
+        );
+    }
+
+    #[test]
+    fn an_eccentric_orbit_swings_by_its_eccentricity_about_its_semi_major_axis() {
+        const ECCENTRICITY: f64 = 0.1;
+        let orbit =
+            Orbit::tilted_ellipse(RADIUS, ECCENTRICITY, 0.3 * TAU, 0.0, 0.0, 0.2 * TAU, EPOCH)
+                .expect("elliptic");
+
+        let farthest = sampled(&orbit)
+            .map(|body| body.radius())
+            .fold(0.0, f64::max);
+        let nearest = sampled(&orbit)
+            .map(|body| body.radius())
+            .fold(f64::INFINITY, f64::min);
+
+        let swing = 0.02 * RADIUS * ECCENTRICITY;
+        assert!(
+            (farthest - RADIUS * (1.0 + ECCENTRICITY)).abs() < swing,
+            "it reaches {farthest}"
+        );
+        assert!(
+            (nearest - RADIUS * (1.0 - ECCENTRICITY)).abs() < swing,
+            "it falls to {nearest}"
+        );
     }
 }

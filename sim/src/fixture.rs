@@ -55,14 +55,7 @@ impl World {
 
     pub(crate) fn crewed(roster: Roster, seats: Vec<Seat>) -> World {
         let mut world = World {
-            state: State::new(
-                CLOCK,
-                0,
-                Belt::GRAVITY,
-                roster,
-                Belt::fixed(Belt::GRAVITY),
-                seats,
-            ),
+            state: State::new(CLOCK, 0, Belt::GRAVITY, roster, Belt::from_seed(0), seats),
         };
         world.start_the_clock();
         world

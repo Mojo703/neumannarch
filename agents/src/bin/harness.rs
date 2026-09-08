@@ -591,7 +591,7 @@ fn engage(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
         SEED,
         Belt::GRAVITY,
         roster,
-        Belt::fixed(Belt::GRAVITY),
+        Belt::from_seed(SEED),
         seats,
     );
     let mut engagement = Engagement {

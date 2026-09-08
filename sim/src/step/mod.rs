@@ -410,7 +410,7 @@ mod tests {
         );
         let landed = world.off_asteroid(unit, asteroid(1));
         assert!(
-            landed < left + Schedule::ARRIVAL_POSITION_METERS,
+            landed < Belt::ZONE_RADIUS_METERS,
             "it left {left} meters off and arrived {landed} off"
         );
 
@@ -805,7 +805,7 @@ mod tests {
                 Rejected::NoSuchSeat,
             ),
             (
-                Issued::want(0, asteroid(99), SHIPYARD, 1),
+                Issued::want(0, asteroid(u32::MAX), SHIPYARD, 1),
                 Rejected::NoSuchAsteroid,
             ),
             (

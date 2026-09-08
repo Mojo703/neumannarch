@@ -27,16 +27,21 @@ impl Panning {
         zooming: bool,
     ) -> f32 {
         let pointer = ctx.pointer();
-        let moved = pointer - self.pointer;
+        let was = self.pointer;
         self.pointer = pointer;
 
         if ctx.down(Button::Pan) {
-            camera.pan_by_pixels(moved, window);
+            camera.pan_by_pointer(was, pointer, window);
         }
         let keys = ctx.axis2(Axis2::Pan);
         if keys != Vec2::ZERO {
             let dt = ctx.dt().as_secs_f32();
-            camera.pan_by_pixels(Vec2::new(-keys.x, keys.y) * KEY_PAN * dt, window);
+            let middle = window.as_vec2() / 2.0;
+            camera.pan_by_pointer(
+                middle,
+                middle + Vec2::new(-keys.x, keys.y) * KEY_PAN * dt,
+                window,
+            );
         }
 
         let notches = ctx.axis(Axis::Zoom);

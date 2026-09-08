@@ -23,6 +23,7 @@ mod fixture;
 pub(crate) mod history;
 mod ids;
 mod materials;
+mod noise;
 pub mod orbit;
 mod post;
 mod posting;

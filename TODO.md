@@ -9,19 +9,36 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Nothing is in flight.
+The belt and the star, plan item 3, pulled ahead of every cleanup
+pass (owner, 2026-09-07: visual and gameplay changes first, the plan's
+order bent for them). One Opus agent, red-state: the fixed belt
+deleted first, the demolition reviewed, then the build. Built and
+verified 2026-09-08, awaiting the owner's review of the diff and the
+commit: the whole working tree (the owner's staged part and the
+resuming agent's unstaged part over it) is one unit. `./check.sh`
+passes; DESIGN.md, DISPLAY.md and ARCHITECTURE.md say what the code
+does and passed a fresh-eyes register review. Every number a rough
+first value to tune by play (owner, 2026-09-07): 200 candidates per
+seed kept by the density field into 100 to 200 asteroids, 25 km
+outer, the inner edge at the half-turn ratio, three one-octave
+fields at 8 km for density, caps and eccentricity (greatest 0.1),
+1 km excursion, one 2 m asteroid radius, no exclusion (owner,
+2026-09-08: simplify, add it back by ruling if play needs it), the
+star 2.5 km with a 75 km light, the focus floored at half the inner
+edge and ceilinged a tenth past the outer with a soft pan, the
+movement limit 80 and the burn share a half. Measured: a 2 km hop
+spends a median 205 m/s against 65 m/s orbital speed at the ring,
+three times the local speed, and needs three or four aim passes,
+never five. Ambient and the starfield are engine features the owner
+adds in parallel; the game takes them when they land. Left for the
+contraction audit from this unit: the soft pan sits on a hard clamp,
+two rules holding the focus inside the belt; `Orbit::tilted_ellipse`
+takes seven bare numbers where a struct of elements would name them;
+`Vec3::dot` went `pub` for the camera's pan.
 
-Next: the belt and the star, plan item 3, pulled ahead of every
-cleanup pass (owner, 2026-09-07: visual and gameplay changes first,
-the plan's order bent for them). Its design is ruled with the owner
-as mechanism before a brief carries it. The starfield is an engine
-feature the owner adds in parallel (owner, 2026-09-07); the game unit
-draws the star and the belt and takes the sky when it lands. Ships
-should move faster: the movement limit is a belt number and is set in
-the belt unit with the spacing and the schedule bound. After it, the
-next visual and gameplay units in the owner's order: ship speed and
-combat feel through the harness; the asteroid bars and flight line
-unit (Docs ahead of code, below); camera and hotkeys.
+After it, the next visual and gameplay units in the owner's order:
+ship speed and combat feel through the harness; the asteroid bars and
+flight line unit (Docs ahead of code, below); camera and hotkeys.
 
 Open from the time split: extraction, construction and fulfilment act
 per tick with a fixed second's worth of work rather than integrating
@@ -30,16 +47,42 @@ draft. The complete shape is every phase taking the step's match-time
 span, zero in the draft, and no early return. Contraction audit.
 
 Open from the draft unit:
-- `harness draft` on the fixed belt: the first picker lost 8 of 8
-  mirrors. Caps are even (both seats' two asteroids sum to 17); position
-  is not: the first picker's asteroids lie at the belt's ends, the
-  second's sit adjacent in the middle. The fixed table's geometry; for
-  the belt unit and the harness.
+- `harness draft` on the seeded belt (2026-09-08): the first picker
+  won 4 of 8 with 1 drawn, so the fixed table's edge is gone. Found
+  behind it, verified by running the bot over seeds 0..8: a bot's
+  first draft pick is always asteroid 0, never the richest. On the
+  first pick the plan has no target yet, so `Plan::intended` is
+  empty, every asteroid's fit is zero and the tie falls to the lowest
+  id; the second pick works because the first placement is then a
+  target. A bot unit, with the initiative item below.
 - The owner's arrival scene, the probes flying into the system during
   the draft: display only, not yet designed.
 
 ## Open, each for a ruling or a unit
 
+From the owner's play (2026-09-08), each for a ruling before a unit:
+- The asteroid bars crowd the belt when the camera is far out: at the
+  whole-ring zoom the bars and icons are most of what is drawn (the
+  look tool's belt and wheel scenes show it). The owner's proposal:
+  drop the icons and read the material by colour alone, stand the bars
+  upright over the asteroid so they pack tighter. A DISPLAY.md
+  Resources change; joins the asteroid bars and flight line unit.
+- The bars vanish where the stockpile bar would cover them
+  (`Wheels::clear_of` drops every section and bar meeting its box).
+  The owner wants them drawn behind it instead. A DISPLAY.md Two
+  layers change.
+- The bots take no initiative: they build no army and take no asteroid
+  by force. With the first-pick defect above, a bot unit through the
+  harness (plan item 4's bot-behaviour guarantees).
+- The mouse wheel over a wheel's line sets that row's want, as the
+  buttons do. A DISPLAY.md Editing change; kept beside the hotkeys
+  item.
+- The wheel's wrapped columns stand about 130 px apart in the look
+  tool's wheel and draft scenes, reading as three groups rather than
+  one wheel. A small display item.
+- The bot draft test in agents/src/scripted.rs hands the subject its
+  answer (every cap overwritten by hand) and lost the lancer half of
+  its guarantee; with the first-pick defect above, the bot unit.
 - The naming pass over the sim crate (owner, 2026-09-06), the owner
   judging it from the diff: read-only Haiku surveyors in parallel, one
   per module group (state, step, orbit and roster, history and the
@@ -305,9 +348,87 @@ programme.
   expects its signatures to change mid-unit and reports each break as
   engine friction rather than working around it.
 
+## Engine queue, approved 2026-09-07
+
+Engine units the owner approved, dispatched from this session under
+the engine's own CLAUDE.md, one Opus agent at a time, in this order,
+after the belt lands (owner: the engine is a path dependency, so no
+engine edit while a game unit builds). No request file in the engine
+repo; the design lives here and in the briefs; each unit writes its
+ARCHITECTURE.md section. The owner commits in the engine.
+
+The engine is at `../../mirage-engine`, which is
+`/home/matthewg/Documents/Projects/mirage-engine`. Two read-only Opus
+proposals (2026-09-07) designed every item below against the engine's
+accepted patterns; the owner ruled on their doubts. Units in this
+order, the first five additive, the last red-state:
+
+0. Gate words, one reviewed change before any doc is written: the doc
+   vocabulary gains font, glyph, arrow, grab, crosshair, punctuation,
+   numpad, zoom, motion, sky, skies, equirectangular; the unit gate
+   gains point, points.
+1. Renames: `TickCtx::dt` to `tick_interval` (owner: matches
+   `set_tick_interval` letter for letter), `FrameCtx::dt` to
+   `since_last_frame`, and the crate-private fields with them.
+2. `keys!` gains Minus, Equal, BracketLeft, BracketRight, Semicolon,
+   Quote, Backquote, Backslash, Comma, Period, Slash, Home, End, PageUp,
+   PageDown, Insert, Delete, CapsLock, Numpad0..9, NumpadAdd, Subtract,
+   Multiply, Divide, Decimal, Enter, NumLock, with display names; new
+   rows at the end so capture precedence holds.
+3. Camera, pure geometry beside `pixel_of`:
+   `shifted_so(point, lands_at, size) -> Option<Camera>`, translated
+   never turned, `None` by `pixel_of`'s own contract; and
+   `zoomed_about(point: Vec3, factor, size) -> Option<Camera>`, the
+   world point the caller names keeping its pixel while the eye moves
+   toward it, the field of view untouched (owner: the API assumes no
+   plane; the game names the ground point its own ray test found).
+   The game's depth-scaled drag pan and its zoom guess are deleted.
+4. `FrameCtx::text_layout(text, Font) -> TextLayout` under the `ui`
+   feature, in logical points: `Font::proportional(size)`,
+   `Font::monospace(size)`, `Family { Proportional, Monospace }`
+   public with `Font::family()`; `TextLayout` holds egui's galley and a
+   context clone privately so `size`, `width`, `height` now and glyph
+   boxes, `wrapped_at(width)` and a baseline later live on one value.
+5. `FrameCtx::set_cursor(Cursor)` per frame, reset to Arrow each frame;
+   `Cursor` closed as listed; resolved once into egui's platform output
+   so one writer reaches winit, egui's own icon winning where the UI
+   holds the pointer; winit writes the browser canvas style itself;
+   headless `Session::cursor()` reads the resolved one.
+6. Sky and ambient: `#[derive(Skies)]` in mirage-engine-derive (no
+   macro), `BuildSky: Catalog` with `build(&self, &Assets) -> SkyData`,
+   `NoSkies` uninhabited, `type Skies` on `Game` written by every
+   implementor (neumannarch's `NoSkies` lands in the same change);
+   `SkyData` a closed sum, `Equirect` now (width twice the height,
+   else boot-fatal naming the sky) and parametric kinds such as a
+   gradient later as variants; `Assets::sky(name)` reads an equirect
+   `.png`; built skies live in a renderer table erased of the
+   vocabulary; `ctx.set_sky(G::Skies)` per frame, last write kept,
+   drawn as one full-screen triangle inside the forward pass after the
+   opaque and cutout batches at far depth with an equal test, direction
+   from the inverse projection with translation dropped, repeat across
+   and clamp down, in HDR under bloom and exposure; no sky draws the
+   documented background; an orthographic lens shows one direction's
+   texels, a listed invariant. `ctx.set_ambient(Color)` per frame,
+   channels held at zero and above, today's constant the default; the
+   background constant moves to the sky module. Example `sky-turn`.
+   About 900 code, 450 tests, 130 docs.
+7. One headless input stream, red-state (delete `offer_ui`,
+   `Overlay::offer(egui::Event)` and their two tests first): a
+   crate-private event enum (Switched, Pointed, Moved(Motion, f32),
+   Typed) fed by `press`, `release`, `set_pointer`, `motion(Motion,
+   f32)` and `type_text(&str)` through one private `Session::feed` that
+   reaches the action tables and egui both, modifiers read off the live
+   devices; the windowed path keeps egui-winit's translation, a named
+   two-producer seam carried by tests. `Session::new(..)?
+   .with_frame_interval(Duration)` and `set_frame_interval` for the dt
+   each `step` reports, zero by default so every existing session reads
+   as today. Unblocks plan item 6. Rewrites the headless paragraph and
+   `docs/verifying.md`.
+
 ## Engine gaps, verified open 2026-09-06
 
-Reported to the owner as found; the game never works around a gap.
+Each answered by a numbered item of the queue above; the game never
+works around a gap.
 
 - No text measure without a painter: cell widths are guessed at 0.6 em
   per digit; a measure on `FrameCtx` would delete the guess.
@@ -331,10 +452,20 @@ Reported to the owner as found; the game never works around a gap.
   are read by the game and `offer_ui` by egui, never both, so a screen
   built from egui widgets cannot be verified headlessly; plan item 6
   depends on this.
-- A drag pan under perspective is inexact: `pan_by_pixels` scales at
-  the focus's depth and lands a few percent off on a long drag; a
-  camera-side "pan so this world point lands on that pixel" would be
-  exact.
+- A drag pan under perspective was inexact; the game now pans by two
+  pixels' rays meeting the focus's plane through `Camera::ray_through`
+  and `Ray::hit_plane`, exact at every zoom. Queue item 3's
+  `shifted_so` would still delete the game's plane arithmetic.
+- Found 2026-09-08 by the belt unit: `Sphere::catalog` is documented
+  as `0..=3` while `Mesh` says every value is built once and kept, so
+  a game cannot tell whether an uncatalogued value is a first-frame
+  hitch or an error; `Light::point` documents no falloff, so a range
+  is found only by rendering; `ray::Plane` is not re-exported from
+  the crate root while `Ray` is, and `mesh::Plane` holds the root's
+  name, and `Ray` exposes neither its origin nor its direction;
+  `Camera` cannot say what distance frames a sphere or a box and
+  never learns the drawing area, so the game derives the widest zoom
+  by hand from the tilt and the field of view.
 
 ## Settled, do not re-raise
 

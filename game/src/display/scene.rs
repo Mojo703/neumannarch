@@ -136,6 +136,10 @@ pub struct Scene {
     pub flights: Vec<FlightLine>,
     pub stockpile_bar: Option<StockpileBarView>,
     pub zone: f64,
+    pub star_radius: f64,
+    pub star_light_range: f64,
+    pub belt_inner_radius: f64,
+    pub belt_outer_radius: f64,
     pub seat: SeatId,
     pub selection: Option<AsteroidId>,
     pub gesture: Option<WheelGesture>,
@@ -160,18 +164,14 @@ impl Scene {
             flights: Vec::new(),
             stockpile_bar: None,
             zone: Belt::ZONE_RADIUS_METERS,
+            star_radius: Belt::STAR_RADIUS_METERS,
+            star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+            belt_inner_radius: Belt::inner_radius_meters(),
+            belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             seat: SeatId(0),
             selection: None,
             gesture: None,
         }
-    }
-
-    pub fn centre(&self) -> Vec3 {
-        let asteroids = self.asteroids.len().max(1) as f64;
-        self.asteroids
-            .iter()
-            .fold(Vec3::ZERO, |sum, asteroid| sum + asteroid.pos)
-            * (1.0 / asteroids)
     }
 
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene {
@@ -210,6 +210,10 @@ impl Scene {
                 marked: marked_on_bar(roster, client.gesture.as_ref()),
             }),
             zone: view.zone,
+            star_radius: view.star_radius,
+            star_light_range: view.star_light_range,
+            belt_inner_radius: view.belt_inner_radius,
+            belt_outer_radius: view.belt_outer_radius,
             seat: view.seat,
             selection: client.selection,
             gesture: client.gesture,
@@ -1099,7 +1103,7 @@ mod tests {
             "every asteroid carries its pull"
         );
 
-        let belt = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO);
+        let belt = Scene::of_belt(&Belt::from_seed(0), Belt::GRAVITY, Time::ZERO);
         assert_eq!(belt.stockpile_bar, None);
         assert!(
             belt.asteroids

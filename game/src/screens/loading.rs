@@ -13,9 +13,9 @@ use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::net::machine::Machine;
 use crate::net::transport::Transport;
+use crate::screens::Playable;
 use crate::screens::panel::{self, Panel};
 use crate::screens::play::Play;
-use crate::screens::{Playable, lobby};
 
 pub(crate) const BUILDING: &str = "Building the match";
 
@@ -67,8 +67,8 @@ impl Loading {
         transport: &mut dyn Transport,
     ) -> Loading {
         let machine = Machine::of(started, crew, transport);
-        let scene = Scene::of_belt(&Belt::fixed(Belt::GRAVITY), Belt::GRAVITY, Time::ZERO);
-        let camera = BeltCamera::new(scene.centre(), lobby::PREVIEW_ZOOM);
+        let scene = Scene::of_belt(&Belt::from_seed(lobby.seed()), Belt::GRAVITY, Time::ZERO);
+        let camera = BeltCamera::framing(scene.belt_inner_radius, scene.belt_outer_radius);
         Loading {
             lobby,
             machine,

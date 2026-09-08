@@ -251,8 +251,8 @@ send is still forming.
   tick its mean longitude is stated at; an asteroid never thrusts, so its body
   at any tick is `Orbit::at`. Its `radius` is its own size, for drawing;
   `Belt::ZONE_RADIUS_METERS` is the zone, one constant of the belt for
-  every asteroid, which `belt.rs` owns and one test holds against the belt's
-  own spacing. Beside it `belt.rs` owns the zone's other three constants,
+  every asteroid, which `belt.rs` owns. Beside it `belt.rs` owns the
+  zone's other three constants,
   which every asteroid shares and no row states: `FIELD_SCALE_METERS`, the
   strength field's reach; `ARRIVAL_METERS`, the distance a term toward a
   place must stop within; and `SPACING_METERS`, the distance a pair settles
@@ -350,8 +350,7 @@ the hover changes and once a tick while it is held, never once a frame.
 `Setup::new` refuses a match with no seats or more than `MAX_SEATS` by
 name, so a setup off the wire is checked once. `State::start(&setup)`
 seats the players it names, each with their reserve and starting stock,
-lays `Belt::fixed`, and carries the seed, which is hashed and unused
-until map generation lands. A rejected command comes back with the
+lays `Belt::from_seed(seed)`, and carries the seed. A rejected command comes back with the
 command that was refused and changes nothing. `Rejected::TooMany` is a
 want above `MAX_WANT` per post and row, a roster constant.
 
@@ -480,9 +479,9 @@ since a read-only index of the snapshot is not an effect.
   of "where a force here is". The zone is the chase's extent in the
   holding rule and the circle `View::zone` carries out for the display.
   Construction and `Fire` gate by the asteroid a unit stands at rather
-  than by a distance, which the zone is what justifies: holding keeps a
-  unit inside its own asteroid's zone and no two zones overlap, so the
-  set is the same one and no rule pays for a distance test.
+  than by a distance, and pay nothing for it: a unit's home is the whole
+  force it stands in, so two zones that pass within a zone's radius
+  of each other change no rule, only what the belt looks like.
 - **Schedules.** A `Schedule` is one send's thrust: two `Burn`s
   and the arrival tick, a burn being an acceleration held over whole ticks.
   A burn is built only from a delta-v and the roster's movement limit, so its
@@ -851,7 +850,6 @@ pub struct Client<'a> { selection, pointed, gesture, fights: &'a Fights }
 impl Scene {
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene;
     pub fn of_belt(asteroids: &[Asteroid], gravity: Gravity, tick: Tick) -> Scene;
-    pub fn centre(&self) -> Vec3;
     pub fn wheel_of(&self, asteroid: AsteroidId) -> Option<&WheelView>;
 }
 
@@ -867,8 +865,11 @@ impl ButtonAt {
 ```
 
 - `of_belt` is what the lobby and loading screens draw before a match
-  exists to have a view of; `look` builds scenes by hand. `centre` is the
-  middle of the asteroids, which a camera frames the map from.
+  exists to have a view of; `look` builds scenes by hand. A scene derives
+  no extent of its own: the star's radius, the star's light range and the
+  belt's inner and outer radii are the sim's constants, carried on the
+  `View` as the zone is and copied onto the scene, so the display never
+  reads the map's layout off the asteroids it happens to draw.
 - A scene carries a wheel for every asteroid a seat holds a composition
   at, and for the selection and the asteroid under the pointer, whose
   own sector stands empty until it wants something: without it no first
@@ -1085,12 +1086,29 @@ impl Order {
   still names the personality. `Play` owns the panel's alpha, eased by
   `ease::toward` over `Span::Slow` toward one while the draft runs and zero once
   `Draft::ended`, and draws the panel while it is above zero.
-- `camera::BeltCamera`: the focus point moving at the local orbital
-  velocity, pan by meters or by pointer pixels, and zoom within a range
-  stated against the belt's own scale. A pan, a zoom or a new focus sets
-  the target; `settle(dt)`, once per frame, eases the shown focus and
+- `camera::BeltCamera`: the focus point moving about the star, pan by
+  meters or between two pointer pixels, and zoom within a range stated
+  against the belt's own edges. A pan, a zoom or a new focus sets the
+  target; `settle(dt)`, once per frame, eases the shown focus and
   distance toward it, and the engine camera and the viewport read the
-  shown values.
+  shown values. `advance` turns the focus at the orbital rate at its own
+  radius, or at the belt's inner edge if that is slower, so a focus
+  near the star never outruns the belt's fastest asteroid. The camera's
+  yaw is the shown focus's angle about the star, so the star holds one
+  screen direction as the belt turns; the outward direction and the
+  screen's up follow the yaw. `pan_by_pointer(from, to, window)` moves the
+  focus by the difference between the two pixels' rays where they meet
+  the focus's own plane, so the pan is the projection's own arithmetic
+  and no small-angle scale is assumed. A pan's component toward the star
+  is scaled to zero as the focus nears a floor stated off the belt's
+  inner edge, and its component away is scaled the same way past the
+  outer edge and a margin, so the focus stays over the belt and never
+  reaches the star, where the yaw would have no angle to read.
+  `framing(inner, outer)` is the whole-belt frame: the focus sits on the
+  star, and `farthest_zoom` is the distance at which the belt's outer
+  radius stands inside the drawing area, computed from the tilt, the
+  field of view's tangent and a margin for a window at least as wide as
+  it is tall.
 - `viewport::Viewport`: one frame's projection, the engine camera built
   once, with the window and the painter's own measure. Everything that
   projects a world point goes through it. An asteroid with no wheel is picked
@@ -1098,8 +1116,9 @@ impl Order {
   `wheel::PICK_RADIUS`, which is how an asteroid a seat holds nothing at is
   selected and its first want placed.
 - Two draw modules, one per DISPLAY.md layer. `belt`: one function from a
-  `Scene` and a `Viewport` to the engine's draws — asteroids, one light, and
-  ships, in 3D. `hud`: one function from a `Scene`, a `Viewport` and an
+  `Scene` and a `Viewport` to the engine's draws — the star at the origin
+  as an emissive sphere of the scene's star radius, one point light there
+  of the scene's star light range, asteroids, and ships, in 3D. `hud`: one function from a `Scene`, a `Viewport` and an
   `egui::Painter` to what is painted over the belt's own projection —
   every asteroid's zone circle in one ink, every standing armed ship's range
   circle in its owner's colour, and the flight lines. The wheels and the
@@ -1552,8 +1571,9 @@ exists.
   standings say the clock has run out; every earlier tick carries them
   too, and no screen but this one reads them yet. Ending a match at an
   elimination is a later unit.
-  The lobby draws the belt behind everything at `PREVIEW_ZOOM`, the
-  widest view whose zone circles stand apart, and lays its seats out by team:
+  The lobby draws the belt behind everything at `BeltCamera::framing`,
+  the widest zoom, which frames every asteroid of every seed with the
+  star at the centre, and lays its seats out by team:
   one heading per team that holds a seat, and its seats under it, each a
   holder choice, a Kick beside a guest, a team choice and a readiness
   mark. A closed seat is not drawn, so a team holding none is not drawn
@@ -1632,7 +1652,11 @@ list later.
 ```
 sim/src/
   lib.rs            TICKS_PER_SECOND, TICK; the public surface
-  belt.rs           Belt::fixed, the zone's four constants, State::start
+  belt.rs           Belt::from_seed and the belt's own constants: the
+                    outer radius, the inner edge, the star, the zone's
+                    four; State::start
+  noise.rs          Noise, one smooth field over the belt plane, and
+                    fraction, one draw off a hashed key
   setup.rs          Setup, MAX_SEATS, BadSetup
   real.rs           Real
   vec3.rs           Vec3
@@ -1805,10 +1829,38 @@ it; a new one is added here in the unit that introduces it:
   flight the units already carry is the cheaper truth.
 - `Schedule::between` gives up after `CORRECTIONS` passes. The margin is
   the predicate and the cap is only its guard: at the shipped
-  `BURN_SHARE_OF_SPAN` no candidate inside the margin has ever needed a
-  fourth pass, and a candidate the cap rejected would be one the sim could
-  not have flown within the tolerance. A proof that the aim correction
-  converges for every schedule inside the margin would delete the cap.
+  `BURN_SHARE_OF_SPAN` of one half, a neighbour hop over the shipped belt
+  takes three passes or four and never a fifth, and a candidate the cap
+  rejected would be one the sim could not have flown within the
+  tolerance. A proof that the aim correction converges for every schedule
+  inside the margin would delete the cap.
+
+- Two asteroids' zones can pass within one zone's radius of each other
+  over a match. The belt lays each asteroid off three smooth fields and a
+  drawn point, with nothing holding a pair apart, and the zones are small
+  against the belt's own spacing, so a meeting is rare and no rule reads
+  it. Excluding a candidate whose orbit comes inside a stated distance of
+  a standing one at any tick of the match would delete it, at the price of
+  that test over every pair and every tick of generation.
+
+- `BeltCamera::face_the_star` holds the yaw it had while the focus sits
+  exactly on the star, where the angle about the star has no value. Only
+  the whole-belt frame puts it there, and no pan can, since a pan's
+  component toward the star reaches zero at a floor stated off the belt's
+  inner edge. A focus that could not stand on the star would delete it, which
+  would cost the whole-belt frame the star as its centre.
+
+- The widest zoom frames the belt for a window at least as wide as it is
+  tall; a window taller than it is wide clips the belt's sides. The
+  camera is built before a frame and never learns the drawing area. A
+  camera that took the window with every zoom would delete it.
+
+- A pointer drag keeps the belt under the pointer only while the drag is
+  small against the focus's own radius. The yaw is locked to the focus's
+  angle about the star, so a pan that carries the focus a noticeable
+  share of the way round also turns the view under the pointer. A yaw that did not
+  follow the focus would delete it, and would cost the star its one
+  screen direction.
 - A frame carrying a machine's request arrives at a machine's own
   connection only from a room that has broken the protocol, and is dropped
   as bytes that are not a message are. A wire typed by direction would

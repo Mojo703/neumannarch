@@ -142,6 +142,10 @@ mod tests {
             },
             terrain: Vec::new(),
             zone: Belt::ZONE_RADIUS_METERS,
+            star_radius: Belt::STAR_RADIUS_METERS,
+            star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+            belt_inner_radius: Belt::inner_radius_meters(),
+            belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             standings: Standings::new(Vec::new(), false),
         }
     }

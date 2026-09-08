@@ -317,14 +317,25 @@ flight is the sim's response.
 
 ## Camera
 
-A sixty-degree tilt from above, pan and zoom, no rotation. Every move
-of the camera eases over a short span, pan, zoom and the jump to a new
-focus alike, never a cut. The camera is
-attached to a focus point that moves at the local orbital velocity, so the
-player's region stays on screen while the belt turns. The focus starts at
-the belt's centre until the player's first placement, then at that asteroid;
-clicking an asteroid's wheel makes it the focus. A pan, a zoom and the jump
-to a new focus each ease over the slow span, never a cut.
+A sixty-degree tilt from above, pan and zoom, no rotation by the player.
+The camera is attached to a focus point that turns about the star at the
+orbital rate at its own radius, or at the belt's inner edge where its own
+would be faster, so the player's region stays on screen while the belt
+turns and a focus near the star never outruns the belt. The camera turns
+with the focus, so the star holds one direction on screen, up, at every
+focus and every zoom, and the belt's outer edge lies down-screen.
+
+A pan toward the star slows as the focus nears a floor short of the
+star and stops there, and a pan outward slows the same way past the
+belt's outer edge, so the focus stays over the belt and no pan pushes it
+past the floor or the outer edge. The focus starts on the star until the
+player's first placement, then at that asteroid; clicking an asteroid's
+wheel makes it the focus. A pan, a zoom and the jump to a new focus each
+ease over the slow span, never a cut.
+
+The widest zoom is the whole belt: the star at the centre and every
+asteroid of every seed inside the screen. The lobby, the loading screen
+and the opening of a match all open at that zoom.
 
 ## Ranges
 
@@ -407,7 +418,7 @@ follows Controls, above.
 - **Lobby.** One screen for skirmish and multiplayer. The belt the match
   will be played on fills the screen behind everything else, rendered
   from the seed by the same belt and HUD code as the match, at the widest
-  zoom whose zone circles stand apart, each asteroid wearing its resource
+  zoom, which frames every asteroid, each asteroid wearing its resource
   bars; it redraws the instant the seed changes, and it pans and zooms
   under the same controls as the match. Over it, at the left, the seats
   as a table of four rows, one per seat the match can hold, under column
