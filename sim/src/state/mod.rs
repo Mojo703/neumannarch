@@ -18,14 +18,16 @@ pub(crate) use threat::{Aim, Assigned, Threat};
 pub(crate) use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
+use crate::belt::Belt;
 use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
 use crate::posting::Posting;
-use crate::roster::{Roster, Row};
+use crate::roster::{Kind, Roster, Row};
 use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick, Time};
+use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Held {
@@ -160,6 +162,36 @@ impl State {
             .filter(move |entity| entity.standing(self.time()) == Some(asteroid))
     }
 
+    pub fn is_taken(&self, asteroid: AsteroidId) -> bool {
+        self.entities_at(asteroid).next().is_some()
+    }
+
+    pub fn held_by(&self, seat: SeatId) -> impl Iterator<Item = AsteroidId> {
+        self.deduped(
+            self.of_seat(seat)
+                .filter(|entity| self[entity.row()].kind() == Kind::Structure)
+                .filter_map(|entity| entity.standing(self.time())),
+        )
+    }
+
+    pub fn occupied_by(&self, seat: SeatId) -> impl Iterator<Item = AsteroidId> {
+        self.deduped(self.of_seat(seat).map(Entity::home))
+    }
+
+    fn of_seat(&self, seat: SeatId) -> impl Iterator<Item = &Entity> {
+        self.entities().filter(move |entity| entity.seat() == seat)
+    }
+
+    fn deduped(
+        &self,
+        asteroids: impl Iterator<Item = AsteroidId>,
+    ) -> impl Iterator<Item = AsteroidId> {
+        let mut asteroids: Vec<AsteroidId> = asteroids.collect();
+        asteroids.sort_unstable();
+        asteroids.dedup();
+        asteroids.into_iter()
+    }
+
     pub(crate) fn ready(&self) -> &[Ready] {
         &self.ready
     }
@@ -262,6 +294,41 @@ impl State {
                 .map(|weapon| Ready::new(id, weapon, now)),
         );
         id
+    }
+
+    pub(crate) fn place_from_reserve(&mut self, post: Post, row: RowId) -> bool {
+        let taken = self
+            .seat_mut(post.seat)
+            .is_some_and(|seat| seat.take_reserved(row));
+        if taken {
+            self.spawn_at(post, row);
+        }
+        taken
+    }
+
+    pub(crate) fn spawn_at(&mut self, post: Post, row: RowId) {
+        let motion = match self[row].kind() {
+            Kind::Structure => Motion::Fixed,
+            Kind::Unit => Motion::Steered {
+                body: self.spawn_body(post.asteroid, self.time().next()),
+                flight: None,
+            },
+        };
+        self.spawn(post.seat, row, post.asteroid, motion);
+    }
+
+    pub(crate) fn spawn_body(&self, asteroid: AsteroidId, at: Time) -> Body {
+        let home = self[asteroid].orbit().at(at, self.gravity());
+        let already = self
+            .standing_at(asteroid)
+            .filter(|entity| entity.motion() != Motion::Fixed)
+            .count();
+        let radial = home.pos.normalized().unwrap_or(Vec3::ZERO);
+        let floor = self[asteroid].radius() + Belt::SPACING_METERS;
+        Body::new(
+            home.pos + radial * (floor + Belt::SPACING_METERS * already as f64),
+            home.vel,
+        )
     }
 
     pub(crate) fn set_motion(&mut self, id: EntityId, motion: Motion) {
@@ -429,6 +496,33 @@ mod tests {
             .find(|(_, row)| row.kind() == kind)
             .map(|(id, _)| id)
             .expect("the shipped roster has both kinds")
+    }
+
+    #[test]
+    fn held_by_names_the_asteroids_of_a_seats_structures_and_occupied_by_all_it_is_homed_at() {
+        let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)]);
+        let structure = row_of(&world.state, Kind::Structure);
+        let unit = row_of(&world.state, Kind::Unit);
+        let away = AsteroidId(1);
+        let body = world.state.spawn_body(away, world.state.time());
+        world.fix(0, structure, ASTEROID);
+        world.fix(0, structure, ASTEROID);
+        world.free(0, unit, away, body);
+
+        assert_eq!(
+            world.state.held_by(SeatId(0)).collect::<Vec<AsteroidId>>(),
+            vec![ASTEROID],
+            "a unit stands where no structure of the seat does"
+        );
+        assert_eq!(
+            world
+                .state
+                .occupied_by(SeatId(0))
+                .collect::<Vec<AsteroidId>>(),
+            vec![ASTEROID, away]
+        );
+        assert_eq!(world.state.occupied_by(SeatId(1)).next(), None);
+        assert!(world.state.is_taken(away), "the unit is homed there");
     }
 
     #[test]

@@ -1,33 +1,30 @@
 use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
-use neumannarch_sim::roster::{Kind, Roster, Row};
+use neumannarch_sim::roster::{Glyph, Kind, Roster, Row};
 use neumannarch_sim::state::Rejected;
 use neumannarch_sim::state::view::Building;
 use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId};
 
-use crate::display::glyph::{self, Glyph};
+use crate::display::belt;
+use crate::display::glyph::{self, Cell, Drawing, Look};
 use crate::display::glyph_quad::seat_color32;
 use crate::display::hue;
 use crate::display::label;
 use crate::display::scene::{
     Arc, ButtonAt, Entry, Fill, SectorView, Shown, WheelButton, WheelView,
 };
-use crate::display::stencil::{self, Cell, Stencil};
 use crate::display::wheels::Spoken;
+use crate::display::zoom;
 use crate::screens::panel;
 
 pub const PICK_RADIUS: f32 = 36.0;
 
-const INNER: f32 = 80.0;
-
 const DEPTH: f32 = 420.0;
-
-const SMALL_SCALE: f32 = 0.72;
 
 pub(crate) const GLYPH_HALF: f32 = 13.0;
 
-pub(crate) const GLYPH_SLOT: f32 = 2.0 * GLYPH_HALF * glyph::WIDEST_SCALE;
+pub(crate) const GLYPH_SLOT: f32 = 2.0 * GLYPH_HALF;
 
 pub(crate) const SECTION_HEIGHT: f32 = 36.0;
 
@@ -55,7 +52,7 @@ const STEP_WIDTH: f32 = GAP + 2.0 * CHARACTER_WIDTH + GAP;
 
 const BUTTON_WIDTH: f32 = 24.0;
 
-const BAR_LENGTH: f32 = 1.5 * SECTION_HEIGHT;
+pub(crate) const BAR_LENGTH: f32 = 1.5 * SECTION_HEIGHT;
 
 const SPINE_INSET: f32 = 4.0;
 
@@ -63,9 +60,9 @@ const SPINE_WIDTH: f32 = 1.0;
 
 const SPINE_ALPHA: f32 = 0.6;
 
-const BAR_WIDTH: f32 = 3.0;
+pub(crate) const BAR_WIDTH: f32 = 3.0;
 
-const BAR_TRAIL: Color32 = Color32::from_gray(235);
+pub(crate) const BAR_TRAIL: Color32 = Color32::from_gray(235);
 
 const SEGMENTS: usize = 12;
 
@@ -84,12 +81,6 @@ pub(crate) const MARK_STROKE: f32 = 1.2;
 const DASH_LENGTH: f32 = 2.0;
 
 const DASH_GAP: f32 = 1.5;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Detail {
-    Full,
-    Small,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ButtonRefusals {
@@ -120,33 +111,31 @@ impl Buttons {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Sizing {
-    pub detail: Detail,
-    pub scale: f32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placed {
     pub asteroid: AsteroidId,
     pub centre: Pos2,
-    pub sizing: Sizing,
+    pub stand_off: f32,
+    pub scale: f32,
     pub alpha: f32,
+    pub shrinking: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Footprint {
     pub asteroid: AsteroidId,
     pub centre: Pos2,
-    full: Rect,
-    small: Rect,
+    pub stand_off: f32,
+    rect: Rect,
 }
 
 pub struct Wheel {
     asteroid: AsteroidId,
     viewer: SeatId,
     centre: Pos2,
+    stand_off: f32,
     scale: f32,
     alpha: f32,
+    shrinking: bool,
     sectors: Vec<Sector>,
     buttons: Option<Buttons>,
 }
@@ -187,30 +176,24 @@ impl Footprint {
     pub fn of(
         asteroid: AsteroidId,
         centre: Pos2,
+        stand_off: f32,
         view: &WheelView,
         roster: &Roster,
         seat: SeatId,
     ) -> Footprint {
-        let bounds = |detail: Detail| {
-            let edits = detail == Detail::Full;
-            stacked(centre, view, roster, seat, Sizing::settled(detail), edits)
-                .iter()
-                .flat_map(|sector| &sector.slots)
-                .fold(pick_square(centre), |bounds, slot| bounds.union(slot.frame))
-        };
         Footprint {
             asteroid,
             centre,
-            full: bounds(Detail::Full),
-            small: bounds(Detail::Small),
+            stand_off,
+            rect: stacked(centre, stand_off, view, roster, seat, 1.0, true)
+                .iter()
+                .flat_map(|sector| &sector.slots)
+                .fold(pick_square(centre), |bounds, slot| bounds.union(slot.frame)),
         }
     }
 
-    pub fn at(&self, detail: Detail) -> Rect {
-        match detail {
-            Detail::Full => self.full,
-            Detail::Small => self.small,
-        }
+    pub fn rect(&self) -> Rect {
+        self.rect
     }
 }
 
@@ -225,18 +208,34 @@ impl Wheel {
         let Placed {
             asteroid,
             centre,
-            sizing,
+            stand_off,
+            scale,
             alpha,
+            shrinking,
         } = placed;
         Wheel {
             asteroid,
             viewer: seat,
             centre,
-            scale: sizing.scale,
+            stand_off,
+            scale,
             alpha,
-            sectors: stacked(centre, view, roster, seat, sizing, buttons.is_some()),
+            shrinking,
+            sectors: stacked(
+                centre,
+                stand_off,
+                view,
+                roster,
+                seat,
+                scale,
+                buttons.is_some(),
+            ),
             buttons,
         }
+    }
+
+    pub fn stand_off(zone_points: f32) -> f32 {
+        zoom::floored(zone_points + ROW_GAP, belt::ENTITY_FLOOR_POINTS)
     }
 
     pub fn asteroid(&self) -> AsteroidId {
@@ -261,14 +260,6 @@ impl Wheel {
 
     pub fn draws(&self) -> bool {
         !self.sectors.is_empty()
-    }
-
-    pub fn clear_of(&mut self, rect: Rect) {
-        for sector in &mut self.sectors {
-            sector.slots.retain(|slot| !slot.frame.intersects(rect));
-        }
-        self.sectors
-            .retain(|sector| !sector.slots.is_empty() || sector.arc.is_some());
     }
 
     pub fn frames(&self) -> impl Iterator<Item = Rect> + '_ {
@@ -332,6 +323,9 @@ impl Wheel {
     }
 
     fn button_under(&self, at: Pos2) -> Option<ButtonAt> {
+        if self.shrinking {
+            return None;
+        }
         let step = self.buttons.as_ref()?.step;
         self.sectors
             .iter()
@@ -372,7 +366,14 @@ impl Wheel {
     }
 
     fn spine(&self, from: f32, to: f32) -> Vec<Pos2> {
-        spine_points(self.centre, self.scale, from, to, Side::Right)
+        spine_points(
+            self.centre,
+            self.scale,
+            self.stand_off,
+            from,
+            to,
+            Side::Right,
+        )
     }
 
     fn paint_spine(&self, painter: &egui::Painter, sector: &Sector) {
@@ -414,21 +415,22 @@ impl Wheel {
         painter.rect_filled(slot.frame, CORNER, self.faded(SCRIM));
         let (fill, alpha) = match slot.lines.iter().any(|line| !line.previewed()) {
             true => (Fill::Solid, self.alpha),
-            false => (Fill::Hollow, self.alpha * stencil::DIM_ALPHA),
+            false => (Fill::Hollow, self.alpha * glyph::DIM_ALPHA),
         };
-        Stencil {
-            glyph: &slot.glyph,
-            cell: Cell {
+        Drawing::of(slot.glyph).paint(
+            painter,
+            Cell {
                 centre: slot.glyph_rect(self.scale).center(),
-                half: GLYPH_HALF * slot.glyph.size.scale() * self.scale,
+                half: GLYPH_HALF * self.scale,
             },
-            colour,
-            outline: Color32::WHITE,
-            fill,
-            alpha,
-            starved: None,
-        }
-        .paint(painter);
+            Look {
+                colour,
+                outline: Color32::WHITE,
+                fill,
+                alpha,
+                starved: None,
+            },
+        );
         for line in &slot.lines {
             self.paint_line(painter, line, colour);
         }
@@ -589,36 +591,6 @@ impl Wheel {
     }
 }
 
-impl Sizing {
-    pub fn settled(detail: Detail) -> Sizing {
-        Sizing {
-            detail,
-            scale: detail.scale(),
-        }
-    }
-}
-
-impl Detail {
-    pub fn scale(self) -> f32 {
-        match self {
-            Detail::Full => 1.0,
-            Detail::Small => SMALL_SCALE,
-        }
-    }
-
-    fn shows(self, mark: Mark, entries: &[Shown]) -> bool {
-        match self {
-            Detail::Full => true,
-            Detail::Small => {
-                mark != Mark::Wanted
-                    || entries
-                        .iter()
-                        .all(|shown| matches!(shown.entry, Entry::Placed))
-            }
-        }
-    }
-}
-
 impl Slot {
     fn glyph_rect(&self, scale: f32) -> Rect {
         Rect::from_min_size(
@@ -700,9 +672,9 @@ fn pick_square(centre: Pos2) -> Rect {
     Rect::from_center_size(centre, Vec2::splat(2.0 * PICK_RADIUS))
 }
 
-pub(crate) fn x_at(scale: f32, y: f32) -> f32 {
+pub(crate) fn x_at(scale: f32, stand_off: f32, y: f32) -> f32 {
     let depth = DEPTH * scale;
-    let radius = depth + INNER * scale;
+    let radius = depth + stand_off * scale;
     (radius * radius - y * y).max(0.0).sqrt() - depth
 }
 
@@ -712,12 +684,19 @@ pub(crate) enum Side {
     Left,
 }
 
-pub(crate) fn spine_points(centre: Pos2, scale: f32, from: f32, to: f32, side: Side) -> Vec<Pos2> {
+pub(crate) fn spine_points(
+    centre: Pos2,
+    scale: f32,
+    stand_off: f32,
+    from: f32,
+    to: f32,
+    side: Side,
+) -> Vec<Pos2> {
     let inset = SPINE_INSET * scale;
     (0..=SEGMENTS)
         .map(|step| {
             let y = from + (to - from) * step as f32 / SEGMENTS as f32;
-            let out = x_at(scale, y) - inset;
+            let out = x_at(scale, stand_off, y) - inset;
             let x = match side {
                 Side::Right => centre.x + out,
                 Side::Left => centre.x - out,
@@ -736,19 +715,19 @@ pub(crate) fn spine_stroke(colour: Color32, alpha: f32) -> Stroke {
 
 fn stacked(
     centre: Pos2,
+    stand_off: f32,
     view: &WheelView,
     roster: &Roster,
     seat: SeatId,
-    sizing: Sizing,
+    scale: f32,
     edits: bool,
 ) -> Vec<Sector> {
-    let Sizing { detail, scale } = sizing;
     let rows: Vec<(&SectorView, bool, Vec<Unlaid>)> = view
         .sectors
         .iter()
         .map(|sector| {
             let edits = edits && sector.seat == seat;
-            (sector, edits, rows_of(sector, roster, detail, edits))
+            (sector, edits, rows_of(sector, roster, edits))
         })
         .filter(|(sector, _, rows)| !rows.is_empty() || sector.arc.is_some())
         .collect();
@@ -782,7 +761,7 @@ fn stacked(
                     across += widest + COLUMN_GAP * scale;
                     column.iter().enumerate().map(move |(index, unlaid)| {
                         let y = top + index as f32 * (SECTION_HEIGHT + ROW_GAP) * scale;
-                        unlaid.laid(centre, scale, y, left, edits)
+                        unlaid.laid(centre, scale, stand_off, y, left, edits)
                     })
                 })
                 .collect();
@@ -847,9 +826,17 @@ impl Unlaid {
         Self::lead(scale, edits) + (grown + step + PAD) * scale
     }
 
-    fn laid(&self, centre: Pos2, scale: f32, top: f32, across: f32, edits: bool) -> Slot {
+    fn laid(
+        &self,
+        centre: Pos2,
+        scale: f32,
+        stand_off: f32,
+        top: f32,
+        across: f32,
+        edits: bool,
+    ) -> Slot {
         let height = SECTION_HEIGHT * scale;
-        let left = centre.x + x_at(scale, top + height / 2.0) + across;
+        let left = centre.x + x_at(scale, stand_off, top + height / 2.0) + across;
         let width = self.width(scale, edits);
         let top = centre.y + top;
         let cell_top = top + (height - LINE_HEIGHT * scale) / 2.0;
@@ -872,14 +859,14 @@ impl Unlaid {
             .collect();
         Slot {
             row: self.row,
-            glyph: self.glyph.clone(),
+            glyph: self.glyph,
             frame: Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)),
             lines,
         }
     }
 }
 
-fn rows_of(view: &SectorView, roster: &Roster, detail: Detail, edits: bool) -> Vec<Unlaid> {
+fn rows_of(view: &SectorView, roster: &Roster, edits: bool) -> Vec<Unlaid> {
     let mut structures: Vec<(RowId, &Row)> = Vec::new();
     let mut units: Vec<(RowId, &Row)> = Vec::new();
     for (row, data) in roster.iter() {
@@ -901,10 +888,10 @@ fn rows_of(view: &SectorView, roster: &Roster, detail: Detail, edits: bool) -> V
                 .map_or(&[], |shown| &shown.entries);
             Unlaid {
                 row,
-                glyph: Glyph::of(data),
+                glyph: data.glyph(),
                 lines: lines(entries)
                     .into_iter()
-                    .filter(|(mark, entries)| !entries.is_empty() && detail.shows(*mark, entries))
+                    .filter(|(_, entries)| !entries.is_empty())
                     .collect(),
             }
         })
@@ -939,7 +926,7 @@ fn marked(entry: Entry) -> Mark {
         Entry::Surplus(_) => Mark::Surplus,
         Entry::Leaving { .. } => Mark::Leaving,
         Entry::Arriving { .. } => Mark::Arriving,
-        Entry::Building(_) | Entry::Wanted { .. } | Entry::Placed => Mark::Wanted,
+        Entry::Building(_) | Entry::Wanted { .. } => Mark::Wanted,
     }
 }
 
@@ -965,6 +952,8 @@ mod tests {
 
     const CENTRE: Pos2 = egui::pos2(400.0, 300.0);
 
+    const STAND_OFF: f32 = 80.0;
+
     fn shown(entry: Entry) -> Shown {
         Shown {
             entry,
@@ -987,14 +976,16 @@ mod tests {
         }
     }
 
-    fn wheel(sectors: Vec<SectorView>, detail: Detail, buttons: Option<Buttons>) -> Wheel {
+    fn wheel(sectors: Vec<SectorView>, buttons: Option<Buttons>) -> Wheel {
         let roster = Roster::shipped();
         Wheel::over(
             Placed {
                 asteroid: ASTEROID,
                 centre: CENTRE,
-                sizing: Sizing::settled(detail),
+                stand_off: STAND_OFF,
+                scale: 1.0,
                 alpha: 1.0,
+                shrinking: false,
             },
             &WheelView {
                 asteroid: ASTEROID,
@@ -1051,11 +1042,7 @@ mod tests {
     #[test]
     fn a_selected_wheel_stands_a_section_per_row_to_the_asteroids_right_structures_first() {
         let roster = Roster::shipped();
-        let wheel = wheel(
-            vec![sector(MINE, Vec::new())],
-            Detail::Full,
-            Some(selected()),
-        );
+        let wheel = wheel(vec![sector(MINE, Vec::new())], Some(selected()));
 
         let slots: Vec<&Slot> = slots(&wheel).map(|(_, slot)| slot).collect();
         assert_eq!(slots.len(), roster.iter().count());
@@ -1091,11 +1078,7 @@ mod tests {
 
     #[test]
     fn sections_stand_on_an_arc_that_bows_away_from_the_asteroid() {
-        let wheel = wheel(
-            vec![sector(MINE, Vec::new())],
-            Detail::Full,
-            Some(selected()),
-        );
+        let wheel = wheel(vec![sector(MINE, Vec::new())], Some(selected()));
 
         let slots: Vec<&Slot> = slots(&wheel)
             .map(|(_, slot)| slot)
@@ -1112,7 +1095,7 @@ mod tests {
 
     #[test]
     fn a_section_is_one_strip_with_its_counts_in_a_row_beside_its_glyph() {
-        let full = wheel(held(), Detail::Full, None);
+        let full = wheel(held(), None);
 
         let slot = slot_of(&full, FRIGATE);
         assert_eq!(slot.lines.len(), 3, "here, arriving and wanted");
@@ -1151,7 +1134,6 @@ mod tests {
                     }],
                 )],
             )],
-            Detail::Full,
             None,
         );
         assert_eq!(
@@ -1169,7 +1151,6 @@ mod tests {
                     MINE,
                     vec![row(FRIGATE, vec![Entry::Present(count)])],
                 )],
-                Detail::Full,
                 None,
             );
             let slot = slot_of(&wheel, FRIGATE);
@@ -1184,49 +1165,14 @@ mod tests {
 
     #[test]
     fn a_row_at_rest_stands_as_its_glyph_alone_and_only_where_it_takes_an_edit() {
-        let open = wheel(
-            vec![sector(MINE, Vec::new())],
-            Detail::Full,
-            Some(selected()),
-        );
+        let open = wheel(vec![sector(MINE, Vec::new())], Some(selected()));
         assert!(slot_of(&open, FRIGATE).lines.is_empty());
 
-        let shut = wheel(vec![sector(MINE, Vec::new())], Detail::Full, None);
+        let shut = wheel(vec![sector(MINE, Vec::new())], None);
         assert!(
             !shut.draws(),
             "a wheel that takes no edit shows what stands there alone"
         );
-    }
-
-    #[test]
-    fn a_small_wheel_shows_what_stands_and_moves_and_never_a_want() {
-        let small = wheel(held(), Detail::Small, None);
-
-        assert_eq!(slots(&small).count(), 1, "only the row it holds");
-        let slot = slot_of(&small, FRIGATE);
-        assert_eq!(slot.lines.len(), 2);
-        assert_eq!(slot.lines[0].count, 2, "what stands there");
-        assert_eq!(slot.lines[1].count, 3, "and what is on its way");
-        assert!(
-            slot.frame.height()
-                < slot_of(&wheel(held(), Detail::Full, None), FRIGATE)
-                    .frame
-                    .height()
-        );
-
-        let placed = wheel(
-            vec![sector(THEIRS, vec![row(SHIPYARD, vec![Entry::Placed])])],
-            Detail::Small,
-            None,
-        );
-        let slot = slot_of(&placed, SHIPYARD);
-        assert_eq!(
-            slot.lines.len(),
-            1,
-            "a draft placement is the one want it shows"
-        );
-        assert_eq!(slot.lines[0].mark, Mark::Wanted);
-        assert_eq!(slot.lines[0].count, 1);
     }
 
     #[test]
@@ -1237,7 +1183,6 @@ mod tests {
         ];
         let wheel = wheel(
             vec![sector(MINE, Vec::new()), sector(THEIRS, theirs)],
-            Detail::Full,
             Some(selected()),
         );
 
@@ -1266,7 +1211,7 @@ mod tests {
             .iter()
             .map(|(id, _)| row(id, vec![Entry::Present(1)]))
             .collect();
-        let wheel = wheel(vec![sector(THEIRS, every)], Detail::Full, None);
+        let wheel = wheel(vec![sector(THEIRS, every)], None);
 
         let slots: Vec<&Slot> = slots(&wheel).map(|(_, slot)| slot).collect();
         assert!(
@@ -1299,7 +1244,6 @@ mod tests {
                     MINE,
                     vec![row(FRIGATE, vec![Entry::Present(count)])],
                 )],
-                Detail::Full,
                 Some(selected()),
             )
         };
@@ -1338,7 +1282,6 @@ mod tests {
                     arc: Some(arc),
                 },
             ],
-            Detail::Full,
             None,
         );
 
@@ -1359,7 +1302,7 @@ mod tests {
                 sector(THEIRS, vec![row(FRIGATE, vec![Entry::Present(1)])]),
             ]
         };
-        let open = wheel(sectors(), Detail::Full, Some(selected()));
+        let open = wheel(sectors(), Some(selected()));
         let mine = |button| ButtonAt {
             posting: Posting::of(ASTEROID, MINE, FRIGATE),
             button,
@@ -1391,7 +1334,7 @@ mod tests {
             "a rival's section takes no edit"
         );
 
-        let shut = wheel(sectors(), Detail::Full, None);
+        let shut = wheel(sectors(), None);
         assert_eq!(shut.button_at(plus), None, "an unselected wheel takes none");
         assert_eq!(shut.button(FRIGATE, WheelButton::Plus(1)), None);
     }
@@ -1429,7 +1372,7 @@ mod tests {
 
     #[test]
     fn what_is_under_the_pointer_says_what_it_is_and_why() {
-        let wheel = wheel(held(), Detail::Full, None);
+        let wheel = wheel(held(), None);
         let slot = slot_of(&wheel, FRIGATE);
         let at = |line: usize| slot.lines[line].cell.center();
 
@@ -1469,7 +1412,7 @@ mod tests {
             )]),
             ..selected()
         };
-        let wheel = wheel(vec![sector(MINE, Vec::new())], Detail::Full, Some(refused));
+        let wheel = wheel(vec![sector(MINE, Vec::new())], Some(refused));
         let slot = slot_of(&wheel, FRIGATE);
         let plus = slot.button(WheelButton::Plus(1), 1.0).center();
 
@@ -1521,7 +1464,6 @@ mod tests {
                     ],
                 )],
             )],
-            Detail::Full,
             None,
         );
         let line = &slot_of(&wheel, FRIGATE).lines[0];
@@ -1539,7 +1481,6 @@ mod tests {
     fn a_section_of_a_rival_seat_shows_what_it_holds_and_takes_no_button() {
         let wheel = wheel(
             vec![sector(THEIRS, vec![row(SHIPYARD, vec![Entry::Present(1)])])],
-            Detail::Small,
             Some(selected()),
         );
 
@@ -1548,27 +1489,23 @@ mod tests {
     }
 
     #[test]
-    fn a_footprint_covers_the_asteroid_and_every_section_at_each_size() {
+    fn a_footprint_covers_the_asteroid_and_every_section() {
         let roster = Roster::shipped();
         let view = WheelView {
             asteroid: ASTEROID,
             sectors: held(),
         };
-        let footprint = Footprint::of(ASTEROID, CENTRE, &view, &roster, MINE);
+        let footprint = Footprint::of(ASTEROID, CENTRE, STAND_OFF, &view, &roster, MINE);
 
-        for detail in [Detail::Full, Detail::Small] {
+        assert!(footprint.rect().contains(CENTRE), "the asteroid is on it");
+        let full = wheel(held(), Some(selected()));
+        for (_, slot) in slots(&full) {
             assert!(
-                footprint.at(detail).contains(CENTRE),
-                "the asteroid is on it"
+                footprint.rect().contains_rect(slot.frame),
+                "every section stands on the footprint"
             );
         }
-        let full = wheel(held(), Detail::Full, Some(selected()));
         let slot = slot_of(&full, FRIGATE);
-        assert!(footprint.at(Detail::Full).contains_rect(slot.frame));
-        assert!(
-            !footprint.at(Detail::Small).contains_rect(slot.frame),
-            "the small footprint is not the full one"
-        );
         assert!(
             full.holds(slot.button(WheelButton::Plus(1), 1.0).center()),
             "a wheel holds its own buttons"

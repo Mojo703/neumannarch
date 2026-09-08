@@ -5,7 +5,6 @@ use neumannarch_protocol::{Crew, Lobby, Started};
 use neumannarch_sim::Time;
 use neumannarch_sim::belt::Belt;
 
-use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
 use crate::display::glyph_quad::GlyphQuad;
 use crate::display::scene::Scene;
@@ -48,7 +47,6 @@ impl Loading {
         let scene = &self.scene;
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
-            Bars::at_rest(scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, Pos2::ZERO, false);
             panel.text(
                 BUILDING,

@@ -4,7 +4,7 @@ use core::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Materials([f64; 3]);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Material {
     Metals,
     Volatiles,

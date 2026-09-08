@@ -1,3 +1,4 @@
+use super::glyph::{Role, Tier};
 use super::row::{Row, Weapon, Weights};
 use crate::ids::RowId;
 use crate::materials::{Material, Materials};
@@ -28,17 +29,21 @@ const HELD: Weights = Weights {
 
 pub(super) fn rows() -> Vec<Row> {
     vec![
-        row(
-            "constructor",
-            Materials::new(30.0, 10.0, 10.0),
-            50.0,
-            1.0,
-            Weights {
+        Row {
+            manoeuvring: Real(1.0),
+            steering: Weights {
                 caution: Real(12.0),
                 ..HELD
             },
-            vec![Weapon::Build { rate: Real(3.0) }],
-        ),
+            ..row(
+                "constructor",
+                Role::Build,
+                Tier::ONE,
+                Materials::new(30.0, 10.0, 10.0),
+                50.0,
+                vec![Weapon::Build { rate: Real(3.0) }],
+            )
+        },
         extractor("metals extractor", Material::Metals),
         extractor("volatiles extractor", Material::Volatiles),
         extractor("energy extractor", Material::Energy),
@@ -46,10 +51,10 @@ pub(super) fn rows() -> Vec<Row> {
             capacity: STORE,
             ..row(
                 "storage",
+                Role::Store,
+                Tier::ONE,
                 Materials::new(30.0, 0.0, 10.0),
                 150.0,
-                0.0,
-                Weights::STILL,
                 vec![],
             )
         },
@@ -57,43 +62,49 @@ pub(super) fn rows() -> Vec<Row> {
             capacity: STORE,
             ..row(
                 "shipyard",
+                Role::Build,
+                Tier::ONE,
                 Materials::new(100.0, 0.0, 40.0),
                 300.0,
-                0.0,
-                Weights::STILL,
                 vec![Weapon::Build { rate: Real(15.0) }],
             )
         },
-        row(
-            "raider",
-            Materials::new(20.0, 20.0, 5.0),
-            40.0,
-            2.0,
-            Weights {
+        Row {
+            manoeuvring: Real(2.0),
+            steering: Weights {
                 wander: Real(0.5),
                 cohesion: Real(1.5),
                 caution: Real(5.0),
                 chase: Real(1.2),
                 ..HELD
             },
-            vec![Weapon::Damage {
-                range: Real(3.0),
-                rate: Real(4.0),
-                damage: Real(3.0),
-                falloff: Real(0.5),
-            }],
-        ),
+            ..row(
+                "raider",
+                Role::ShortFire,
+                Tier::ONE,
+                Materials::new(20.0, 20.0, 5.0),
+                40.0,
+                vec![Weapon::Damage {
+                    range: Real(3.0),
+                    rate: Real(4.0),
+                    damage: Real(3.0),
+                    falloff: Real(0.5),
+                }],
+            )
+        },
         Row {
             plating: Real(1.0),
+            manoeuvring: Real(1.25),
+            steering: Weights {
+                cohesion: Real(2.5),
+                ..HELD
+            },
             ..row(
                 "frigate",
+                Role::ShortFire,
+                Tier::TWO,
                 Materials::new(80.0, 10.0, 30.0),
                 150.0,
-                1.25,
-                Weights {
-                    cohesion: Real(2.5),
-                    ..HELD
-                },
                 vec![Weapon::Damage {
                     range: Real(6.0),
                     rate: Real(2.0),
@@ -102,34 +113,38 @@ pub(super) fn rows() -> Vec<Row> {
                 }],
             )
         },
-        row(
-            "lancer",
-            Materials::new(40.0, 5.0, 40.0),
-            60.0,
-            0.75,
-            Weights {
+        Row {
+            manoeuvring: Real(0.75),
+            steering: Weights {
                 cohesion: Real(3.0),
                 caution: Real(12.0),
                 chase: Real(0.8),
                 ..HELD
             },
-            vec![Weapon::Damage {
-                range: Real(14.0),
-                rate: Real(1.0),
-                damage: Real(20.0),
-                falloff: Real(0.0),
-            }],
-        ),
+            ..row(
+                "lancer",
+                Role::LongFire,
+                Tier::THREE,
+                Materials::new(40.0, 5.0, 40.0),
+                60.0,
+                vec![Weapon::Damage {
+                    range: Real(14.0),
+                    rate: Real(1.0),
+                    damage: Real(20.0),
+                    falloff: Real(0.0),
+                }],
+            )
+        },
     ]
 }
 
 fn extractor(name: &'static str, material: Material) -> Row {
     row(
         name,
+        Role::Extract,
+        Tier::ONE,
         Materials::new(20.0, 0.0, 5.0),
         120.0,
-        0.0,
-        Weights::STILL,
         vec![Weapon::Extract {
             material,
             rate: Real(2.0),
@@ -139,17 +154,19 @@ fn extractor(name: &'static str, material: Material) -> Row {
 
 fn row(
     name: &'static str,
+    role: Role,
+    tier: Tier,
     cost: Materials,
     hp: f64,
-    manoeuvring: f64,
-    steering: Weights,
     weapons: Vec<Weapon>,
 ) -> Row {
     Row {
         name,
+        role,
+        tier,
         cost,
-        manoeuvring: Real(manoeuvring),
-        steering,
+        manoeuvring: Real(0.0),
+        steering: Weights::STILL,
         hp: Real(hp),
         plating: Real(0.0),
         capacity: Materials::ZERO,

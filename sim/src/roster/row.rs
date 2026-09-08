@@ -1,5 +1,6 @@
 use crate::materials::{Material, Materials};
 use crate::real::Real;
+use crate::roster::glyph::{Role, Tier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -10,6 +11,8 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Row {
     pub name: &'static str,
+    pub role: Role,
+    pub tier: Tier,
     pub cost: Materials,
     pub manoeuvring: Real,
     pub steering: Weights,
@@ -150,6 +153,8 @@ mod tests {
     fn row(manoeuvring: f64, weapons: Vec<Weapon>) -> Row {
         Row {
             name: "test",
+            role: Role::Scout,
+            tier: Tier::ONE,
             cost: Materials::new(1.0, 0.0, 0.0),
             manoeuvring: Real(manoeuvring),
             steering: Weights::STILL,

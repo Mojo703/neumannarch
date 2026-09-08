@@ -139,7 +139,6 @@ mod tests {
                 count: 1,
                 dashed: true,
             },
-            Entry::Placed,
         ];
         let refusals = [
             Refused::NotHost,

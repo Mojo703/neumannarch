@@ -1,4 +1,4 @@
-use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
+use mirage_engine::egui::{Align2, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
 use neumannarch_protocol::Lobby;
@@ -6,12 +6,10 @@ use neumannarch_sim::state::State;
 use neumannarch_sim::state::standings::{Standings, Team};
 use neumannarch_sim::{SeatId, TeamId};
 
-use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
-use crate::display::glyph::{self, Frame, Glyph, Size};
+use crate::display::glyph::{self, Cell, Primitive};
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
-use crate::display::scene::{Fill, Scene};
-use crate::display::stencil::{Cell, Stencil};
+use crate::display::scene::Scene;
 use crate::display::viewport::Viewport;
 use crate::display::{belt, hud};
 use crate::screens::control::{Controls, Rule};
@@ -21,10 +19,9 @@ const WIDTH: f32 = 520.0;
 
 const ACTION_WIDTH: f32 = 160.0;
 
-const ASTEROID_HELD: Glyph = Glyph {
-    frame: Frame::Square,
-    marks: Vec::new(),
-    size: Size::Medium,
+const ASTEROID_HELD: Primitive = Primitive::Dot {
+    at: (30.0, 30.0),
+    radius: 14.0,
 };
 
 const ASTEROID_STEP: f32 = 2.5 * glyph::HALF;
@@ -80,7 +77,6 @@ impl Results {
         let mut picked = None;
         ctx.ui(|ui| {
             hud::paint(scene, &viewport, ui.painter());
-            Bars::at_rest(scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             picked = paint(&panel, standings, teams, rematch);
         });
@@ -112,22 +108,14 @@ fn paint_team(panel: &Panel<'_>, rect: Rect, team: &Team, colour: SeatId, winner
         );
     }
     for at in 0..team.asteroids {
-        Stencil {
-            glyph: &ASTEROID_HELD,
-            cell: Cell {
-                centre: Pos2::new(
-                    rect.left() + ASTEROIDS_FROM + at as f32 * ASTEROID_STEP,
-                    rect.center().y,
-                ),
-                half: glyph::HALF,
-            },
-            colour: seat_color32(colour),
-            outline: Color32::WHITE,
-            fill: Fill::Solid,
-            alpha: 1.0,
-            starved: None,
+        Cell {
+            centre: Pos2::new(
+                rect.left() + ASTEROIDS_FROM + at as f32 * ASTEROID_STEP,
+                rect.center().y,
+            ),
+            half: glyph::HALF,
         }
-        .paint(panel.painter());
+        .paint(panel.painter(), &ASTEROID_HELD, seat_color32(colour));
     }
     panel.text(
         &format!("Value {}", team.value as u64),

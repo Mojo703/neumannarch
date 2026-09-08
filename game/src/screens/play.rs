@@ -96,7 +96,7 @@ impl Play {
             machine.session().state().roster(),
             Client {
                 selection: None,
-                pointed: None,
+                asked: Vec::new(),
                 gesture: None,
                 fights: &Fights::default(),
             },
@@ -242,17 +242,12 @@ impl Play {
         let window = ctx.window_size();
         let points_per_pixel = 1.0 / ctx.pixels_per_point();
         let dt = self.clock.frame(ctx.elapsed());
-        let mut motion = core::mem::take(&mut self.motion);
-        motion.begin(dt);
+        self.motion.begin(dt);
         self.order_alpha = ease::toward(self.order_alpha, self.order_target(), dt, Span::Slow);
 
         let viewport = Viewport::of(&self.camera, window, points_per_pixel);
         self.shifted = ctx.down(Button::Shift);
-        let aimed = self.wheels(
-            &viewport,
-            Some(viewport.point_at(ctx.pointer())),
-            &mut motion,
-        );
+        let aimed = self.easing_wheels(&viewport, viewport.point_at(ctx.pointer()));
         self.read_input(ctx, &viewport, &aimed);
         self.camera.settle(dt);
 
@@ -263,14 +258,7 @@ impl Play {
         let bar = scene
             .stockpile_bar
             .map(|view| StockpileBar::across(over, view));
-        let wheels = self.wheels_over(
-            &scene,
-            bar.as_ref(),
-            &viewport,
-            &self.aim(Some(pointer)),
-            &mut motion,
-        );
-        self.motion = motion;
+        let wheels = self.easing_wheels_over(&scene, &viewport, pointer);
 
         belt::draw(&scene, &viewport, ctx);
         let clicked = ctx.pressed(Button::Select);
@@ -324,7 +312,11 @@ impl Play {
             self.roster(),
             Client {
                 selection: self.selection,
-                pointed: self.hovered,
+                asked: self
+                    .hovered
+                    .into_iter()
+                    .chain(self.motion.shrinking())
+                    .collect(),
                 gesture: self.gesture().cloned(),
                 fights: &self.fights,
             },
@@ -361,26 +353,36 @@ impl Play {
         pointer: Option<egui::Pos2>,
         ease: &mut impl Ease,
     ) -> Wheels {
-        let scene = self.scene();
-        let bar = scene
-            .stockpile_bar
-            .map(|view| StockpileBar::across(viewport.bounds(), view));
-        self.wheels_over(&scene, bar.as_ref(), viewport, &self.aim(pointer), ease)
+        Wheels::over(
+            &self.scene(),
+            self.roster(),
+            viewport,
+            &self.aim(pointer),
+            ease,
+        )
     }
 
-    fn wheels_over(
-        &self,
+    fn easing_wheels(&mut self, viewport: &Viewport, pointer: egui::Pos2) -> Wheels {
+        let scene = self.scene();
+        self.easing_wheels_over(&scene, viewport, pointer)
+    }
+
+    fn easing_wheels_over(
+        &mut self,
         scene: &Scene,
-        bar: Option<&StockpileBar>,
         viewport: &Viewport,
-        aim: &Aim<'_>,
-        ease: &mut impl Ease,
+        pointer: egui::Pos2,
     ) -> Wheels {
-        let wheels = Wheels::over(scene, self.roster(), viewport, aim, ease);
-        match bar {
-            Some(bar) => wheels.clear_of(bar.frame()),
-            None => wheels,
-        }
+        let mut motion = core::mem::take(&mut self.motion);
+        let wheels = Wheels::over(
+            scene,
+            self.roster(),
+            viewport,
+            &self.aim(Some(pointer)),
+            &mut motion,
+        );
+        self.motion = motion;
+        wheels
     }
 
     fn aim(&self, pointer: Option<egui::Pos2>) -> Aim<'_> {

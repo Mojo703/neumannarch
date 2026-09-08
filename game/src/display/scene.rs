@@ -2,15 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::orbit::Gravity;
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::roster::{Glyph, Kind, Roster};
 use neumannarch_sim::state::view::{Berth, Building, View};
 use neumannarch_sim::state::{Asteroid, Command, Held, Preview, Route};
-use neumannarch_sim::{AsteroidId, Materials, Post, Posting, RowId, SeatId, Stockpile, Time, Vec3};
+use neumannarch_sim::{
+    AsteroidId, EntityId, Materials, Post, Posting, RowId, SeatId, Stockpile, Time, Vec3,
+};
 
 use crate::display::fights::Fights;
-use crate::display::glyph::Glyph;
 use crate::display::label;
 use crate::display::send::Sending;
+
+const STRUCTURE_RING_STEP_RADIANS: f64 = core::f64::consts::TAU / 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Fill {
@@ -99,7 +102,6 @@ pub enum Entry {
     Building(Building),
     Arriving { count: u32, from: AsteroidId },
     Wanted { count: u32, dashed: bool },
-    Placed,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,9 +125,45 @@ pub struct WheelView {
 
 pub struct Client<'a> {
     pub selection: Option<AsteroidId>,
-    pub pointed: Option<AsteroidId>,
+    pub asked: Vec<AsteroidId>,
     pub gesture: Option<WheelGesture>,
     pub fights: &'a Fights,
+}
+
+impl Client<'_> {
+    fn asked(&self) -> Vec<AsteroidId> {
+        let mut asked: Vec<AsteroidId> = self
+            .selection
+            .into_iter()
+            .chain(self.asked.iter().copied())
+            .collect();
+        asked.sort_unstable();
+        asked.dedup();
+        asked
+    }
+}
+
+fn ringed(view: &View, roster: &Roster) -> BTreeMap<EntityId, Vec3> {
+    let mut standing: BTreeMap<AsteroidId, u32> = BTreeMap::new();
+    let mut ringed = BTreeMap::new();
+    for present in &view.present {
+        if roster[present.row].kind() != Kind::Structure {
+            continue;
+        }
+        let Some(terrain) = view.terrain_of(present.home) else {
+            continue;
+        };
+        let rung = standing.entry(present.home).or_default();
+        let turn = STRUCTURE_RING_STEP_RADIANS * f64::from(*rung);
+        *rung += 1;
+        let asteroid = terrain.orbit.at(view.time, view.gravity).pos;
+        let radial = asteroid.normalized().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+        let along = Vec3::new(-radial.z, 0.0, radial.x);
+        let reach = terrain.radius + Belt::SPACING_METERS;
+        let (sin, cos) = turn.sin_cos();
+        ringed.insert(present.id, asteroid + (radial * cos + along * sin) * reach);
+    }
+    ringed
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +171,7 @@ pub struct Scene {
     pub asteroids: Vec<AsteroidView>,
     pub entities: Vec<EntityView>,
     pub wheels: Vec<WheelView>,
+    pub fights: BTreeMap<AsteroidId, Vec<Arc>>,
     pub flights: Vec<FlightLine>,
     pub stockpile_bar: Option<StockpileBarView>,
     pub zone: f64,
@@ -161,6 +200,7 @@ impl Scene {
                 .collect(),
             entities: Vec::new(),
             wheels: Vec::new(),
+            fights: BTreeMap::new(),
             flights: Vec::new(),
             stockpile_bar: None,
             zone: Belt::ZONE_RADIUS_METERS,
@@ -175,6 +215,12 @@ impl Scene {
     }
 
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene {
+        let ringed = ringed(view, roster);
+        let asked = client.asked();
+        let mut fights: BTreeMap<AsteroidId, Vec<Arc>> = BTreeMap::new();
+        for (asteroid, arc) in client.fights.arcs() {
+            fights.entry(asteroid).or_default().push(arc);
+        }
         Scene {
             asteroids: view
                 .terrain
@@ -192,14 +238,15 @@ impl Scene {
                 .iter()
                 .map(|present| EntityView {
                     seat: present.seat,
-                    glyph: Glyph::of(&roster[present.row]),
-                    pos: present.body.pos,
+                    glyph: roster[present.row].glyph(),
+                    pos: ringed.get(&present.id).copied().unwrap_or(present.body.pos),
                     range: reach(roster, present.row, present.at.standing().is_some()),
                 })
                 .collect(),
-            wheels: Sectors::of(view, client.fights, [client.selection, client.pointed])
+            wheels: Sectors::of(view, &fights, &asked)
                 .previewing(view, client.gesture.as_ref())
                 .drawn(),
+            fights,
             flights: flight_lines(view, client.gesture.as_ref()),
             stockpile_bar: Some(StockpileBarView {
                 stockpile: view.stockpile,
@@ -223,6 +270,13 @@ impl Scene {
     pub fn wheel_of(&self, asteroid: AsteroidId) -> Option<&WheelView> {
         self.wheels.iter().find(|wheel| wheel.asteroid == asteroid)
     }
+
+    pub fn largest_cap(&self) -> f64 {
+        self.asteroids
+            .iter()
+            .flat_map(|asteroid| asteroid.caps.amounts().map(|(_, cap)| cap))
+            .fold(0.0, f64::max)
+    }
 }
 
 impl Entry {
@@ -231,7 +285,7 @@ impl Entry {
             Entry::Present(_) | Entry::Leaving { .. } => Fill::Solid,
             Entry::Building(building) => Fill::Filling(building.progress as f32),
             Entry::Surplus(_) | Entry::Arriving { .. } => Fill::Hollow,
-            Entry::Wanted { dashed: false, .. } | Entry::Placed => Fill::Hollow,
+            Entry::Wanted { dashed: false, .. } => Fill::Hollow,
             Entry::Wanted { dashed: true, .. } => Fill::Dashed,
         }
     }
@@ -248,7 +302,6 @@ impl Entry {
             | Entry::Leaving { count, .. }
             | Entry::Arriving { count, .. }
             | Entry::Wanted { count, .. } => Some(count),
-            Entry::Placed => Some(1),
             Entry::Building(_) => None,
         }
     }
@@ -269,7 +322,6 @@ impl Entry {
             Entry::Arriving { from, .. } => format!("{name} arriving from {}", asteroid_name(from)),
             Entry::Wanted { dashed: true, .. } => format!("No builder for {name}"),
             Entry::Wanted { dashed: false, .. } => format!("{name} wanted"),
-            Entry::Placed => format!("{name} placed"),
         }
     }
 }
@@ -325,9 +377,12 @@ struct Sectors {
 }
 
 impl Sectors {
-    fn of(view: &View, fights: &Fights, full: [Option<AsteroidId>; 2]) -> Sectors {
+    fn of(view: &View, fights: &BTreeMap<AsteroidId, Vec<Arc>>, asked: &[AsteroidId]) -> Sectors {
         let mut rows: BTreeMap<Post, Rows> = BTreeMap::new();
         for (post, composition) in &view.compositions {
+            if !asked.contains(&post.asteroid) {
+                continue;
+            }
             let sector = rows.entry(*post).or_default();
             for (row, held) in &composition.rows {
                 let entries = entries_of(view, Posting::new(*post, *row), *held);
@@ -336,16 +391,10 @@ impl Sectors {
                 }
             }
         }
-        let placements: Vec<Posting> = match view.draft.ended() {
-            None => view
-                .draft
-                .stages()
-                .iter()
-                .filter_map(|stage| Some(Posting::of(stage.placed?, stage.seat, stage.row)))
-                .collect(),
-            Some(_) => Vec::new(),
-        };
         for (posting, plan) in &view.plans {
+            if !asked.contains(&posting.asteroid()) {
+                continue;
+            }
             let entries = rows
                 .entry(posting.post())
                 .or_default()
@@ -357,7 +406,7 @@ impl Sectors {
             let short = plan
                 .want
                 .saturating_sub(covered(view, *posting) + wanted_frames(plan.building));
-            if short > 0 && !placements.contains(posting) {
+            if short > 0 {
                 entries.push(shown(Entry::Wanted {
                     count: short,
                     dashed: !builds_at(view, posting.post()),
@@ -365,29 +414,25 @@ impl Sectors {
             }
             entries.sort_by_key(order);
         }
-        for posting in placements {
-            rows.entry(posting.post())
-                .or_default()
-                .entry(posting.row())
-                .or_default()
-                .push(shown(Entry::Placed));
-        }
         let arcs: BTreeMap<Post, Arc> = fights
-            .arcs()
-            .map(|(asteroid, arc)| {
-                (
-                    Post {
-                        asteroid,
-                        seat: arc.seat,
-                    },
-                    arc,
-                )
+            .iter()
+            .filter(|(asteroid, _)| asked.contains(asteroid))
+            .flat_map(|(asteroid, arcs)| {
+                arcs.iter().map(|arc| {
+                    (
+                        Post {
+                            asteroid: *asteroid,
+                            seat: arc.seat,
+                        },
+                        *arc,
+                    )
+                })
             })
             .collect();
         for post in arcs.keys() {
             rows.entry(*post).or_default();
         }
-        for asteroid in full.into_iter().flatten().filter(|_| view.still_in) {
+        for asteroid in asked.iter().copied().filter(|_| view.still_in) {
             rows.entry(Post {
                 asteroid,
                 seat: view.seat,
@@ -474,7 +519,7 @@ fn order(shown: &Shown) -> u8 {
         Entry::Leaving { .. } => 2,
         Entry::Building(_) => 3,
         Entry::Arriving { .. } => 4,
-        Entry::Wanted { .. } | Entry::Placed => 5,
+        Entry::Wanted { .. } => 5,
     }
 }
 
@@ -629,7 +674,12 @@ mod tests {
             local.session().state().roster(),
             Client {
                 selection,
-                pointed: None,
+                asked: local
+                    .view()
+                    .terrain
+                    .iter()
+                    .map(|terrain| terrain.asteroid)
+                    .collect(),
                 gesture,
                 fights,
             },
@@ -667,25 +717,35 @@ mod tests {
     }
 
     #[test]
-    fn a_asteroid_holding_no_composition_carries_no_wheel() {
+    fn only_an_asked_asteroid_carries_a_wheel_whatever_it_holds() {
         let mut local = Local::start(2);
-
-        assert!(scene(&local).wheels.is_empty(), "a fresh belt draws none");
-
         local.want(&[(at(0), SHIPYARD, 1)]);
-        let scene = scene(&local);
 
-        assert_eq!(
-            scene.wheels.len(),
-            1,
-            "one wheel, at the asteroid it wants at"
+        let asking = |asked: Vec<AsteroidId>| {
+            Scene::from_view(
+                &local.view(),
+                local.session().state().roster(),
+                Client {
+                    selection: None,
+                    asked,
+                    gesture: None,
+                    fights: &Fights::default(),
+                },
+            )
+        };
+        assert!(
+            asking(Vec::new()).wheels.is_empty(),
+            "nothing asked, nothing drawn"
         );
-        assert_eq!(scene.wheels[0].asteroid, at(0));
-        assert!(scene.wheel_of(at(5)).is_none());
+
+        let asked = asking(vec![at(0), at(5)]);
+        assert_eq!(asked.wheels.len(), 2, "one wheel per asteroid asked");
+        assert!(asked.wheel_of(at(0)).is_some());
+        assert!(asked.wheel_of(at(5)).is_some());
     }
 
     #[test]
-    fn a_draft_placement_stands_on_its_asteroid_as_a_placed_line_until_the_clock_starts() {
+    fn a_draft_pick_stands_on_its_asteroid_as_a_present_structure() {
         let mut local = Local::drafting(2);
         let stages = local.session().state().draft().stages().to_vec();
         let mine = stages
@@ -707,28 +767,10 @@ mod tests {
         for (asteroid, (seat, stage)) in [(at(0), first), (at(1), second)] {
             assert_eq!(
                 entries(&drafting, asteroid, seat, stage.row),
-                vec![shown(Entry::Placed)],
-                "the placement is the one line at its asteroid"
+                vec![shown(Entry::Present(1))],
+                "the pick stands at its asteroid while the draft runs"
             );
         }
-        assert_eq!(Entry::Placed.count(), Some(1));
-        assert_eq!(Entry::Placed.fill(), Fill::Hollow);
-        assert_eq!(Entry::Placed.phrase("Shipyard"), "Shipyard placed");
-
-        local.start_the_clock();
-        local.run(1);
-        let started = scene(&local);
-        assert!(
-            started.wheels.iter().all(|wheel| {
-                wheel.sectors.iter().all(|sector| {
-                    sector
-                        .rows
-                        .iter()
-                        .all(|row| row.entries.iter().all(|shown| shown.entry != Entry::Placed))
-                })
-            }),
-            "once the clock runs the structure stands and the line is gone"
-        );
     }
 
     #[test]
@@ -749,7 +791,7 @@ mod tests {
             local.session().state().roster(),
             Client {
                 selection: None,
-                pointed: Some(at(5)),
+                asked: vec![at(5)],
                 gesture: None,
                 fights: &Fights::default(),
             },
@@ -912,7 +954,7 @@ mod tests {
             local.session().state().roster(),
             Client {
                 selection: Some(at(5)),
-                pointed: Some(at(5)),
+                asked: vec![at(5)],
                 gesture: None,
                 fights: &Fights::default(),
             },

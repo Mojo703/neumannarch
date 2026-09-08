@@ -1,11 +1,10 @@
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke};
 use neumannarch_sim::{Material, Time};
 
-use crate::display::bars::{ICON_SLOT, ICON_WIDTH};
+use crate::display::bars::ICON_SLOT;
+use crate::display::glyph::{Cell, Drawing, Look};
 use crate::display::hue;
-use crate::display::icon;
 use crate::display::scene::{BarMark, StockpileBarView};
-use crate::display::stencil::Cell;
 use crate::display::wheel;
 use crate::screens::panel;
 
@@ -189,14 +188,13 @@ impl StockpileBar {
             true => (amount / capacity) as f32 * BAR_LENGTH,
             false => 0.0,
         };
-        Cell {
-            centre: egui::pos2(cell.frame.left() + ICON_SLOT / 2.0, cell.frame.center().y),
-            half: wheel::GLYPH_HALF,
-        }
-        .paint(
+        Drawing::icon(material).paint(
             painter,
-            &icon::of(material).placed(icon::CENTRE, ICON_WIDTH),
-            hue,
+            Cell {
+                centre: egui::pos2(cell.frame.left() + ICON_SLOT / 2.0, cell.frame.center().y),
+                half: wheel::GLYPH_HALF,
+            },
+            Look::solid(hue),
         );
         painter.text(
             egui::pos2(cell.stock.right(), cell.stock.center().y),

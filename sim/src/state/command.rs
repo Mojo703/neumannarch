@@ -150,14 +150,12 @@ impl State {
         if count > MAX_WANT {
             return Err(Rejected::TooMany);
         }
-        if count != PICK {
+        if count != PICK || seated.reserved(posting.row()) == 0 {
             return Ok(());
         }
         match self.draft.awaits(posting.seat(), posting.row()) {
             Some(false) => Err(Rejected::NotYet),
-            Some(true) if self.draft.took(posting.asteroid()).is_some() => {
-                Err(Rejected::AsteroidTaken)
-            }
+            Some(true) if self.is_taken(posting.asteroid()) => Err(Rejected::AsteroidTaken),
             Some(_) | None => Ok(()),
         }
     }
@@ -166,6 +164,7 @@ impl State {
         if self.draft.awaits(posting.seat(), posting.row()) == Some(true) {
             self.draft
                 .place(posting.asteroid(), posting.seat(), posting.row(), self.tick);
+            self.place_from_reserve(posting.post(), posting.row());
         }
     }
 

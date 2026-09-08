@@ -11,11 +11,13 @@ use crate::display::ease::{self, Span};
 use crate::display::label::{self, titled};
 use crate::display::scene::{ButtonAt, Scene, Shown, WheelButton, WheelGesture};
 use crate::display::viewport::Viewport;
-use crate::display::wheel::{ButtonRefusals, Buttons, Detail, Footprint, Placed, Sizing, Wheel};
+use crate::display::wheel::{ButtonRefusals, Buttons, Footprint, Placed, Wheel};
 
 pub const RESTING_ALPHA: f32 = 0.7;
 
 const HOVER_MARGIN: f32 = 48.0;
+
+const GONE_SCALE: f32 = 0.01;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Aim<'a> {
@@ -61,7 +63,7 @@ pub enum Eased {
 impl Eased {
     fn at_rest(self) -> f32 {
         match self {
-            Eased::Scale => Detail::Small.scale(),
+            Eased::Scale => 0.0,
             Eased::Alpha => RESTING_ALPHA,
         }
     }
@@ -89,6 +91,7 @@ pub struct Motion {
 #[derive(Clone, Copy, Debug)]
 struct Tween {
     value: f64,
+    target: f64,
     stepped: u64,
 }
 
@@ -96,6 +99,27 @@ impl Motion {
     pub fn begin(&mut self, dt: f64) {
         self.frame += 1;
         self.dt = dt;
+        let gone: Vec<AsteroidId> = self
+            .scales()
+            .filter(|(_, tween)| tween.target == 0.0 && tween.value <= f64::from(GONE_SCALE))
+            .map(|(asteroid, _)| asteroid)
+            .collect();
+        self.tweens
+            .retain(|(asteroid, _), _| !gone.contains(asteroid));
+    }
+
+    pub fn shrinking(&self) -> Vec<AsteroidId> {
+        self.scales()
+            .filter(|(_, tween)| tween.value > f64::from(GONE_SCALE))
+            .map(|(asteroid, _)| asteroid)
+            .collect()
+    }
+
+    fn scales(&self) -> impl Iterator<Item = (AsteroidId, &Tween)> {
+        self.tweens
+            .iter()
+            .filter(|((_, eased), _)| *eased == Eased::Scale)
+            .map(|((asteroid, _), tween)| (*asteroid, tween))
     }
 }
 
@@ -105,11 +129,13 @@ impl Ease for Motion {
         let dt = self.dt;
         let tween = self.tweens.entry((asteroid, eased)).or_insert(Tween {
             value: f64::from(eased.at_rest()),
+            target: f64::from(target),
             stepped: 0,
         });
         if tween.stepped != frame {
             tween.stepped = frame;
-            tween.value = ease::toward(tween.value, f64::from(target), dt, Span::Fast);
+            tween.target = f64::from(target);
+            tween.value = ease::toward(tween.value, tween.target, dt, Span::Fast);
         }
         tween.value as f32
     }
@@ -171,40 +197,37 @@ impl Wheels {
         ease: &mut impl Ease,
     ) -> Wheels {
         let footprints = footprints(scene, roster, viewport, aim.viewer);
-        let resting = laid(&footprints, None, scene.selection);
-        let hovered = hovered(&footprints, &resting, aim);
-        let placed: Vec<Placed> = match hovered {
-            None => resting,
-            Some(_) => laid(&footprints, hovered, scene.selection),
-        }
-        .into_iter()
-        .map(|placed| placed.eased(ease))
-        .collect();
+        let hovered = hovered(&footprints, aim);
+        let asked =
+            |asteroid: AsteroidId| Some(asteroid) == hovered || Some(asteroid) == scene.selection;
+        let placed: Vec<Placed> = laid(&footprints, hovered, scene.selection)
+            .into_iter()
+            .map(|placed| match asked(placed.asteroid) {
+                true => placed,
+                false => Placed {
+                    scale: 0.0,
+                    shrinking: true,
+                    ..placed
+                },
+            })
+            .map(|placed| placed.eased(ease))
+            .filter(|placed| placed.scale > GONE_SCALE)
+            .collect();
         let mut wheels: Vec<Wheel> = placed
             .iter()
             .filter_map(|placed| {
                 let view = scene.wheel_of(placed.asteroid)?;
-                let buttons = (placed.sizing.detail == Detail::Full)
-                    .then(|| aim.buttons_at(placed.asteroid, roster));
-                let wheel = Wheel::over(*placed, view, roster, aim.viewer, buttons);
+                let buttons = aim.buttons_at(placed.asteroid, roster);
+                let wheel = Wheel::over(*placed, view, roster, aim.viewer, Some(buttons));
                 wheel.draws().then_some(wheel)
             })
             .collect();
         wheels.sort_by(|a, b| b.alpha().total_cmp(&a.alpha()));
         Wheels {
             wheels,
-            bars: Bars::over(scene, viewport, &placed),
+            bars: Bars::over(scene, &placed),
             hovered,
         }
-    }
-
-    pub fn clear_of(mut self, rect: Rect) -> Wheels {
-        for wheel in &mut self.wheels {
-            wheel.clear_of(rect);
-        }
-        self.wheels.retain(Wheel::draws);
-        self.bars.clear_of(rect);
-        self
     }
 
     pub fn frames(&self) -> impl Iterator<Item = Rect> + '_ {
@@ -263,21 +286,9 @@ impl Wheels {
 }
 
 impl Placed {
-    pub fn resting(asteroid: AsteroidId, centre: Pos2) -> Placed {
-        Placed {
-            asteroid,
-            centre,
-            sizing: Sizing::settled(Detail::Small),
-            alpha: RESTING_ALPHA,
-        }
-    }
-
     fn eased(self, ease: &mut impl Ease) -> Placed {
         Placed {
-            sizing: Sizing {
-                detail: self.sizing.detail,
-                scale: ease.ease(self.asteroid, Eased::Scale, self.sizing.scale),
-            },
+            scale: ease.ease(self.asteroid, Eased::Scale, self.scale),
             alpha: ease.ease(self.asteroid, Eased::Alpha, self.alpha),
             ..self
         }
@@ -297,18 +308,29 @@ fn footprints(
     viewport: &Viewport,
     viewer: SeatId,
 ) -> Vec<Footprint> {
-    let asteroids: BTreeMap<AsteroidId, Pos2> = scene
+    let asteroids: BTreeMap<AsteroidId, (Pos2, f32)> = scene
         .asteroids
         .iter()
-        .filter_map(|asteroid| Some((asteroid.id, viewport.point_of(asteroid.pos)?)))
+        .filter_map(|asteroid| {
+            let zone_points = scene.zone as f32 / viewport.meters_per_point(asteroid.pos)?;
+            Some((
+                asteroid.id,
+                (
+                    viewport.point_of(asteroid.pos)?,
+                    Wheel::stand_off(zone_points),
+                ),
+            ))
+        })
         .collect();
     scene
         .wheels
         .iter()
         .filter_map(|wheel| {
+            let (centre, stand_off) = *asteroids.get(&wheel.asteroid)?;
             Some(Footprint::of(
                 wheel.asteroid,
-                *asteroids.get(&wheel.asteroid)?,
+                centre,
+                stand_off,
                 wheel,
                 roster,
                 viewer,
@@ -325,52 +347,39 @@ fn laid(
     let whole = hovered.or(selected);
     footprints
         .iter()
-        .map(|footprint| {
-            let asteroid = Some(footprint.asteroid);
-            let detail = match asteroid == hovered || asteroid == selected {
-                true => Detail::Full,
-                false => Detail::Small,
-            };
-            Placed {
-                sizing: Sizing::settled(detail),
-                alpha: match asteroid == whole {
-                    true => 1.0,
-                    false => RESTING_ALPHA,
-                },
-                ..Placed::resting(footprint.asteroid, footprint.centre)
-            }
+        .map(|footprint| Placed {
+            asteroid: footprint.asteroid,
+            centre: footprint.centre,
+            stand_off: footprint.stand_off,
+            scale: 1.0,
+            alpha: match Some(footprint.asteroid) == whole {
+                true => 1.0,
+                false => RESTING_ALPHA,
+            },
+            shrinking: false,
         })
         .collect()
 }
 
-fn hovered(footprints: &[Footprint], resting: &[Placed], aim: &Aim) -> Option<AsteroidId> {
+fn hovered(footprints: &[Footprint], aim: &Aim) -> Option<AsteroidId> {
     let pointer = aim.pointer?;
-    let extent = |placed: &Placed, detail: Detail| {
+    let held = footprints
+        .iter()
+        .find(|footprint| Some(footprint.asteroid) == aim.hovered)
+        .filter(|footprint| footprint.rect().expand(HOVER_MARGIN).contains(pointer))
+        .map(|footprint| footprint.asteroid);
+    held.or_else(|| {
         footprints
             .iter()
-            .find(|footprint| footprint.asteroid == placed.asteroid)
-            .map(|footprint| footprint.at(detail))
-    };
-    let held = aim.hovered.filter(|asteroid| {
-        resting.iter().any(|placed| {
-            placed.asteroid == *asteroid
-                && extent(placed, Detail::Full)
-                    .is_some_and(|extent| extent.expand(HOVER_MARGIN).contains(pointer))
-        })
-    });
-    held.or_else(|| {
-        resting
-            .iter()
-            .filter_map(|placed| Some((placed, extent(placed, placed.sizing.detail)?)))
-            .filter(|(_, extent)| extent.contains(pointer))
-            .min_by(|(a, a_extent), (b, b_extent)| {
-                a_extent.area().total_cmp(&b_extent.area()).then(
+            .filter(|footprint| footprint.rect().contains(pointer))
+            .min_by(|a, b| {
+                a.rect().area().total_cmp(&b.rect().area()).then(
                     a.centre
                         .distance(pointer)
                         .total_cmp(&b.centre.distance(pointer)),
                 )
             })
-            .map(|(placed, _)| placed.asteroid)
+            .map(|footprint| footprint.asteroid)
     })
 }
 
@@ -384,23 +393,26 @@ mod tests {
     use neumannarch_sim::state::view::View;
     use neumannarch_sim::state::{Command, Rejected};
     use neumannarch_sim::step::fire::Shots;
-    use neumannarch_sim::{Retention, Sequence, Session, Setup, TeamId, Tick};
+    use neumannarch_sim::{Materials, Retention, Sequence, Session, Setup, TeamId, Tick, Vec3};
 
     use super::*;
+    use crate::display::camera::BeltCamera;
     use crate::display::local::Local;
-    use crate::display::scene::{Entry, RowView, SectorView, WheelView};
+    use crate::display::scene::{AsteroidView, Entry, RowView, SectorView, WheelView};
 
     const A: AsteroidId = AsteroidId(0);
+
+    const STAND_OFF: f32 = 80.0;
 
     const B: AsteroidId = AsteroidId(1);
 
     static WATCHING: LazyLock<Watching> = LazyLock::new(Watching::of);
 
-    fn view(asteroid: AsteroidId) -> WheelView {
+    fn view_of(asteroid: AsteroidId, seat: SeatId) -> WheelView {
         WheelView {
             asteroid,
             sectors: vec![SectorView {
-                seat: SeatId(0),
+                seat,
                 rows: vec![RowView {
                     row: FRIGATE,
                     entries: vec![Shown {
@@ -413,12 +425,23 @@ mod tests {
         }
     }
 
+    fn view(asteroid: AsteroidId) -> WheelView {
+        view_of(asteroid, SeatId(0))
+    }
+
     fn footprints(apart: f32) -> Vec<Footprint> {
         let roster = Roster::shipped();
         [(A, egui::pos2(0.0, 0.0)), (B, egui::pos2(apart, 0.0))]
             .into_iter()
             .map(|(asteroid, centre)| {
-                Footprint::of(asteroid, centre, &view(asteroid), &roster, SeatId(0))
+                Footprint::of(
+                    asteroid,
+                    centre,
+                    STAND_OFF,
+                    &view(asteroid),
+                    &roster,
+                    SeatId(0),
+                )
             })
             .collect()
     }
@@ -447,11 +470,11 @@ mod tests {
         }
     }
 
-    fn detail(placed: &[Placed], asteroid: AsteroidId) -> Option<Detail> {
+    fn scaled(placed: &[Placed], asteroid: AsteroidId) -> Option<f32> {
         placed
             .iter()
             .find(|placed| placed.asteroid == asteroid)
-            .map(|placed| placed.sizing.detail)
+            .map(|placed| placed.scale)
     }
 
     fn alpha(placed: &[Placed], asteroid: AsteroidId) -> Option<f32> {
@@ -470,30 +493,30 @@ mod tests {
     }
 
     fn far() -> f32 {
-        4.0 * footprints(0.0)[0].at(Detail::Full).width()
+        4.0 * footprints(0.0)[0].rect().width()
     }
 
-    #[test]
-    fn nothing_of_a_wheel_or_a_bar_stands_inside_a_rect_it_is_cleared_of() {
-        use crate::display::camera::BeltCamera;
-        use crate::display::scene::AsteroidView;
-        use neumannarch_sim::{Materials, Vec3};
-
-        let viewport = Viewport::of(
-            &BeltCamera::new(Vec3::ZERO, 2_000.0, 14_000.0, 25_000.0),
-            mirage_engine::math::UVec2::new(1280, 720),
-            1.0,
-        );
-        let scene = Scene {
-            asteroids: vec![AsteroidView {
-                id: A,
-                pos: Vec3::ZERO,
-                radius: 6.0,
-                caps: Materials::new(20.0, 10.0, 5.0),
-                pull: Materials::ZERO,
-            }],
+    fn scene(selection: Option<AsteroidId>, wheels: Vec<WheelView>) -> Scene {
+        Scene {
+            asteroids: vec![
+                AsteroidView {
+                    id: A,
+                    pos: Vec3::new(-300.0, 0.0, 0.0),
+                    radius: 6.0,
+                    caps: Materials::new(20.0, 10.0, 5.0),
+                    pull: Materials::ZERO,
+                },
+                AsteroidView {
+                    id: B,
+                    pos: Vec3::new(300.0, 0.0, 0.0),
+                    radius: 6.0,
+                    caps: Materials::new(20.0, 10.0, 5.0),
+                    pull: Materials::ZERO,
+                },
+            ],
             entities: Vec::new(),
-            wheels: vec![view(A)],
+            wheels,
+            fights: BTreeMap::new(),
             flights: Vec::new(),
             stockpile_bar: None,
             zone: 1.0,
@@ -502,40 +525,17 @@ mod tests {
             belt_inner_radius: Belt::inner_radius_meters(),
             belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             seat: SeatId(0),
-            selection: Some(A),
+            selection,
             gesture: None,
-        };
-        let roster = Roster::shipped();
-        let centre = viewport.point_of(Vec3::ZERO).expect("on screen");
-        let whole = Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still);
-        let top = whole
-            .frames()
-            .fold(Rect::NOTHING, |bounds, frame| bounds.union(frame))
-            .top();
-        let bar = Rect::from_min_max(
-            egui::pos2(centre.x - 400.0, top - 10.0),
-            egui::pos2(centre.x + 400.0, top + 20.0),
-        );
-        assert!(
-            whole.frames().any(|frame| frame.intersects(bar)),
-            "the wheel and its bars reach into the stockpile bar"
-        );
-        let crossing = whole
-            .frames()
-            .find(|frame| frame.intersects(bar))
-            .expect("a frame under the stockpile bar");
+        }
+    }
 
-        let cleared =
-            Wheels::over(&scene, &roster, &viewport, &aim(centre, None), &mut Still).clear_of(bar);
-
-        assert!(cleared.frames().all(|frame| !frame.intersects(bar)));
-        assert!(cleared.frames().count() < whole.frames().count());
-        assert_eq!(
-            cleared.button_at(crossing.center()),
-            None,
-            "what is not drawn takes no click"
-        );
-        assert_eq!(cleared.spoken_at(crossing.center()), None);
+    fn viewport() -> Viewport {
+        Viewport::of(
+            &BeltCamera::new(Vec3::ZERO, 2_000.0, 14_000.0, 25_000.0),
+            mirage_engine::math::UVec2::new(1280, 720),
+            1.0,
+        )
     }
 
     #[test]
@@ -586,26 +586,74 @@ mod tests {
     }
 
     #[test]
-    fn a_wheel_is_full_where_the_pointer_or_the_selection_rests_and_small_elsewhere() {
-        let none = placed(far(), None, None);
-        assert_eq!(detail(&none, A), Some(Detail::Small));
-        assert_eq!(detail(&none, B), Some(Detail::Small));
+    fn only_the_hovered_and_the_selected_wheel_are_laid_whole_and_take_a_click() {
+        let laid = placed(far(), Some(A), Some(B));
+        assert_eq!(scaled(&laid, A), Some(1.0));
+        assert_eq!(scaled(&laid, B), Some(1.0));
 
-        let selected = placed(far(), None, Some(B));
-        assert_eq!(detail(&selected, A), Some(Detail::Small));
-        assert_eq!(detail(&selected, B), Some(Detail::Full));
+        let roster = Roster::shipped();
+        let viewport = viewport();
+        let scene = |selection| scene(selection, vec![view(A), view(B)]);
+        let centre = |asteroid: usize| {
+            viewport
+                .point_of(scene(None).asteroids[asteroid].pos)
+                .expect("on screen")
+        };
+        let mut motion = Motion::default();
+        let fast = Span::Fast.seconds();
 
-        let hovered = placed(far(), Some(A), None);
-        assert_eq!(detail(&hovered, A), Some(Detail::Full));
-        assert_eq!(detail(&hovered, B), Some(Detail::Small));
-
-        let both = placed(far(), Some(A), Some(B));
-        assert_eq!(detail(&both, A), Some(Detail::Full));
-        assert_eq!(
-            detail(&both, B),
-            Some(Detail::Full),
-            "two may be full at once"
+        motion.begin(fast);
+        let held = Wheels::over(
+            &scene(Some(B)),
+            &roster,
+            &viewport,
+            &aim(centre(1), None),
+            &mut motion,
         );
+        assert_eq!(
+            held.iter().map(Wheel::asteroid).collect::<Vec<_>>(),
+            vec![B],
+            "a wheel neither hovered nor selected is sent to nothing"
+        );
+
+        motion.begin(fast / 2.0);
+        let turning = Wheels::over(
+            &scene(Some(A)),
+            &roster,
+            &viewport,
+            &aim(centre(0), None),
+            &mut motion,
+        );
+        let wheel = |asteroid| {
+            turning
+                .iter()
+                .find(|wheel| wheel.asteroid() == asteroid)
+                .expect("a wheel")
+        };
+        assert_eq!(
+            wheel(B).frames().count(),
+            wheel(A).frames().count(),
+            "a wheel shrinking away keeps its sector laid as it was"
+        );
+        let plus = |asteroid| {
+            wheel(asteroid)
+                .button(FRIGATE, WheelButton::Plus(1))
+                .expect("its buttons are drawn")
+        };
+        assert_eq!(
+            wheel(A).button_at(plus(A)),
+            Some(ButtonAt {
+                posting: Posting::of(A, SeatId(0), FRIGATE),
+                button: WheelButton::Plus(1),
+            }),
+            "the selected wheel takes the click"
+        );
+        assert_eq!(
+            wheel(B).button_at(plus(B)),
+            None,
+            "a wheel shrinking away takes none"
+        );
+        assert_eq!(wheel(B).spoken_at(plus(B)), None, "and says nothing");
     }
 
     #[test]
@@ -629,39 +677,28 @@ mod tests {
             Some(RESTING_ALPHA),
             "and the selected faint at full size"
         );
-
-        let covering = placed(1.0, None, Some(A));
-        assert_eq!(
-            alpha(&covering, B),
-            Some(RESTING_ALPHA),
-            "a covered wheel is no fainter than one at rest"
-        );
     }
 
     #[test]
-    fn a_hovered_wheel_stays_hovered_where_it_grows_under_the_pointer() {
+    fn a_hovered_wheel_keeps_the_pointer_until_it_leaves_by_the_margin() {
         let footprints = footprints(far());
-        let resting = laid(&footprints, None, None);
-        let small = footprints[0].at(Detail::Small);
-        let full = footprints[0].at(Detail::Full);
-        let outside_small = egui::pos2(small.right() + 2.0, 0.0);
-        assert!(full.contains(outside_small), "but inside the full one");
+        let rect = footprints[0].rect();
+        let outside = egui::pos2(rect.right() + 2.0, 0.0);
 
         assert_eq!(
-            hovered(&footprints, &resting, &aim(outside_small, None)),
+            hovered(&footprints, &aim(outside, None)),
             None,
-            "hovering is decided against the wheels as they stand"
+            "past a wheel's edge nothing is hovered"
         );
         assert_eq!(
-            hovered(&footprints, &resting, &aim(outside_small, Some(A))),
+            hovered(&footprints, &aim(outside, Some(A))),
             Some(A),
-            "and a hovered wheel keeps the pointer while it grows"
+            "and a hovered wheel keeps the pointer"
         );
         assert_eq!(
             hovered(
                 &footprints,
-                &resting,
-                &aim(egui::pos2(full.right() + HOVER_MARGIN - 1.0, 0.0), Some(A))
+                &aim(egui::pos2(rect.right() + HOVER_MARGIN - 1.0, 0.0), Some(A))
             ),
             Some(A),
             "an overshoot past its edge keeps it"
@@ -669,16 +706,15 @@ mod tests {
         assert_eq!(
             hovered(
                 &footprints,
-                &resting,
-                &aim(egui::pos2(full.right() + HOVER_MARGIN + 1.0, 0.0), Some(A))
+                &aim(egui::pos2(rect.right() + HOVER_MARGIN + 1.0, 0.0), Some(A))
             ),
             None,
-            "until the pointer leaves its full extent by the margin"
+            "until the pointer leaves its extent by the margin"
         );
     }
 
     #[test]
-    fn a_wheel_grows_from_rest_and_shrinks_back_over_the_same_span() {
+    fn a_wheel_grows_from_nothing_and_shrinks_back_over_the_same_span_then_is_dropped() {
         let mut motion = Motion::default();
         let frame = |motion: &mut Motion, dt: f64, target: f32| {
             motion.begin(dt);
@@ -690,56 +726,77 @@ mod tests {
             );
             first
         };
-        let small = Detail::Small.scale();
 
         let fast = Span::Fast.seconds();
         let born = frame(&mut motion, fast / 2.0, 1.0);
         assert!(
-            (born - (small + 1.0) / 2.0).abs() < 1e-3,
-            "{born}: a wheel first drawn full grows from small"
+            (born - 0.5).abs() < 1e-3,
+            "{born}: a wheel first drawn grows from nothing"
         );
         assert_eq!(frame(&mut motion, fast, 1.0), 1.0);
         assert_eq!(frame(&mut motion, 1.0, 1.0), 1.0, "and holds");
-        let back = frame(&mut motion, fast / 2.0, small);
+        assert_eq!(motion.shrinking(), vec![A], "a wheel on screen is drawn");
+        let back = frame(&mut motion, fast / 2.0, 0.0);
         assert!(
-            (back - (small + 1.0) / 2.0).abs() < 1e-3,
+            (back - 0.5).abs() < 1e-3,
             "{back}: it shrinks by the same span"
         );
-        assert_eq!(frame(&mut motion, fast, small), small);
+        assert_eq!(motion.shrinking(), vec![A], "and is drawn while it shrinks");
+        assert_eq!(frame(&mut motion, fast, 0.0), 0.0);
+        assert!(
+            motion.shrinking().is_empty(),
+            "a wheel shrunk to nothing is drawn no more"
+        );
+
+        motion.begin(fast);
+        assert!(motion.tweens.is_empty(), "and its tweens are dropped");
     }
 
     #[test]
-    fn a_small_wheel_under_the_pointer_is_hovered_though_the_full_one_reaches_it() {
-        let apart = footprints(0.0)[0].at(Detail::Full).width() / 2.0;
-        let footprints = footprints(apart);
-        let resting = laid(&footprints, None, Some(A));
-        let inside_b = footprints[1].at(Detail::Small).center();
+    fn a_narrow_wheel_under_the_pointer_is_hovered_though_a_wider_one_reaches_it() {
+        let roster = Roster::shipped();
+        let apart = footprints(0.0)[0].rect().width() / 2.0;
+        let footprints = vec![
+            Footprint::of(
+                A,
+                egui::pos2(0.0, 0.0),
+                STAND_OFF,
+                &view(A),
+                &roster,
+                SeatId(0),
+            ),
+            Footprint::of(
+                B,
+                egui::pos2(apart, 0.0),
+                STAND_OFF,
+                &view_of(B, SeatId(1)),
+                &roster,
+                SeatId(0),
+            ),
+        ];
+        let inside_b = footprints[1].rect().center();
         assert!(
-            footprints[0].at(Detail::Full).contains(inside_b),
-            "the full wheel reaches over the small one"
+            footprints[1].rect().width() < footprints[0].rect().width(),
+            "a rival's wheel shows what it holds alone"
+        );
+        assert!(
+            footprints[0].rect().contains(inside_b),
+            "the wider wheel reaches over the narrow one"
         );
 
-        assert_eq!(
-            hovered(&footprints, &resting, &aim(inside_b, None)),
-            Some(B)
-        );
+        assert_eq!(hovered(&footprints, &aim(inside_b, None)), Some(B));
     }
 
     #[test]
     fn the_pointer_over_a_wheel_hovers_the_nearest_one() {
         let footprints = footprints(far());
-        let resting = laid(&footprints, None, None);
 
         assert_eq!(
-            hovered(&footprints, &resting, &aim(egui::pos2(10.0, 0.0), None)),
+            hovered(&footprints, &aim(egui::pos2(10.0, 0.0), None)),
             Some(A)
         );
         assert_eq!(
-            hovered(
-                &footprints,
-                &resting,
-                &aim(egui::pos2(far() + 10.0, 0.0), None)
-            ),
+            hovered(&footprints, &aim(egui::pos2(far() + 10.0, 0.0), None)),
             Some(B)
         );
     }

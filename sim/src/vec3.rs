@@ -35,7 +35,7 @@ impl Vec3 {
         self.length_squared().sqrt()
     }
 
-    pub(crate) fn normalized(self) -> Option<Vec3> {
+    pub fn normalized(self) -> Option<Vec3> {
         let length = self.length();
         (length > 0.0).then(|| self * (1.0 / length))
     }

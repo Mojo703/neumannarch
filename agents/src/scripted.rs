@@ -164,11 +164,7 @@ mod tests {
             state[picking].reserved(row) > 0,
             "a row it holds in reserve"
         );
-        assert_eq!(
-            state.draft().took(asteroid),
-            None,
-            "an asteroid no seat has taken"
-        );
+        assert!(!state.is_taken(asteroid), "an asteroid no seat has taken");
 
         let waiting = state.draft().stages()[1].seat;
         let shut =
@@ -188,15 +184,8 @@ mod tests {
             (SeatId(1), scripted(Personality::expand())),
         ]);
 
-        let draft = state.draft();
-        let mine: Vec<AsteroidId> = draft
-            .placements(SeatId(0))
-            .map(|(asteroid, _)| asteroid)
-            .collect();
-        let theirs: Vec<AsteroidId> = draft
-            .placements(SeatId(1))
-            .map(|(asteroid, _)| asteroid)
-            .collect();
+        let mine: Vec<AsteroidId> = state.occupied_by(SeatId(0)).collect();
+        let theirs: Vec<AsteroidId> = state.occupied_by(SeatId(1)).collect();
 
         assert_eq!(mine.len(), 2, "a seat drafts one asteroid per reserve row");
         assert_eq!(theirs.len(), 2);
@@ -204,7 +193,7 @@ mod tests {
             mine.iter().all(|asteroid| !theirs.contains(asteroid)),
             "{mine:?} and {theirs:?} share an asteroid"
         );
-        assert_eq!(draft.ended(), Some(state.tick().back(1)));
+        assert_eq!(state.draft().ended(), Some(state.tick().back(1)));
     }
 
     #[test]
@@ -217,10 +206,10 @@ mod tests {
             |state| state.time().0 >= opening,
         );
 
-        let (asteroid, _) = state
-            .draft()
-            .placements(SeatId(0))
-            .find(|(_, row)| *row == CONSTRUCTOR)
+        let asteroid = state
+            .entities()
+            .find(|entity| entity.seat() == SeatId(0) && entity.row() == CONSTRUCTOR)
+            .map(|entity| entity.home())
             .expect("it drafted its constructor somewhere");
         let post = Post {
             asteroid,

@@ -1,5 +1,6 @@
 use core::ops::Index;
 
+pub use glyph::{Frame, Glyph, Role, Tier};
 pub use row::{Kind, Row, Weapon, Weights};
 pub use shipped::{
     CONSTRUCTOR, ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
@@ -83,6 +84,7 @@ impl Index<RowId> for Roster {
     }
 }
 
+mod glyph;
 mod row;
 mod shipped;
 

@@ -1,12 +1,11 @@
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::roster::{Glyph, Roster};
 use neumannarch_sim::state::{Draft, GRACE, STAGE_SPAN};
 use neumannarch_sim::{AsteroidId, SeatId, Tick};
 
-use crate::display::glyph::{self, Glyph};
+use crate::display::glyph::{self, Cell, Drawing, Look};
 use crate::display::glyph_quad::seat_color32;
 use crate::display::scene::{Fill, asteroid_name};
-use crate::display::stencil::{Cell, Stencil};
 use crate::display::wheel;
 use crate::display::wheels::RESTING_ALPHA;
 use crate::screens::panel;
@@ -92,7 +91,7 @@ impl Order {
             .enumerate()
             .map(|(at, stage)| Row {
                 rect: row_at(at),
-                stage: Some((stage.seat, Glyph::of(&roster[stage.row]))),
+                stage: Some((stage.seat, roster[stage.row].glyph())),
                 name: names[usize::from(stage.seat.0)].clone(),
                 standing: match (stage.placed, running) {
                     (Some(asteroid), _) => Standing::Placed(asteroid),
@@ -162,19 +161,20 @@ impl Row {
         let middle = self.rect.center().y;
         if let Some((seat, glyph)) = &self.stage {
             let (fill, outline) = self.marked(*seat);
-            Stencil {
-                glyph,
-                cell: Cell {
+            Drawing::of(*glyph).paint(
+                painter,
+                Cell {
                     centre: Pos2::new(self.rect.left() + GLYPH_SLOT / 2.0, middle),
-                    half: glyph::HALF * glyph.size.scale(),
+                    half: glyph::HALF,
                 },
-                colour: seat_color32(*seat),
-                outline,
-                fill,
-                alpha,
-                starved: None,
-            }
-            .paint(painter);
+                Look {
+                    colour: seat_color32(*seat),
+                    outline,
+                    fill,
+                    alpha,
+                    starved: None,
+                },
+            );
         }
         painter.text(
             Pos2::new(self.rect.left() + GLYPH_SLOT + GAP, middle),

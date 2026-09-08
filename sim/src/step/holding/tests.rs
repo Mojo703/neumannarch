@@ -64,7 +64,7 @@ fn a_force_held_for_a_asteroid_period_never_has_a_ship_inside_the_asteroid() {
     let mut world = world();
     let force: Vec<EntityId> = (0..12)
         .map(|_| {
-            let body = crate::step::spawn_body(&world.state, HOME, world.state.time());
+            let body = world.state.spawn_body(HOME, world.state.time());
             world.free(0, FRIGATE, HOME, body)
         })
         .collect();

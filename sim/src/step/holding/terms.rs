@@ -75,6 +75,7 @@ mod tests {
     use crate::TICKS_PER_SECOND;
     use crate::materials::Materials;
     use crate::roster::Weights;
+    use crate::roster::{Role, Tier};
 
     const LIMIT: f64 = 1.25;
 
@@ -94,6 +95,8 @@ mod tests {
     fn row() -> Row {
         Row {
             name: "test",
+            role: Role::Scout,
+            tier: Tier::ONE,
             cost: Materials::new(1.0, 0.0, 0.0),
             manoeuvring: Real(LIMIT),
             steering: weights(),

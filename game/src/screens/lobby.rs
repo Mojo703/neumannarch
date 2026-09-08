@@ -9,7 +9,6 @@ use neumannarch_sim::belt::Belt;
 use neumannarch_sim::{SeatId, TICKS_PER_SECOND, TeamId, Tick, Time};
 
 use crate::controls::Button;
-use crate::display::bars::Bars;
 use crate::display::camera::BeltCamera;
 use crate::display::ease::Clock;
 use crate::display::glyph_quad::{GlyphQuad, seat_color32};
@@ -152,7 +151,6 @@ impl LobbyScreen {
         let mut asked = Asked::default();
         ctx.ui(|ui| {
             hud::paint(&self.scene, &viewport, ui.painter());
-            Bars::at_rest(&self.scene, &viewport).paint(ui.painter());
             let panel = Panel::new(ui.painter(), window, pointer, clicked);
             asked = self.paint(&panel, &Typed::this_frame(ui.ctx()));
         });

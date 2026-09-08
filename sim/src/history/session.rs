@@ -191,7 +191,6 @@ mod tests {
     use crate::ids::{AsteroidId, RowId, TeamId};
     use crate::roster::{FRIGATE, METALS_EXTRACTOR, SHIPYARD};
     use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion, STAGE_SPAN, Stage};
-    use crate::step::spawn_body;
     use crate::time::Time;
 
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
@@ -473,7 +472,7 @@ mod tests {
             Session::new(setup(), Retention::shipped(), &BOTH).expect("both seats are seated");
         for at in 0..100u32 {
             let place = asteroid(at % 21);
-            let body = spawn_body(&session.live, place, Time::ZERO);
+            let body = session.live.spawn_body(place, Time::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
                 FRIGATE,

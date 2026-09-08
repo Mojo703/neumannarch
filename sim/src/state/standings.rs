@@ -1,6 +1,5 @@
 use super::State;
 use crate::ids::{SeatId, TeamId};
-use crate::state::Motion;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Standings {
@@ -29,12 +28,11 @@ impl State {
 
     fn score(&self, team: TeamId) -> Team {
         let mine = |seat: SeatId| self[seat].team() == team;
-        let mut asteroids: Vec<_> = self
-            .entities()
-            .filter(|entity| mine(entity.seat()))
-            .filter(|entity| entity.motion() == Motion::Fixed)
-            .map(|entity| entity.home())
-            .collect();
+        let seats = (0..self.seats().len())
+            .filter_map(|at| u8::try_from(at).ok())
+            .map(SeatId)
+            .filter(|seat| mine(*seat));
+        let mut asteroids: Vec<_> = seats.flat_map(|seat| self.held_by(seat)).collect();
         asteroids.sort_unstable();
         asteroids.dedup();
         Team {

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -8,7 +9,6 @@ use mirage_engine::prelude::*;
 use neumannarch_game::display::camera::BeltCamera;
 use neumannarch_game::display::fights::Fights;
 use neumannarch_game::display::glyph;
-use neumannarch_game::display::glyph::Glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
     Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, FlightLine, RowView, Scene, SectorView,
@@ -26,7 +26,7 @@ use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
 use neumannarch_sim::Session as Match;
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::roster::{
-    ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD,
+    ENERGY_EXTRACTOR, FRIGATE, Glyph, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD,
 };
 use neumannarch_sim::state::view::{Building, View};
 use neumannarch_sim::state::{Command, STAGE_SPAN, State};
@@ -53,7 +53,7 @@ const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
 const DRAFT_FOCUS_TOWARD_TAKEN: f64 = 0.3;
 
 fn glyph_of(row: RowId) -> Glyph {
-    Glyph::of(&Roster::shipped()[row])
+    Roster::shipped()[row].glyph()
 }
 
 fn main() {
@@ -170,10 +170,6 @@ impl Game for Looker {
             &aim(scene, &self.watched),
             &mut Still,
         );
-        let wheels = match &bar {
-            Some(bar) => wheels.clear_of(bar.frame()),
-            None => wheels,
-        };
         let order = self.drafting.as_ref().map(|drafting| {
             Order::over(
                 over,
@@ -419,6 +415,7 @@ fn region_scene(watched: &Watched) -> Scene {
         asteroids,
         entities,
         wheels,
+        fights: BTreeMap::new(),
         flights: vec![FlightLine {
             from: Vec3::new(-90.0, 0.0, 80.0),
             to: AsteroidId(2),
@@ -495,6 +492,7 @@ fn fight_scene() -> Scene {
         asteroids,
         entities,
         wheels,
+        fights: BTreeMap::new(),
         flights: Vec::new(),
         stockpile_bar: None,
         zone: ZONE,
@@ -565,6 +563,7 @@ fn stockpile_scene() -> Scene {
         asteroids,
         entities,
         wheels,
+        fights: BTreeMap::new(),
         flights: Vec::new(),
         stockpile_bar: Some(StockpileBarView {
             stockpile: Stockpile::new(
@@ -661,7 +660,7 @@ fn draft_scene() -> (Scene, Drafting, Watched) {
         session.state().roster(),
         Client {
             selection: Some(bare),
-            pointed: Some(bare),
+            asked: vec![bare],
             gesture: None,
             fights: &Fights::default(),
         },
@@ -681,7 +680,7 @@ fn nearest_free(state: &State) -> AsteroidId {
     let taken = state.asteroid_body(TAKEN).pos;
     state
         .asteroids()
-        .filter(|(id, _)| *id != TAKEN && state.draft().took(*id).is_none())
+        .filter(|(id, _)| *id != TAKEN && !state.is_taken(*id))
         .min_by(|(one, _), (other, _)| {
             let apart = |id: AsteroidId| state.asteroid_body(id).pos.distance(taken);
             apart(*one).total_cmp(&apart(*other))

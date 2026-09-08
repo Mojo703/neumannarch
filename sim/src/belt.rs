@@ -71,7 +71,7 @@ impl Belt {
 
     pub(crate) const ARRIVAL_METERS: f64 = 7.5;
 
-    pub(crate) const SPACING_METERS: f64 = 0.5;
+    pub const SPACING_METERS: f64 = 0.5;
 
     pub fn inner_radius_meters() -> f64 {
         let gained = 1.0 + SHEAR_TURNS * REFERENCE_PERIOD_SECONDS / REFERENCE_MATCH_SECONDS;

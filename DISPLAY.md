@@ -12,34 +12,60 @@ the client predicts nothing of its own.
 
 ## Ships are the truth
 
-Every ship and structure is drawn where the sim has it, always. A held
-force is readable because the sim holds it inside its asteroid's zone
-(DESIGN.md, Movement and combat); the display never rearranges anything,
-and no glyph stands for a ship anywhere but at the ship.
+Every ship is drawn where the sim has it, always. A held force is
+readable because the sim holds it inside its asteroid's zone (DESIGN.md,
+Movement and combat); the display never rearranges a ship, and no glyph
+stands for a ship anywhere but at the ship. A structure has no position
+of its own: the sim has it at its asteroid's own point, and so does every
+other structure there. The display stands an asteroid's structures in a
+ring about the asteroid at one spacing, in id order from the asteroid's
+radial direction, so each is seen; that ring is the one arrangement the
+display makes, and it moves nothing farther than a spacing from where the
+sim has it.
 
 ## The two layers
 
 The belt is drawn in 3D, through the engine: asteroids as meshes at their
-bodies, and ships as billboarded textured quads showing the row's glyph,
-one draw per ship. It changes only as the sim moves a body, every tick.
+bodies, and ships and structures as billboarded textured quads showing
+the row's glyph, one draw each. It changes only as the sim moves a body,
+every tick. Every body is drawn at world scale with a floor in pixels: its
+drawn size is a soft maximum of its world size on screen and the floor,
+one sharpness constant, so zooming out shrinks a body until it settles as
+a dot and nothing ever snaps. No body ever fades: a force far away is a
+pile of dots in its colour at its asteroid.
 
 The HUD is painted in screen space over the belt camera's projection of
-world points: everything the sections below describe, except asteroids and
-ships. Nothing on it is a widget or a panel; the painter is only a way to
-put pixels on screen. It draws after the belt and is never covered by it,
-and it changes with the sim and with the player's pointer, every frame.
+world points: everything the sections below describe, except asteroids,
+ships and structures. Nothing on it is a widget or a panel; the painter
+is only a way to put pixels on screen. It draws after the belt and is
+never covered by it, and it changes with the sim and with the player's
+pointer, every frame. Everything on it fades with zoom: a mark's alpha
+follows the size on screen of its asteroid's zone, whole above one
+constant, gone below another, a soft ramp between, and the wheel and bars
+of the hovered and the selected asteroid alone are exempt, since the
+player asked for them. Every floor, size and fade on both layers is a
+pure function of the pixels per metre at the body's position this frame
+and of nothing else; nothing eases in time but what the pointer causes
+and what the sim does.
 
 ## The wheel
 
-Every asteroid that holds a composition, and the selected asteroid whether or
-not it holds one, carries one wheel: the whole HUD of an asteroid. Ships and
-structures are drawn at their world positions and never on it.
+The asteroid under the pointer and the selected asteroid carry one wheel
+each, and no other asteroid carries one: the wheel is the detail the
+player asks for by pointing, and at rest an asteroid shows its bodies,
+its yield mark (Resources, below) and its fight bar (Fights, below) and
+nothing more. Ships and structures are drawn at their world positions
+and never on it.
 
 A wheel is a column of sections standing to the right of the asteroid,
 centred on the asteroid's height, their inner edges on an arc of a circle
 whose centre lies far to the asteroid's left, so the column bows toward the
 asteroid's right and the asteroid's left side carries the asteroid's resources
-(Resources, below). A section is one upright strip for
+(Resources, below). The arc stands off the asteroid by the zone's size
+on screen plus a small gap, floored at the size a body is drawn at its
+smallest, so far out, the wheel and the bars draw tight against the
+asteroid and clear of its bodies, and near in, they stand outside its
+zone. A section is one upright strip for
 one row, of the glyph's height, never a box: the row's glyph at its
 left, then its counted lines side by side along the strip, each a small
 mark and a numeral in the seat's colour, packed left to right so the
@@ -79,21 +105,16 @@ than they show, so a count rising or a button's step appearing never runs
 under the next column. A sector carries a spine: a thin line in the
 seat's colour along its inner edge, on the arc.
 
-A wheel has two states and no third: full where the pointer or the
-selection rests, small elsewhere. Hover and selection are one state
-drawn one way, with the same scale, the same detail, the same buttons and
-the same alpha; selection differs from hover only in that it outlasts
-the pointer and holds the camera's focus. While the pointer rests on
-another asteroid's wheel, the selected wheel keeps its full size and its
-buttons and is drawn at the faint alpha of a small wheel, and is whole
-again when the pointer leaves; the hovered wheel is full and whole. Two
-wheels may be full at once, the hovered one whole and the selected one
-faint. A small wheel is drawn at a smaller scale and shows present and
-in transit, never wanted, and is drawn faint; a full wheel is drawn
-whole, and a faint wheel is painted before a whole one. Neither size
-follows the crowd, and a wheel covered by another is no fainter and does
-not move. Every change between the two states, by hover or by selection
-alike, eases over the fast span, never a jump. Every eased change on
+Hover and selection are one state drawn one way, with the same scale, the
+same detail, the same buttons and the same alpha; selection differs from
+hover only in that it outlasts the pointer and holds the camera's focus.
+While the pointer rests on another asteroid's wheel, the selected wheel
+keeps its size and its buttons and is drawn faint, and is whole again
+when the pointer leaves; the hovered wheel is whole. A faint wheel is
+painted before a whole one, and a wheel covered by another is no fainter
+and does not move. A wheel grows from nothing when its asteroid is
+hovered or selected and shrinks to nothing when it is neither, easing
+over the fast span, never a jump. Every eased change on
 screen uses one of two spans and no other, fast and slow, named
 constants of the game crate: fast for what the pointer causes, slow for
 what the camera and the screens do. A faded glyph is blended toward the
@@ -120,32 +141,29 @@ Asteroid 5". Hovering a glyph shows the row's name alone.
 
 ## The glyph
 
-Three rules produce every glyph from its row; no glyph is drawn by hand.
+A glyph is a solid silhouette in the owner's colour with no outline, in
+the language of strategic icons: three parts in three fixed places, so
+the player learns it once and reads it at every size down to the belt's
+floor. The row names two of the parts and its stats give the rest.
 
-- **Shape:** a triangle for a unit, a square for a structure.
-- **Marks,** placed on the frame by what earns them, in a sixty-unit
-  cell whose shape is the triangle (30,6) (56,52) (4,52) or the square
-  from 8 to 52. The mark's outline is white; a hollow mark is stroked, a
-  dot is filled. These are the owner's drawings and the game reproduces
-  them exactly, scaled to the glyph's size:
-  - Build: a plus at (30,38) with arms of 8.5 on a triangle; at the
-    centre with arms of 6.5 inside the ring on a square that also stores.
-  - Extract: a chevron centred at (30,44) with a half-width of 10 and a
-    half-height of 4, pointing down, and above it the weapon's
-    material's icon (Icons, below),
-    centred at (30,26) and 20 units wide, both wholly inside the
-    frame, so an extractor reads as one by its chevron and as which by
-    its icon.
-  - Capacity: a ring at the centre, radius 13; radius 15 beside a plus.
-  - Damage at short range: a dot at (30,34) of radius 8; at (30,29) of
-    radius 7 when a belt sits below it.
-  - Plating above zero: a belt, a line at y 45 from x 17 to 43.
-  - Damage at long range: a bar at x 30 from y 14 to 48. The range
-    threshold is a constant in the game crate.
-- **Size,** three steps by cost class: a row's cost against two
-  thresholds, constants in the game crate.
+- **The frame** is the row's kind: a triangle for a unit, a square for
+  a structure, and a shield, a square with a rounded point at its base,
+  for a structure that fights.
+- **The role** is one bold pictogram cut out of the frame as a hole, the
+  row's own: a plus for build, the material's icon for extract, two
+  rings for store, a dot for short-range fire, a bar for long-range
+  fire, and the drawings for the roles no shipped row has yet, a scout's
+  arrow, a brawler's dot over a belt, an arch for artillery, two bars
+  for carry, a plus over a belt for tend, a bowtie for sense, a double
+  ring for shield and three bars for refine.
+- **The tier** is one to three notches cut from the frame's base, and a
+  structure of a higher tier wears a more worked frame: an inner border
+  at tier two, the top corners cut as well at tier three.
 
-Fill is the owner's colour; the outline is white.
+Every glyph is one size, drawn in a sixty-unit cell; a hollow glyph is
+the frame's outline alone, a filling glyph the silhouette filling from
+its base, a dashed glyph the frame's outline dashed. The drawings are
+polygons in the game crate, edited there.
 
 ## The stockpile and the clock
 
@@ -190,64 +208,67 @@ as a numeral. It has no icon, no hue and no hover.
 
 ## Icons
 
-The three material icons are one SVG sheet in the game crate,
-`game/icons/materials.svg`, three groups with the ids metals,
-volatiles and energy, each one drawing in its own sixty-unit cell laid
-side by side, so the owner edits the three as a whole: metals a hex
-nut, a hexagon with a small hole; volatiles a drop; energy a bolt.
-Each group is one closed path, no open stroke, no gradient and no
-text, read by its id when the
-game starts into the same primitives the marks are made of, so it is
-stroked hollow or filled solid and tinted by whatever draws it, and it
-reads at the smallest glyph size, where thirty units are six pixels.
-An icon is drawn wherever a material is named: the Extract mark on an
-extractor's glyph, the stockpile's cells and the asteroid bars. They are
-the owner's drawings and the game reproduces them exactly, as it does
-the marks.
+The three material icons are the same drawings the extractor glyphs
+carry as their cut-out, drawn alone and filled in whatever hue the
+place asks for: metals a hex nut, a hexagon with a round hole;
+volatiles a drop; energy a bolt. An icon is drawn wherever a material
+is named: the extractor's glyph, the stockpile's cells and the asteroid
+bars.
 
 ## Resources
 
-Every asteroid carries three bars at its left, the mirror of the wheel at
-its right: one per material in the fixed order, stacked, each of one
-strip's height, their right ends on the same arc the wheel's sections
-stand on, mirrored, its centre far to the asteroid's right, and along that
-arc a spine in grey ink, the wheel's spine in no seat's colour. The
-icon stands at the bar's right end, nearest the asteroid, and the bar
-grows leftward from it. A bar's cap is a band of the material's hue
-dimmed toward the backdrop, its length the asteroid's cap for the material
-against the largest cap of any material on the belt, so a rich asteroid has
-long bands and a poor one short and the cap reads on any display; the
-pull over the last second by every extractor there of any seat is the
-same hue at full strength laid over the band from its right end, so
-fill against band is pull against cap. No outline carries the cap. A
-cap of zero draws no bar. An extractor the seat wants at the asteroid
-and has not yet standing shows on that material's bar past the pull:
-a frame that is building as a fainter segment of the hue, as long as
-the extractor's yield would be against the cap, filling with the
-frame's progress; a want with no frame yet as a hollow outline of the
-same segment; so a player schedules construction against what the
-asteroid will give. The bars are drawn at every asteroid always and
-take the wheel's two states with it: full where the wheel is full,
-small elsewhere, easing between them as the wheel does, drawn at the
-wheel's pixel scale at every zoom, so a crowded belt overlaps them.
-The small state is the bars alone, no icons, standing tight against
-the asteroid as the small wheel stands tight on its other side; the full
-state adds the icons and the room they need. Hovering a bar shows "Metals 12
-of 20".
+Every asteroid carries a yield mark around it, three sectors of a
+hundred and twenty degrees each, one per material in the fixed order
+from the asteroid's radial direction, in the material's full hue, with
+the bars' gap between them. The sectors ride
+outside the asteroid's zone circle on screen, floored at a few points
+so far out they hug the rock, and nothing ever stands under them. A sector's reach is what is left to take, the cap less the
+last second's pull by every extractor there of any seat, against the
+largest cap of any material on the belt: a rich untouched asteroid is a
+large mark, a poor one small, and one being pulled at its cap shows
+nothing for that material. Which materials it gives reads from which
+sectors reach. The mark fades with zoom as every resting mark does,
+whole at the zoom of a region and faint at the whole belt, where the
+asteroid's own colour, its caps' mix, carries the yield as well. Nothing
+on the mark is a numeral.
+
+The hovered and the selected asteroid add three bars at the asteroid's
+left, the mirror of the wheel at its right: one per material in the
+fixed order, stacked, each of one strip's height, their right ends on
+the same arc the wheel's sections stand on, mirrored, its centre far to
+the asteroid's right, and along that arc a spine in grey ink, the
+wheel's spine in no seat's colour. The icon stands at the bar's right
+end, nearest the asteroid, and the bar grows leftward from it. A bar's
+cap is a band of the material's hue dimmed toward the backdrop, its
+length the cap against the belt's largest, and the pull is the same hue
+at full strength laid over the band from its right end, so the bars are
+the mark's two facts drawn as lengths, which read exactly where the mark
+reads by area. No outline carries the cap. A cap of zero draws no bar.
+An extractor the seat wants at the asteroid and has not yet standing
+shows on that material's bar past the pull: a frame that is building as
+a fainter segment of the hue, as long as the extractor's yield would be
+against the cap, filling with the frame's progress; a want with no frame
+yet as a hollow outline of the same segment; so a player schedules
+construction against what the asteroid will give. The bars grow and
+shrink with the wheel and are exempt from the fade as it is. Hovering a
+bar shows "Metals 12 of 20".
 
 ## Fights
 
-While shots are exchanged at an asteroid, each engaged seat's spine lights
-as a bar: a thick segment of the seat's colour from the top of its
-sector, on the same arc, of one fixed length whoever the seat is, so
-two seats' bars compare at a glance. The bar is full at the fight's
-start and drains downward as that player's total HP at the asteroid falls.
-Damage from the last second and a half trails the drain as a white
-segment that catches up; white, since a red trail vanishes on a red
-seat. A sector with nothing standing stays one bar tall while its bar
-shows. Bars disappear ten seconds after the last shot. Ships carry no
-health bars: damage is on the hull, and the combatant the player reads
-is the force.
+While shots are exchanged at an asteroid, each engaged seat carries a
+fight bar there: a thick segment of the seat's colour on the wheel's
+arc at the asteroid's right, one below another in seat order, of one
+fixed length whoever the seat is, so two seats' bars compare at a
+glance. The bar is full at the fight's start and drains downward as that
+player's total HP at the asteroid falls. Damage from the last second and
+a half trails the drain as a white segment that catches up; white, since
+a red trail vanishes on a red seat. The bars stand whether or not the
+asteroid carries a wheel; where it does, each seat's bar is its sector's
+spine lit. Bars disappear ten seconds after the last shot. A fight bar
+fades with zoom later than every other resting mark, its two constants
+set so it is still faint at the whole belt, since where the fight is
+must read from anywhere. Ships carry no health bars: damage is on the
+hull, and the combatant the player reads is the force.
 
 ## Flights
 
@@ -275,9 +296,9 @@ fills. A button the sim would refuse is dimmed, and bears its refusal as
 a phrase where the sim has one; minus at zero, which the sim has no rule
 for, is dimmed and bears no phrase. A click adds or removes that many
 wants and selects the asteroid. Holding repeats after a third of a second
-and every tenth of a second after that. A full wheel takes input
-through its buttons and through the drag under Sending, and nothing else;
-a small wheel takes none and shows no buttons.
+and every tenth of a second after that. A wheel takes input through its
+buttons and through the drag under Sending, and nothing else; a wheel
+still shrinking away takes none.
 
 Hovering a live button shows its change as a signed step beside the
 strip, "+1" or "-5", and changes no count. The click lands the change,
@@ -343,8 +364,9 @@ Every asteroid's zone is drawn as one faint circle at the zone's radius in
 the belt, always, in one ink. Every armed ship at an asteroid carries one
 faint circle at its longest weapon range in its owner's colour; a ship
 in flight carries none, since it is not a shooter. Both are painted on
-the HUD over the belt camera's projection, thin, at low alpha, and are
-never brighter than a wheel. Nothing else on the HUD states a distance.
+the HUD over the belt camera's projection, thin, at low alpha, fading
+with zoom as every resting mark does, and are never brighter than a
+wheel. Nothing else on the HUD states a distance.
 
 ## Words on screen
 
@@ -469,10 +491,10 @@ follows Controls, above.
   A bot's name is drawn from a short list the bot's personality owns,
   chosen by the seed and the seat, so a match's bots read as people
   and two bots of one personality read apart; the lobby's Holder
-  choice still names the personality. An asteroid a draft placement stands
-  on shows the placed row on its small wheel as a wanted line in the
-  seat's colour, the one wanted line a small wheel ever shows, so a
-  taken asteroid reads as taken from the belt. Placing goes through the
+  choice still names the personality. A placement puts the structure at
+  the asteroid at once (DESIGN.md, Start), so a taken asteroid reads as
+  taken from the belt by the structure standing there, as it does for
+  the rest of the match. Placing goes through the
   wheel: a bare asteroid under the pointer shows the seat's own hollow
   wheel. Every button is live during the draft, since a want accepted
   then stands until the clock runs, except a reserve button before the
@@ -490,10 +512,12 @@ follows Controls, above.
 ## Judging
 
 Legibility is judged on screenshots rendered through the engine's offscreen
-Session over fixed scenes: a region with several asteroids, mixed forces, a
-fight, and a flight; a fight at one asteroid; the whole belt. A judge that has
-not seen the code answers, from the image alone: who holds each asteroid, which
-side is winning, what is in flight and where to. Every misread is a defect.
+Session over fixed scenes at the three zooms the player lives at: the
+whole belt; a region with several asteroids, mixed forces, a fight, and a
+flight; and a fight at one asteroid. A judge that has not seen the code
+answers, from the image alone: who holds each asteroid, which side is
+winning, what is in flight and where to, and, at the region, which
+asteroid is richest and in what. Every misread is a defect.
 
 ## Later layers
 

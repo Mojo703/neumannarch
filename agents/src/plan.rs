@@ -55,9 +55,13 @@ impl Plan {
             promised: BTreeMap::new(),
             budget: survey.view.stockpile.stock() + survey.view.income * BUILD_HORIZON,
         };
-        plan.draft(survey, personality, commitments);
-        plan.economy(survey, personality, commitments, dice);
-        plan.army(survey, personality, commitments);
+        match survey.view.draft.ended() {
+            None => plan.draft(survey, personality),
+            Some(_) => {
+                plan.economy(survey, personality, commitments, dice);
+                plan.army(survey, personality, commitments);
+            }
+        }
         plan
     }
 
@@ -92,21 +96,17 @@ impl Plan {
             .collect()
     }
 
-    fn draft(&mut self, survey: &Survey, personality: &Personality, commitments: &mut Commitments) {
-        let draft = &survey.view.draft;
+    fn draft(&mut self, survey: &Survey, personality: &Personality) {
+        for asteroid in survey.held() {
+            self.stand(survey, asteroid);
+        }
         let seat = survey.view.seat;
-        for (asteroid, row) in draft.placements(seat) {
-            if survey.roles.masons.contains(&row) {
-                commitments.claim(asteroid, survey.view.time);
-            }
-        }
-        if draft.ended().is_some() && !survey.mine.is_empty() {
-            return;
-        }
-        for (asteroid, row) in draft.placements(seat) {
-            self.keep(Priority::Opening, asteroid, row, 1);
-        }
-        let Some(stage) = draft.running().filter(|stage| stage.seat == seat) else {
+        let Some(stage) = survey
+            .view
+            .draft
+            .running()
+            .filter(|stage| stage.seat == seat)
+        else {
             return;
         };
         let Some(asteroid) = self.fittest(survey, personality) else {
@@ -118,10 +118,9 @@ impl Plan {
     fn wanted_shares(&self, survey: &Survey, personality: &Personality) -> Materials {
         let shares = |of: Materials| of * (1.0 / of.total().max(f64::MIN_POSITIVE));
         let drafted = survey
-            .view
-            .draft
-            .placements(survey.view.seat)
-            .filter_map(|(asteroid, _)| survey.view.terrain_of(asteroid))
+            .held()
+            .into_iter()
+            .filter_map(|asteroid| survey.view.terrain_of(asteroid))
             .fold(Materials::ZERO, |caps, terrain| caps + terrain.caps);
         let held = shares(drafted);
         let mut wanted = Materials::ZERO;
@@ -133,24 +132,20 @@ impl Plan {
 
     fn fittest(&self, survey: &Survey, personality: &Personality) -> Option<AsteroidId> {
         let wanted = self.wanted_shares(survey, personality);
-        let nearest = |from: AsteroidId, enemy: bool| -> Option<f64> {
-            survey
-                .view
-                .draft
-                .stages()
+        let taken = survey.taken();
+        let enemy_asteroids = survey.enemy_asteroids();
+        let held = survey.held();
+        let nearest = |from: AsteroidId, among: &[AsteroidId]| -> Option<f64> {
+            among
                 .iter()
-                .filter(|stage| match enemy {
-                    true => survey.view.is_enemy(stage.seat),
-                    false => stage.seat == survey.view.seat,
-                })
-                .filter_map(|stage| Some(survey.between(from, stage.placed?)))
+                .map(|to| survey.between(from, *to))
                 .min_by(f64::total_cmp)
         };
         survey
             .view
             .terrain
             .iter()
-            .filter(|terrain| survey.view.draft.took(terrain.asteroid).is_none())
+            .filter(|terrain| !taken.contains(&terrain.asteroid))
             .map(|terrain| {
                 let asteroid = terrain.asteroid;
                 let fit: f64 = terrain
@@ -158,8 +153,9 @@ impl Plan {
                     .amounts()
                     .map(|(material, cap)| cap * wanted[material])
                     .sum();
-                let away = nearest(asteroid, true).map_or(1.0, |gap| gap / (gap + REACH));
-                let near = nearest(asteroid, false).unwrap_or_default();
+                let away =
+                    nearest(asteroid, &enemy_asteroids).map_or(1.0, |gap| gap / (gap + REACH));
+                let near = nearest(asteroid, &held).unwrap_or_default();
                 (asteroid, fit * away / (1.0 + near / REACH))
             })
             .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
@@ -173,10 +169,10 @@ impl Plan {
         commitments: &mut Commitments,
         dice: &mut Dice,
     ) {
-        let Some(home) = survey.home else {
+        let Some(home) = survey.home() else {
             return;
         };
-        for asteroid in survey.developed.iter().copied() {
+        for asteroid in survey.developed() {
             self.stand(survey, asteroid);
         }
         self.expand(survey, personality, commitments, dice, home);
@@ -201,10 +197,10 @@ impl Plan {
         let weights = personality.weights(
             survey.roster,
             survey.roles,
-            survey.enemy_plating,
-            survey.enemy_range,
+            survey.enemy_plating(),
+            survey.enemy_range(),
         );
-        let army = counted(survey, personality.army_value(survey.enemy), &weights);
+        let army = counted(survey, personality.army_value(survey.enemy()), &weights);
         let army = army
             .iter()
             .filter_map(|(row, count)| survey.roster.get(*row).zip(Some(*count)));
@@ -238,7 +234,7 @@ impl Plan {
             let mut short = (wanted[*material] - survey.view.income[*material]).max(0.0);
             let mut spare: BTreeMap<AsteroidId, f64> = BTreeMap::new();
             let mut counts: BTreeMap<AsteroidId, u32> = BTreeMap::new();
-            for asteroid in survey.developed.iter().copied() {
+            for asteroid in survey.developed() {
                 let Some(terrain) = survey.view.terrain_of(asteroid) else {
                     continue;
                 };
@@ -268,7 +264,7 @@ impl Plan {
 
     fn stand(&mut self, survey: &Survey, asteroid: AsteroidId) {
         let standing = survey.mine.get(&asteroid).into_iter().flatten();
-        for (row, count) in standing.filter(|(row, _)| is_structure(survey.roster, **row)) {
+        for (row, count) in standing.filter(|(row, _)| survey.is_structure(**row)) {
             self.keep(Priority::Economy, asteroid, *row, *count);
         }
     }
@@ -330,15 +326,15 @@ impl Plan {
         let weights = personality.weights(
             survey.roster,
             survey.roles,
-            survey.enemy_plating,
-            survey.enemy_range,
+            survey.enemy_plating(),
+            survey.enemy_range(),
         );
-        let mut left = personality.army_value(survey.enemy);
+        let mut left = personality.army_value(survey.enemy());
+        let occupied = survey.occupied();
         let mut threatened: Vec<(AsteroidId, f64)> = survey
-            .threats
-            .iter()
-            .filter(|(asteroid, _)| survey.occupied.contains(asteroid))
-            .map(|(asteroid, threat)| (*asteroid, *threat))
+            .threats()
+            .into_iter()
+            .filter(|(asteroid, _)| occupied.contains(asteroid))
             .collect();
         threatened.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         for (asteroid, threat) in threatened {
@@ -460,24 +456,18 @@ fn affords(budget: Materials, cost: Materials) -> bool {
     (budget - cost).amounts().all(|(_, left)| left >= 0.0)
 }
 
-fn is_structure(roster: &Roster, row: RowId) -> bool {
-    roster
-        .get(row)
-        .is_some_and(|row| row.kind() == neumannarch_sim::roster::Kind::Structure)
-}
-
 fn first(rows: &[RowId]) -> impl Iterator<Item = RowId> + '_ {
     rows.iter().copied().take(1)
 }
 
 fn yards(survey: &Survey, personality: &Personality) -> Vec<AsteroidId> {
-    let mut asteroids: Vec<AsteroidId> = survey.home.into_iter().collect();
+    let home = survey.home();
+    let mut asteroids: Vec<AsteroidId> = home.into_iter().collect();
     asteroids.extend(
         survey
-            .developed
-            .iter()
-            .copied()
-            .filter(|asteroid| Some(*asteroid) != survey.home),
+            .developed()
+            .into_iter()
+            .filter(|asteroid| Some(*asteroid) != home),
     );
     asteroids.truncate(personality.yards);
     asteroids
@@ -494,20 +484,22 @@ fn claimed(survey: &Survey, commitments: &Commitments) -> Vec<AsteroidId> {
 }
 
 fn wants_another(survey: &Survey, personality: &Personality, commitments: &Commitments) -> bool {
-    survey.held.len() + commitments.claims() < personality.asteroids
+    survey.held().len() + commitments.claims() < personality.asteroids
         && commitments.claims() < personality.claims
 }
 
 fn expansion(survey: &Survey, commitments: &Commitments, dice: &mut Dice) -> Option<AsteroidId> {
-    let from = survey.home?;
+    let from = survey.home()?;
+    let occupied = survey.occupied();
+    let enemy_asteroids = survey.enemy_asteroids();
     let mut rated: Vec<(AsteroidId, f64)> = survey
         .view
         .terrain
         .iter()
         .map(|terrain| terrain.asteroid)
-        .filter(|asteroid| !survey.occupied.contains(asteroid))
+        .filter(|asteroid| !occupied.contains(asteroid))
         .filter(|asteroid| !commitments.claimed(*asteroid) && !commitments.barred(*asteroid))
-        .filter(|asteroid| !survey.enemy_asteroids.contains(asteroid))
+        .filter(|asteroid| !enemy_asteroids.contains(asteroid))
         .filter_map(|asteroid| {
             let caps = survey.view.terrain_of(asteroid)?.caps.total();
             let reach = 1.0 + survey.between(from, asteroid) / REACH;
@@ -525,43 +517,44 @@ fn staging(
     personality: &Personality,
     commitments: &mut Commitments,
 ) -> Option<AsteroidId> {
+    let enemy_asteroids = survey.enemy_asteroids();
     if let Some(asteroid) = commitments.committed {
-        let taken = survey.held.contains(&asteroid) || !survey.enemy_asteroids.contains(&asteroid);
+        let taken = survey.held().contains(&asteroid) || !enemy_asteroids.contains(&asteroid);
         if taken {
             commitments.committed = None;
         } else {
             return Some(asteroid);
         }
     }
-    let target = nearest(survey, &survey.enemy_asteroids);
+    let target = nearest(survey, &enemy_asteroids);
+    let army = survey.army();
     if let Some(asteroid) = target
-        && survey.army > 0.0
-        && survey.army >= personality.attack_ratio * defended(survey, asteroid)
+        && army > 0.0
+        && army >= personality.attack_ratio * defended(survey, asteroid)
     {
         commitments.committed = Some(asteroid);
         return Some(asteroid);
     }
     match target {
         Some(asteroid) => survey
-            .building
-            .iter()
-            .copied()
+            .building()
+            .into_iter()
             .min_by(|a, b| {
                 survey
                     .between(*a, asteroid)
                     .total_cmp(&survey.between(*b, asteroid))
             })
-            .or(survey.home),
-        None => survey.home,
+            .or(survey.home()),
+        None => survey.home(),
     }
 }
 
 fn defended(survey: &Survey, asteroid: AsteroidId) -> f64 {
-    survey.threats.get(&asteroid).copied().unwrap_or_default()
+    survey.threats().get(&asteroid).copied().unwrap_or_default()
 }
 
 fn nearest(survey: &Survey, asteroids: &[AsteroidId]) -> Option<AsteroidId> {
-    let from = survey.home?;
+    let from = survey.home()?;
     asteroids.iter().copied().min_by(|a, b| {
         survey
             .between(from, *a)
@@ -784,10 +777,10 @@ mod tests {
         let roles = Roles::of(&roster);
         let survey = Survey::of(&view, &roster, &roles);
 
-        assert_eq!(survey.enemy_asteroids, vec![ENEMY_ASTEROID]);
-        assert_eq!(survey.threats.get(&ALLY_ASTEROID), None);
-        assert!(survey.threats.contains_key(&ENEMY_ASTEROID));
-        assert_eq!(survey.enemy, state[RAIDER].cost.total() * 4.0);
+        assert_eq!(survey.enemy_asteroids(), vec![ENEMY_ASTEROID]);
+        assert_eq!(survey.threats().get(&ALLY_ASTEROID), None);
+        assert!(survey.threats().contains_key(&ENEMY_ASTEROID));
+        assert_eq!(survey.enemy(), state[RAIDER].cost.total() * 4.0);
 
         let plan = Plan::of(
             &survey,

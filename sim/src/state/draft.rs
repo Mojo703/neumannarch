@@ -87,20 +87,6 @@ impl Draft {
         self.ended
     }
 
-    pub fn placements(&self, seat: SeatId) -> impl Iterator<Item = (AsteroidId, RowId)> + '_ {
-        self.stages
-            .iter()
-            .filter(move |stage| stage.seat == seat)
-            .filter_map(|stage| Some((stage.placed?, stage.row)))
-    }
-
-    pub fn took(&self, asteroid: AsteroidId) -> Option<SeatId> {
-        self.stages
-            .iter()
-            .find(|stage| stage.placed == Some(asteroid))
-            .map(|stage| stage.seat)
-    }
-
     pub fn awaits(&self, seat: SeatId, row: RowId) -> Option<bool> {
         Some(self.waiting(seat, row)? <= self.running)
     }
@@ -141,11 +127,14 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::fixture::{CLOCK, World};
     use crate::ids::TeamId;
+    use crate::materials::Materials;
     use crate::roster::STORAGE;
-    use crate::state::{Issued, Rejected};
+    use crate::state::{Entity, Issued, Rejected};
     use crate::time::Time;
 
     fn drafting(teams: usize) -> World {
@@ -262,6 +251,26 @@ mod tests {
     }
 
     #[test]
+    fn a_seat_whose_reserve_is_spent_wants_one_row_where_something_stands() {
+        let stock = Materials::new(1e4, 1e4, 1e4);
+        let mut world = World::stocked(stock, BTreeMap::from([(STORAGE, 2)]));
+
+        world.tick(&[Issued::want(0, AsteroidId(0), STORAGE, 2)]);
+
+        assert_eq!(
+            world.state[SeatId(0)].reserved(STORAGE),
+            0,
+            "the want emptied the reserve"
+        );
+        assert!(world.state.is_taken(AsteroidId(0)));
+        assert_eq!(
+            world.refusal(Issued::want(0, AsteroidId(0), STORAGE, 1)),
+            None,
+            "a seat holding no reserve of the row wants one like any other"
+        );
+    }
+
+    #[test]
     fn a_reserve_want_before_the_seats_first_stage_is_refused_by_name() {
         let world = drafting(2);
         let waiting = world.state.draft().stages()[1];
@@ -332,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn a_want_accepted_during_the_draft_is_filled_once_the_clock_runs() {
+    fn a_pick_places_the_reserve_structure_at_once_and_any_other_want_waits_for_the_clock() {
         let mut world = drafting(1);
         let stage = running(&world);
         let seat = stage.seat.0;
@@ -344,7 +353,10 @@ mod tests {
 
         world.run(STAGE_SPAN.0 - 1);
 
-        assert_eq!(world.state.entities().count(), 0, "nothing stands");
+        let standing: Vec<RowId> = world.state.entities().map(Entity::row).collect();
+        assert_eq!(standing, vec![stage.row], "the pick stands, complete");
+        assert_eq!(world.state[SeatId(seat)].reserved(stage.row), 0);
+        assert!(world.state.is_taken(AsteroidId(0)));
         assert_eq!(world.state.frames().len(), 0, "nothing builds");
         assert_eq!(
             world.state[SeatId(seat)].stockpile().stock(),

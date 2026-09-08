@@ -1,8 +1,4 @@
-use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
-use crate::orbit::body::Body;
-use crate::post::Post;
-use crate::roster::Kind;
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::Income;
@@ -10,8 +6,6 @@ use crate::step::fire::{Fire, Shots};
 use crate::step::fulfilment::{Assigned, Fulfilment};
 use crate::step::holding::Holding;
 use crate::step::propagation::{Moved, Propagation};
-use crate::time::Time;
-use crate::vec3::Vec3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
@@ -86,12 +80,7 @@ fn move_bodies(next: &mut State, moved: &Moved) {
 
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
     for placement in &filled.placements {
-        let taken = next
-            .seat_mut(placement.seat())
-            .is_some_and(|seat| seat.take_reserved(placement.row()));
-        if taken {
-            spawn(next, placement.post(), placement.row());
-        }
+        next.place_from_reserve(placement.post(), placement.row());
     }
     for send in &filled.sends {
         let route = send.route();
@@ -122,7 +111,7 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
             }
         }
         if spend.completed {
-            spawn(next, frame.post(), frame.row());
+            next.spawn_at(frame.post(), frame.row());
             closing.push(spend.frame);
         }
     }
@@ -187,32 +176,6 @@ fn reap(next: &mut State) {
     }
 }
 
-fn spawn(next: &mut State, post: Post, row: RowId) {
-    let motion = if next[row].kind() == Kind::Structure {
-        Motion::Fixed
-    } else {
-        Motion::Steered {
-            body: spawn_body(next, post.asteroid, next.time().next()),
-            flight: None,
-        }
-    };
-    next.spawn(post.seat, row, post.asteroid, motion);
-}
-
-pub fn spawn_body(state: &State, asteroid: AsteroidId, at: Time) -> Body {
-    let home = state[asteroid].orbit().at(at, state.gravity());
-    let already = state
-        .standing_at(asteroid)
-        .filter(|entity| entity.motion() != Motion::Fixed)
-        .count();
-    let radial = home.pos.normalized().unwrap_or(Vec3::ZERO);
-    let floor = state[asteroid].radius() + Belt::SPACING_METERS;
-    Body::new(
-        home.pos + radial * (floor + Belt::SPACING_METERS * already as f64),
-        home.vel,
-    )
-}
-
 fn join(next: &mut State, entity: EntityId, destination: AsteroidId, flight: Flight) {
     let Some(target) = next.entity_mut(entity) else {
         return;
@@ -239,10 +202,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::belt::Belt;
     use crate::fixture::World;
-    use crate::ids::TeamId;
+    use crate::ids::{RowId, TeamId};
     use crate::materials::Material;
     use crate::orbit::body::Gravity;
+    use crate::post::Post;
     use crate::posting::Posting;
     use crate::real::Real;
     use crate::roster::Roster;
@@ -496,11 +461,11 @@ mod tests {
     #[test]
     fn a_unit_whose_send_is_forming_stands_at_the_asteroid_it_leaves() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let prey = world.fix(1, STORAGE, asteroid(0));
         world.tick(&[
             Issued::numbered(0, 0, asteroid(0), SHIPYARD, 1),
             Issued::numbered(0, 1, asteroid(0), FRIGATE, 1),
         ]);
+        let prey = world.fix(1, STORAGE, asteroid(0));
         let building = world.state[FRIGATE].cost.total() / 15.0;
         world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
         let shooter = world
@@ -695,11 +660,11 @@ mod tests {
     fn an_armed_unit_kills_an_unarmed_enemy_at_its_asteroid() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
 
-        let prey = world.fix(1, STORAGE, asteroid(0));
         world.tick(&[
             Issued::numbered(0, 0, asteroid(0), SHIPYARD, 1),
             Issued::numbered(0, 1, asteroid(0), FRIGATE, 1),
         ]);
+        let prey = world.fix(1, STORAGE, asteroid(0));
 
         let building = world.state[FRIGATE].cost.total() / 15.0;
         world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
@@ -863,7 +828,7 @@ mod tests {
         let radial = home.pos.normalized().expect("a radius");
         let floor = world.state[asteroid(0)].radius() + Belt::SPACING_METERS;
         for already in 0..3 {
-            let spawn = spawn_body(&world.state, asteroid(0), world.state.time());
+            let spawn = world.state.spawn_body(asteroid(0), world.state.time());
             let out = floor + Belt::SPACING_METERS * f64::from(already);
             assert!(
                 spawn.pos.distance(home.pos + radial * out) < 1e-9,
@@ -881,7 +846,7 @@ mod tests {
         let home = world.state.asteroid_body(asteroid(0));
         let floor = world.state[asteroid(0)].radius() + Belt::SPACING_METERS;
 
-        let spawn = spawn_body(&world.state, asteroid(0), world.state.time());
+        let spawn = world.state.spawn_body(asteroid(0), world.state.time());
 
         assert!(spawn.pos.distance(home.pos) - floor < 1e-9);
     }
@@ -893,7 +858,7 @@ mod tests {
             let mut world = World::started(&[TeamId(0), TeamId(1)]);
             let home = asteroid(0);
             for at in 0..units {
-                let body = spawn_body(&world.state, home, world.state.time());
+                let body = world.state.spawn_body(home, world.state.time());
                 world.free((at % 2) as u8, FRIGATE, home, body);
             }
             let mut state = world.state;

@@ -1,415 +1,627 @@
-use neumannarch_sim::Material;
-use neumannarch_sim::roster::{Kind, Row, Weapon};
+use core::f32::consts::TAU;
 
-use crate::display::icon;
+use mirage_engine::egui::epaint::{Mesh, WHITE_UV};
+use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
+use mirage_engine::math::UVec2;
+use mirage_engine::{Color, TextureData};
+use neumannarch_sim::Material;
+use neumannarch_sim::roster::{Frame, Glyph, Role, Tier};
+
+use crate::display::hue;
+use crate::display::scene::Fill;
+use crate::screens::panel;
 
 pub const HALF: f32 = 11.0;
 
-pub const SMALL_BELOW: f64 = 50.0;
-
-pub const LARGE_FROM: f64 = 150.0;
-
-pub const LONG_RANGE_FROM_METERS: f64 = 10.0;
-
-const SIZE_SCALE: [f32; 3] = [0.85, 1.0, 1.2];
-
-pub const WIDEST_SCALE: f32 = SIZE_SCALE[2];
+pub const CELL_PIXELS: u32 = 48;
 
 const CENTRE: (f32, f32) = (30.0, 30.0);
 
-const REFERENCE_HALF: f32 = 22.0;
+const REFERENCE_HALF: f32 = 28.0;
 
 pub const OUTLINE_WIDTH: f32 = 2.0;
 
 pub const MARK_WIDTH: f32 = 4.5;
 
-pub const EXTRACT_ICON_AT: (f32, f32) = (30.0, 26.0);
+const DASH_LENGTH: f32 = 3.0;
 
-pub const EXTRACT_ICON_WIDTH: f32 = 20.0;
+const GAP_LENGTH: f32 = 2.0;
 
-pub const CHEVRON_AT: (f32, f32) = (30.0, 44.0);
+pub const DIM_ALPHA: f32 = 0.5;
 
-pub const CHEVRON_HALF_WIDTH: f32 = 10.0;
+const STARVED_HALF_WIDTH: f32 = 13.0;
 
-pub const CHEVRON_HALF_HEIGHT: f32 = 4.0;
+const ROUND_STEPS: usize = 16;
 
-pub fn unit(point: (f32, f32)) -> (f32, f32) {
-    (
-        (point.0 - CENTRE.0) / REFERENCE_HALF,
-        (point.1 - CENTRE.1) / REFERENCE_HALF,
-    )
+const UNIT_CUT_DROP: f32 = 3.0;
+
+const ICON_SCALE: f32 = 1.7;
+
+type Ring = Vec<(f32, f32)>;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Drawing {
+    rings: Vec<Ring>,
 }
 
-pub fn unit_length(length: f32) -> f32 {
-    length / REFERENCE_HALF
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cell {
+    pub centre: Pos2,
+    pub half: f32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Frame {
-    Triangle,
-    Square,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Look {
+    pub colour: Color32,
+    pub outline: Color32,
+    pub fill: Fill,
+    pub alpha: f32,
+    pub starved: Option<Material>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Glyph {
-    pub frame: Frame,
-    pub marks: Vec<GlyphMark>,
-    pub size: Size,
+impl Look {
+    pub fn solid(colour: Color32) -> Look {
+        Look {
+            colour,
+            outline: colour,
+            fill: Fill::Solid,
+            alpha: 1.0,
+            starved: None,
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum GlyphMark {
-    Dot,
-    Bar,
-    Plus,
-    Extract(Material),
-    Belt,
-    Ring,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Size {
-    Small,
-    Medium,
-    Large,
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Primitive {
     Dot { at: (f32, f32), radius: f32 },
     Line(Vec<(f32, f32)>),
-    Ring { at: (f32, f32), radius: f32 },
-    Path(Vec<Vec<(f32, f32)>>),
 }
 
-impl Frame {
-    fn of(kind: Kind) -> Frame {
-        match kind {
-            Kind::Unit => Frame::Triangle,
-            Kind::Structure => Frame::Square,
+impl Drawing {
+    pub fn of(glyph: Glyph) -> Drawing {
+        let drop = match glyph.frame {
+            Frame::Unit => UNIT_CUT_DROP,
+            Frame::Structure | Frame::Defence => 0.0,
+        };
+        let mut rings = frame(glyph.frame, glyph.tier);
+        rings.extend(
+            cut(glyph.role, glyph.material)
+                .into_iter()
+                .map(|ring| lowered(ring, drop)),
+        );
+        rings.extend(notches(glyph.tier));
+        Drawing { rings }
+    }
+
+    pub fn icon(material: Material) -> Drawing {
+        Drawing {
+            rings: material_icon(material)
+                .into_iter()
+                .map(|ring| {
+                    ring.into_iter()
+                        .map(|(x, y)| {
+                            (
+                                CENTRE.0 + (x - CENTRE.0) * ICON_SCALE,
+                                CENTRE.1 + (y - 29.0) * ICON_SCALE,
+                            )
+                        })
+                        .collect()
+                })
+                .collect(),
         }
     }
 
-    pub fn points(&self) -> &'static [(f32, f32)] {
-        match self {
-            Frame::Triangle => &[(30.0, 6.0), (56.0, 52.0), (4.0, 52.0)],
-            Frame::Square => &[(8.0, 8.0), (52.0, 8.0), (52.0, 52.0), (8.0, 52.0)],
+    pub fn paint(&self, painter: &egui::Painter, cell: Cell, look: Look) {
+        let rings = cell.rings_at(&self.rings);
+        let faded = |colour: Color32| panel::BACKDROP.lerp_to_gamma(colour, look.alpha);
+        let outline = Stroke::new(cell.length(OUTLINE_WIDTH), faded(look.outline));
+        let fill = faded(look.colour);
+        let dim = panel::BACKDROP.lerp_to_gamma(look.colour, look.alpha * DIM_ALPHA);
+        match look.fill {
+            Fill::Solid => {
+                painter.add(Shape::mesh(even_odd_mesh(&rings, fill)));
+            }
+            Fill::Hollow => {
+                painter.add(Shape::mesh(even_odd_mesh(&rings, fill)));
+            }
+            Fill::Filling(fraction) => {
+                painter.add(Shape::mesh(even_odd_mesh(&rings, dim)));
+                let bottom = cell.centre.y + cell.half;
+                let cutoff = bottom - fraction.clamp(0.0, 1.0) * 2.0 * cell.half;
+                let clip = egui::Rect::from_min_max(
+                    egui::pos2(f32::NEG_INFINITY, cutoff),
+                    egui::pos2(f32::INFINITY, f32::INFINITY),
+                );
+                painter
+                    .with_clip_rect(clip)
+                    .add(Shape::mesh(even_odd_mesh(&rings, fill)));
+            }
+            Fill::Dashed => {
+                painter.add(Shape::mesh(even_odd_mesh(&rings, dim)));
+                let mut path = rings[0].clone();
+                path.push(rings[0][0]);
+                painter.extend(Shape::dashed_line(&path, outline, DASH_LENGTH, GAP_LENGTH));
+            }
+        }
+        if let Some(material) = look.starved {
+            let width = cell.length(STARVED_HALF_WIDTH);
+            let thickness = cell.length(MARK_WIDTH) / 2.0;
+            let base = cell.centre.y + cell.half + thickness;
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(cell.centre.x - width, base - thickness),
+                    egui::pos2(cell.centre.x + width, base + thickness),
+                ),
+                0.0,
+                faded(hue::of(material)),
+            );
         }
     }
+
+    pub fn texture(&self, colour: Color) -> TextureData {
+        let side = CELL_PIXELS;
+        let mut pixels = vec![0u8; 4 * (side * side) as usize];
+        for row in 0..side {
+            for col in 0..side {
+                let to = |value: u32| ((value as f32 + 0.5) / side as f32) * 2.0 - 1.0;
+                let (x, y) = (
+                    CENTRE.0 + to(col) * REFERENCE_HALF,
+                    CENTRE.1 + to(row) * REFERENCE_HALF,
+                );
+                if self.covers(x, y) {
+                    let at = 4 * (row * side + col) as usize;
+                    pixels[at..at + 4].copy_from_slice(&encode(colour));
+                }
+            }
+        }
+        TextureData::rgba8(UVec2::new(side, side), pixels).pixelated()
+    }
+
+    fn covers(&self, x: f32, y: f32) -> bool {
+        let crossings = self
+            .rings
+            .iter()
+            .flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)))
+            .filter(|(a, b)| {
+                let ((ax, ay), (bx, by)) = (**a, **b);
+                (ay > y) != (by > y) && x < ax + (y - ay) * (bx - ax) / (by - ay)
+            })
+            .count();
+        crossings % 2 == 1
+    }
 }
 
-impl Glyph {
-    pub fn of(row: &Row) -> Glyph {
-        Glyph {
-            frame: Frame::of(row.kind()),
-            marks: marks_of(row),
-            size: Size::of(row.cost.total()),
+impl Cell {
+    pub fn at(&self, point: (f32, f32)) -> Pos2 {
+        egui::pos2(
+            self.centre.x + (point.0 - CENTRE.0) / REFERENCE_HALF * self.half,
+            self.centre.y + (point.1 - CENTRE.1) / REFERENCE_HALF * self.half,
+        )
+    }
+
+    pub fn length(&self, length: f32) -> f32 {
+        length / REFERENCE_HALF * self.half
+    }
+
+    pub fn paint(&self, painter: &egui::Painter, primitive: &Primitive, colour: Color32) {
+        let stroke = Stroke::new(self.length(MARK_WIDTH), colour);
+        match primitive {
+            Primitive::Dot { at, radius } => {
+                painter.circle_filled(self.at(*at), self.length(*radius), colour);
+            }
+            Primitive::Line(points) => {
+                let screen: Vec<Pos2> = points.iter().map(|&point| self.at(point)).collect();
+                for pair in screen.windows(2) {
+                    painter.line_segment([pair[0], pair[1]], stroke);
+                }
+                for &vertex in &screen {
+                    painter.circle_filled(vertex, stroke.width / 2.0, stroke.color);
+                }
+            }
         }
     }
-}
 
-fn marks_of(row: &Row) -> Vec<GlyphMark> {
-    let mut marks: Vec<GlyphMark> = row.weapons.iter().map(GlyphMark::of_weapon).collect();
-    if row.plating.0 > 0.0 {
-        marks.push(GlyphMark::Belt);
-    }
-    if row.capacity.total() > 0.0 {
-        marks.push(GlyphMark::Ring);
-    }
-    marks
-}
-
-impl GlyphMark {
-    fn of_weapon(weapon: &Weapon) -> GlyphMark {
-        match weapon {
-            Weapon::Damage { range, .. } if range.0 < LONG_RANGE_FROM_METERS => GlyphMark::Dot,
-            Weapon::Damage { .. } => GlyphMark::Bar,
-            Weapon::Build { .. } => GlyphMark::Plus,
-            Weapon::Extract { material, .. } => GlyphMark::Extract(*material),
-        }
+    fn rings_at(&self, rings: &[Ring]) -> Vec<Vec<Pos2>> {
+        rings
+            .iter()
+            .map(|ring| ring.iter().map(|&point| self.at(point)).collect())
+            .collect()
     }
 }
 
-pub fn primitives_of(marks: &[GlyphMark]) -> Vec<Primitive> {
-    let paired = marks.contains(&GlyphMark::Ring) && marks.contains(&GlyphMark::Plus);
-    let belted = marks.contains(&GlyphMark::Belt);
-    marks
-        .iter()
-        .flat_map(|mark| primitives_of_mark(mark, paired, belted))
+pub(crate) fn encode(colour: Color) -> [u8; 4] {
+    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [byte(colour.red), byte(colour.green), byte(colour.blue), 255]
+}
+
+fn frame(frame: Frame, tier: Tier) -> Vec<Ring> {
+    match (frame, tier) {
+        (Frame::Unit, _) => vec![polygon(&[(30.0, 4.0), (58.0, 54.0), (2.0, 54.0)])],
+        (Frame::Structure, Tier::ONE) => vec![square(6.0, 54.0)],
+        (Frame::Structure, Tier::TWO) => vec![square(6.0, 54.0), box_ring(12.0, 48.0, 44.0)],
+        (Frame::Structure, _) => vec![
+            polygon(&[
+                (6.0, 14.0),
+                (14.0, 6.0),
+                (46.0, 6.0),
+                (54.0, 14.0),
+                (54.0, 54.0),
+                (6.0, 54.0),
+            ]),
+            polygon(&[
+                (12.0, 16.0),
+                (16.0, 12.0),
+                (44.0, 12.0),
+                (48.0, 16.0),
+                (48.0, 44.0),
+                (12.0, 44.0),
+            ]),
+            polygon(&[
+                (15.0, 17.0),
+                (17.0, 15.0),
+                (43.0, 15.0),
+                (45.0, 17.0),
+                (45.0, 41.0),
+                (15.0, 41.0),
+            ]),
+        ],
+        (Frame::Defence, _) => vec![polygon(&[
+            (6.0, 6.0),
+            (54.0, 6.0),
+            (54.0, 38.0),
+            (52.0, 45.0),
+            (46.0, 51.0),
+            (38.0, 55.0),
+            (30.0, 58.0),
+            (22.0, 55.0),
+            (14.0, 51.0),
+            (8.0, 45.0),
+            (6.0, 38.0),
+        ])],
+    }
+}
+
+fn cut(role: Role, material: Option<Material>) -> Vec<Ring> {
+    match role {
+        Role::Build => vec![plus((30.0, 29.0), 10.0, 3.5)],
+        Role::Extract => material.map(material_icon).unwrap_or_default(),
+        Role::Store => vec![circle((30.0, 29.0), 11.0), circle((30.0, 29.0), 5.0)],
+        Role::ShortFire => vec![circle((30.0, 29.0), 7.0)],
+        Role::LongFire => vec![rect(27.0, 14.0, 33.0, 38.0)],
+        Role::Scout => vec![polygon(&[
+            (30.0, 16.0),
+            (38.0, 32.0),
+            (32.0, 32.0),
+            (32.0, 42.0),
+            (28.0, 42.0),
+            (28.0, 32.0),
+            (22.0, 32.0),
+        ])],
+        Role::Brawl => vec![circle((30.0, 25.0), 8.0), rect(18.0, 37.0, 42.0, 41.0)],
+        Role::Artillery => vec![arch((30.0, 40.0), 12.0, 6.0)],
+        Role::Carry => vec![rect(20.0, 32.0, 40.0, 38.0), rect(24.0, 24.0, 36.0, 29.0)],
+        Role::Tend => vec![plus((30.0, 26.0), 8.0, 3.0), rect(18.0, 38.0, 42.0, 41.0)],
+        Role::Sense => vec![polygon(&[
+            (14.0, 16.0),
+            (30.0, 28.0),
+            (46.0, 16.0),
+            (46.0, 44.0),
+            (30.0, 32.0),
+            (14.0, 44.0),
+        ])],
+        Role::Shield => vec![circle((30.0, 29.0), 13.0), circle((30.0, 29.0), 7.0)],
+        Role::Refine => vec![
+            rect(14.0, 16.0, 46.0, 22.0),
+            rect(14.0, 26.0, 46.0, 32.0),
+            rect(14.0, 36.0, 46.0, 42.0),
+        ],
+    }
+}
+
+fn material_icon(material: Material) -> Vec<Ring> {
+    match material {
+        Material::Metals => vec![
+            polygon(&[
+                (30.0, 15.0),
+                (42.0, 22.0),
+                (42.0, 36.0),
+                (30.0, 43.0),
+                (18.0, 36.0),
+                (18.0, 22.0),
+            ]),
+            circle((30.0, 29.0), 4.0),
+        ],
+        Material::Volatiles => vec![polygon(&[
+            (30.0, 14.0),
+            (34.0, 21.0),
+            (37.0, 27.0),
+            (39.0, 32.0),
+            (39.0, 36.0),
+            (37.0, 40.0),
+            (34.0, 43.0),
+            (30.0, 44.0),
+            (26.0, 43.0),
+            (23.0, 40.0),
+            (21.0, 36.0),
+            (21.0, 32.0),
+            (23.0, 27.0),
+            (26.0, 21.0),
+        ])],
+        Material::Energy => vec![polygon(&[
+            (34.0, 14.0),
+            (22.0, 31.0),
+            (30.0, 31.0),
+            (26.0, 44.0),
+            (39.0, 26.0),
+            (31.0, 26.0),
+        ])],
+    }
+}
+
+fn notches(tier: Tier) -> Vec<Ring> {
+    let xs: &[f32] = match tier {
+        Tier::ONE => &[27.0],
+        Tier::TWO => &[20.0, 33.0],
+        _ => &[14.0, 27.0, 40.0],
+    };
+    xs.iter()
+        .map(|&left| rect(left, 46.0, left + 6.0, 54.0))
         .collect()
 }
 
-fn primitives_of_mark(mark: &GlyphMark, paired: bool, belted: bool) -> Vec<Primitive> {
-    match mark {
-        GlyphMark::Dot if belted => vec![Primitive::Dot {
-            at: (30.0, 29.0),
-            radius: 7.0,
-        }],
-        GlyphMark::Dot => vec![Primitive::Dot {
-            at: (30.0, 34.0),
-            radius: 8.0,
-        }],
-        GlyphMark::Bar => vec![Primitive::Line(vec![(30.0, 14.0), (30.0, 48.0)])],
-        GlyphMark::Plus if paired => plus_lines((30.0, 30.0), 6.5),
-        GlyphMark::Plus => plus_lines((30.0, 38.0), 8.5),
-        GlyphMark::Extract(material) => vec![
-            chevron_down(CHEVRON_AT, CHEVRON_HALF_WIDTH, CHEVRON_HALF_HEIGHT),
-            icon::of(*material).placed(EXTRACT_ICON_AT, EXTRACT_ICON_WIDTH),
-        ],
-        GlyphMark::Belt => vec![Primitive::Line(vec![(17.0, 45.0), (43.0, 45.0)])],
-        GlyphMark::Ring => vec![Primitive::Ring {
-            at: (30.0, 30.0),
-            radius: if paired { 15.0 } else { 13.0 },
-        }],
-    }
+fn polygon(points: &[(f32, f32)]) -> Ring {
+    points.to_vec()
 }
 
-fn chevron_down(at: (f32, f32), half_width: f32, half_height: f32) -> Primitive {
-    Primitive::Line(vec![
-        (at.0 - half_width, at.1 - half_height),
-        (at.0, at.1 + half_height),
-        (at.0 + half_width, at.1 - half_height),
-    ])
+fn square(from: f32, to: f32) -> Ring {
+    rect(from, from, to, to)
 }
 
-fn plus_lines(at: (f32, f32), arm: f32) -> Vec<Primitive> {
+fn rect(left: f32, top: f32, right: f32, bottom: f32) -> Ring {
+    vec![(left, top), (right, top), (right, bottom), (left, bottom)]
+}
+
+fn box_ring(from: f32, to: f32, bottom: f32) -> Ring {
     vec![
-        Primitive::Line(vec![(at.0 - arm, at.1), (at.0 + arm, at.1)]),
-        Primitive::Line(vec![(at.0, at.1 - arm), (at.0, at.1 + arm)]),
+        (from, from),
+        (to, from),
+        (to, bottom),
+        (from, bottom),
+        (from, from + 3.0),
+        (from + 3.0, from + 3.0),
+        (from + 3.0, bottom - 3.0),
+        (to - 3.0, bottom - 3.0),
+        (to - 3.0, from + 3.0),
+        (from, from + 3.0),
     ]
 }
 
-impl Size {
-    fn of(cost: f64) -> Size {
-        if cost < SMALL_BELOW {
-            Size::Small
-        } else if cost >= LARGE_FROM {
-            Size::Large
-        } else {
-            Size::Medium
+fn plus(at: (f32, f32), arm: f32, half_width: f32) -> Ring {
+    let (x, y, a, w) = (at.0, at.1, arm, half_width);
+    vec![
+        (x - w, y - a),
+        (x + w, y - a),
+        (x + w, y - w),
+        (x + a, y - w),
+        (x + a, y + w),
+        (x + w, y + w),
+        (x + w, y + a),
+        (x - w, y + a),
+        (x - w, y + w),
+        (x - a, y + w),
+        (x - a, y - w),
+        (x - w, y - w),
+    ]
+}
+
+fn circle(at: (f32, f32), radius: f32) -> Ring {
+    (0..ROUND_STEPS)
+        .map(|step| {
+            let angle = TAU * step as f32 / ROUND_STEPS as f32;
+            (at.0 + radius * angle.cos(), at.1 + radius * angle.sin())
+        })
+        .collect()
+}
+
+fn arch(base: (f32, f32), outer: f32, inner: f32) -> Ring {
+    let half = ROUND_STEPS / 2;
+    let along = |radius: f32, step: usize| {
+        let angle = TAU / 2.0 + TAU / 2.0 * step as f32 / half as f32;
+        (base.0 + radius * angle.cos(), base.1 + radius * angle.sin())
+    };
+    (0..=half)
+        .map(|step| along(outer, step))
+        .chain((0..=half).rev().map(|step| along(inner, step)))
+        .collect()
+}
+
+fn lowered(ring: Ring, by: f32) -> Ring {
+    ring.into_iter().map(|(x, y)| (x, y + by)).collect()
+}
+
+pub(crate) fn even_odd_mesh(rings: &[Vec<Pos2>], colour: Color32) -> Mesh {
+    let edges: Vec<(Pos2, Pos2)> = rings
+        .iter()
+        .flat_map(|ring| ring.iter().zip(ring.iter().cycle().skip(1)))
+        .map(|(&a, &b)| (a, b))
+        .filter(|(a, b)| a.y != b.y)
+        .collect();
+    let mut levels: Vec<f32> = edges.iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+    levels.sort_by(f32::total_cmp);
+    levels.dedup();
+
+    let mut mesh = Mesh::default();
+    for band in levels.windows(2) {
+        let (top, bottom) = (band[0], band[1]);
+        let middle = (top + bottom) / 2.0;
+        let mut crossings: Vec<(f32, f32)> = edges
+            .iter()
+            .filter(|(a, b)| a.y.min(b.y) <= middle && middle < a.y.max(b.y))
+            .map(|(a, b)| {
+                let x_at = |y: f32| a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y);
+                (x_at(top), x_at(bottom))
+            })
+            .collect();
+        crossings.sort_by(|a, b| (a.0 + a.1).total_cmp(&(b.0 + b.1)));
+        for pair in crossings.chunks_exact(2) {
+            let (left, right) = (pair[0], pair[1]);
+            let corners = [
+                egui::pos2(left.0, top),
+                egui::pos2(right.0, top),
+                egui::pos2(right.1, bottom),
+                egui::pos2(left.1, bottom),
+            ];
+            let first = mesh.vertices.len() as u32;
+            for corner in corners {
+                mesh.vertices.push(egui::epaint::Vertex {
+                    pos: corner,
+                    uv: WHITE_UV,
+                    color: colour,
+                });
+            }
+            mesh.add_triangle(first, first + 1, first + 2);
+            mesh.add_triangle(first, first + 2, first + 3);
         }
     }
-
-    pub fn scale(&self) -> f32 {
-        SIZE_SCALE[match self {
-            Size::Small => 0,
-            Size::Medium => 1,
-            Size::Large => 2,
-        }]
-    }
+    mesh
 }
 
 #[cfg(test)]
 mod tests {
-    use neumannarch_sim::roster::{Roster, Weights};
-    use neumannarch_sim::{Materials, Real};
+    use neumannarch_sim::roster::Roster;
 
     use super::*;
 
-    const SHIPPED_MARKS: [(&str, &[GlyphMark]); 9] = [
-        ("constructor", &[GlyphMark::Plus]),
-        ("metals extractor", &[GlyphMark::Extract(Material::Metals)]),
-        (
-            "volatiles extractor",
-            &[GlyphMark::Extract(Material::Volatiles)],
-        ),
-        ("energy extractor", &[GlyphMark::Extract(Material::Energy)]),
-        ("storage", &[GlyphMark::Ring]),
-        ("shipyard", &[GlyphMark::Plus, GlyphMark::Ring]),
-        ("raider", &[GlyphMark::Dot]),
-        ("frigate", &[GlyphMark::Dot, GlyphMark::Belt]),
-        ("lancer", &[GlyphMark::Bar]),
-    ];
-
-    fn row(cost: f64, manoeuvring: f64, weapons: Vec<Weapon>) -> Row {
-        Row {
-            name: "test",
-            cost: Materials::new(cost, 0.0, 0.0),
-            manoeuvring: Real(manoeuvring),
-            steering: Weights::STILL,
-            hp: Real(1.0),
-            plating: Real(0.0),
-            capacity: Materials::ZERO,
-            weapons,
-        }
+    fn area(mesh: &Mesh) -> f32 {
+        mesh.indices
+            .chunks_exact(3)
+            .map(|triangle| {
+                let [a, b, c] = [0, 1, 2].map(|at| mesh.vertices[triangle[at] as usize].pos);
+                ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.0
+            })
+            .sum()
     }
 
-    fn damage(range: f64) -> Weapon {
-        Weapon::Damage {
-            range: Real(range),
-            rate: Real(1.0),
-            damage: Real(1.0),
-            falloff: Real(0.0),
-        }
-    }
-
-    #[test]
-    fn a_structure_is_a_square_and_a_unit_a_triangle() {
-        assert_eq!(Glyph::of(&row(60.0, 0.0, vec![])).frame, Frame::Square);
-        assert_eq!(Glyph::of(&row(60.0, 1.0, vec![])).frame, Frame::Triangle);
-    }
-
-    #[test]
-    fn damage_marks_a_dot_below_the_long_range_threshold_and_a_bar_from_it() {
-        let marks = |range| Glyph::of(&row(60.0, 1.0, vec![damage(range)])).marks;
-        assert_eq!(marks(LONG_RANGE_FROM_METERS - 1.0), vec![GlyphMark::Dot]);
-        assert_eq!(marks(LONG_RANGE_FROM_METERS), vec![GlyphMark::Bar]);
-        assert_eq!(marks(LONG_RANGE_FROM_METERS + 1.0), vec![GlyphMark::Bar]);
-    }
-
-    #[test]
-    fn build_marks_a_plus_and_extract_its_materials_icon_in_weapon_order() {
-        let weapons = vec![
-            Weapon::Build { rate: Real(1.0) },
-            Weapon::Extract {
-                material: Material::Metals,
-                rate: Real(1.0),
-            },
+    fn every_glyph() -> Vec<Glyph> {
+        let roles = [
+            Role::Build,
+            Role::Extract,
+            Role::Store,
+            Role::ShortFire,
+            Role::LongFire,
+            Role::Scout,
+            Role::Brawl,
+            Role::Artillery,
+            Role::Carry,
+            Role::Tend,
+            Role::Sense,
+            Role::Shield,
+            Role::Refine,
         ];
-        assert_eq!(
-            Glyph::of(&row(60.0, 0.0, weapons)).marks,
-            vec![GlyphMark::Plus, GlyphMark::Extract(Material::Metals)]
-        );
+        let mut every = Vec::new();
+        for frame in [Frame::Unit, Frame::Structure, Frame::Defence] {
+            for role in roles {
+                for tier in [Tier::ONE, Tier::TWO, Tier::THREE] {
+                    let materials = match role {
+                        Role::Extract => Material::EVERY.map(Some).to_vec(),
+                        _ => vec![None],
+                    };
+                    for material in materials {
+                        every.push(Glyph {
+                            frame,
+                            role,
+                            material,
+                            tier,
+                        });
+                    }
+                }
+            }
+        }
+        every
     }
 
     #[test]
-    fn an_extract_mark_is_a_chevron_pointing_down_under_its_materials_icon_inside_the_frame() {
-        let square = Frame::Square.points();
-        let inside = |(x, y): (f32, f32)| {
-            let inset = MARK_WIDTH / 2.0;
-            x >= square[0].0 + inset
-                && x <= square[2].0 - inset
-                && y >= square[0].1 + inset
-                && y <= square[2].1 - inset
-        };
-        for material in Material::EVERY {
-            let primitives = primitives_of(&[GlyphMark::Extract(material)]);
-            let [Primitive::Line(chevron), Primitive::Path(rings)] = primitives.as_slice() else {
-                panic!("{material:?} draws {primitives:?}");
+    fn every_glyph_is_a_silhouette_with_its_role_cut_out_and_no_two_are_alike() {
+        let glyphs = every_glyph();
+        let drawings: Vec<Drawing> = glyphs.iter().map(|glyph| Drawing::of(*glyph)).collect();
+        for (glyph, drawing) in glyphs.iter().zip(&drawings) {
+            assert!(drawing.rings.len() >= 2, "a frame and at least one cut");
+            let solid = match glyph.frame {
+                Frame::Unit => (6.0, 53.0),
+                Frame::Structure | Frame::Defence => (8.0, 30.0),
             };
-            assert_eq!(
-                chevron.as_slice(),
-                [(20.0, 40.0), (30.0, 48.0), (40.0, 40.0)],
-                "{material:?}: the chevron at (30,44), half-width 10, points down"
-            );
-            let xs = || rings.iter().flatten().map(|(x, _)| *x);
-            let ys = || rings.iter().flatten().map(|(_, y)| *y);
-            let (left, right) = (
-                xs().fold(f32::INFINITY, f32::min),
-                xs().fold(f32::NEG_INFINITY, f32::max),
-            );
-            let (top, bottom) = (
-                ys().fold(f32::INFINITY, f32::min),
-                ys().fold(f32::NEG_INFINITY, f32::max),
-            );
-            assert!((right - left - 20.0).abs() < 1e-3, "{material:?}");
-            assert!(((left + right) / 2.0 - 30.0).abs() < 1e-3, "{material:?}");
-            assert!(((top + bottom) / 2.0 - 26.0).abs() < 1e-3, "{material:?}");
             assert!(
-                chevron
-                    .iter()
-                    .chain(rings.iter().flatten())
-                    .all(|point| inside(*point)),
-                "{material:?} clips the frame"
+                drawing.covers(solid.0, solid.1),
+                "{glyph:?}'s frame is solid"
             );
         }
-    }
-
-    #[test]
-    fn plating_above_zero_earns_the_belt_mark() {
-        let mut plated = row(60.0, 1.0, vec![]);
-        plated.plating = Real(1.0);
-        assert_eq!(Glyph::of(&plated).marks, vec![GlyphMark::Belt]);
-    }
-
-    #[test]
-    fn capacity_above_zero_earns_the_ring_mark_alongside_a_build_plus() {
-        let mut stores = row(60.0, 0.0, vec![]);
-        stores.capacity = Materials::new(1.0, 0.0, 0.0);
-        assert_eq!(Glyph::of(&stores).marks, vec![GlyphMark::Ring]);
-
-        let mut yards = row(60.0, 0.0, vec![Weapon::Build { rate: Real(1.0) }]);
-        yards.capacity = Materials::new(1.0, 0.0, 0.0);
-        assert_eq!(
-            Glyph::of(&yards).marks,
-            vec![GlyphMark::Plus, GlyphMark::Ring]
-        );
-    }
-
-    #[test]
-    fn size_steps_at_the_thresholds() {
-        let size = |cost| Glyph::of(&row(cost, 1.0, vec![])).size;
-        assert_eq!(size(SMALL_BELOW - 1.0), Size::Small);
-        assert_eq!(size(SMALL_BELOW), Size::Medium);
-        assert_eq!(size(LARGE_FROM - 1.0), Size::Medium);
-        assert_eq!(size(LARGE_FROM), Size::Large);
-    }
-
-    #[test]
-    fn every_shipped_rows_marks_are_exactly_what_its_fields_earn() {
-        let roster = Roster::shipped();
-        for (name, marks) in SHIPPED_MARKS {
-            let row = roster
-                .iter()
-                .map(|(_, row)| row)
-                .find(|row| row.name == name);
-            let row = row.unwrap_or_else(|| panic!("no shipped row named {name}"));
-            assert_eq!(Glyph::of(row).marks, marks.to_vec(), "{name}");
-        }
-    }
-
-    #[test]
-    fn every_shipped_row_has_its_own_glyph() {
-        let roster = Roster::shipped();
-        let glyphs: Vec<Glyph> = roster.iter().map(|(_, row)| Glyph::of(row)).collect();
-        assert!(!glyphs.is_empty());
-        for (i, a) in glyphs.iter().enumerate() {
-            for b in &glyphs[i + 1..] {
-                assert_ne!(a, b);
+        for (at, one) in drawings.iter().enumerate() {
+            for other in &drawings[at + 1..] {
+                assert_ne!(one, other);
             }
         }
     }
 
     #[test]
-    fn a_dot_beside_a_belt_sits_higher_and_smaller_than_alone() {
-        let alone = primitives_of(&[GlyphMark::Dot]);
-        let beside = primitives_of(&[GlyphMark::Dot, GlyphMark::Belt]);
-        let dot_at = |primitives: &[Primitive]| {
-            primitives
-                .iter()
-                .find_map(|primitive| match primitive {
-                    Primitive::Dot { at, radius } => Some((*at, *radius)),
-                    _ => None,
-                })
-                .expect("a dot")
-        };
-        assert_eq!(dot_at(&alone), ((30.0, 34.0), 8.0));
-        assert_eq!(dot_at(&beside), ((30.0, 29.0), 7.0));
+    fn a_cut_is_a_hole_in_the_frame_and_the_notches_cut_the_base() {
+        let yard = Drawing::of(Roster::shipped()[neumannarch_sim::roster::SHIPYARD].glyph());
+        assert!(yard.covers(10.0, 10.0));
+        assert!(!yard.covers(30.0, 29.0), "the plus is cut out");
+        assert!(
+            !yard.covers(30.0, 50.0),
+            "the one notch is cut from the base"
+        );
+        assert!(yard.covers(10.0, 50.0));
     }
 
     #[test]
-    fn a_ring_around_a_plus_is_wider_than_alone_and_the_plus_shares_its_centre() {
-        let alone = primitives_of(&[GlyphMark::Ring]);
-        let paired = primitives_of(&[GlyphMark::Ring, GlyphMark::Plus]);
-        let ring_radius = |primitives: &[Primitive]| {
-            primitives
-                .iter()
-                .find_map(|primitive| match primitive {
-                    Primitive::Ring { radius, .. } => Some(*radius),
-                    _ => None,
-                })
-                .expect("a ring")
+    fn a_texture_is_the_silhouette_in_the_colour_and_the_colour_changes_no_shape() {
+        let glyph = Roster::shipped()[neumannarch_sim::roster::FRIGATE].glyph();
+        let opaque = |texture: &TextureData| {
+            texture
+                .pixels()
+                .chunks_exact(4)
+                .filter(|texel| texel[3] == 255)
+                .count()
         };
-        assert_eq!(ring_radius(&alone), 13.0);
-        assert_eq!(ring_radius(&paired), 15.0);
+        let red = Drawing::of(glyph).texture(Color::rgb(1.0, 0.0, 0.0));
+        let blue = Drawing::of(glyph).texture(Color::rgb(0.0, 0.0, 1.0));
+        let texels = (CELL_PIXELS * CELL_PIXELS) as usize;
+        assert!(opaque(&red) > texels / 5 && opaque(&red) < texels * 4 / 5);
+        assert_eq!(opaque(&red), opaque(&blue));
+        assert_ne!(red.pixels(), blue.pixels());
+    }
 
-        let plus_arm = paired
-            .iter()
-            .filter_map(|primitive| match primitive {
-                Primitive::Line(points) if points.len() == 2 => Some(points[0]),
-                _ => None,
-            })
-            .any(|(x, y)| (x, y) == (30.0 - 6.5, 30.0));
-        assert!(plus_arm, "the paired plus does not share the ring's centre");
+    #[test]
+    fn a_ring_inside_a_ring_is_a_hole_and_the_mesh_covers_the_rest() {
+        let square = |half: f32| {
+            vec![
+                egui::pos2(-half, -half),
+                egui::pos2(half, -half),
+                egui::pos2(half, half),
+                egui::pos2(-half, half),
+            ]
+        };
+        let solid = even_odd_mesh(&[square(10.0)], Color32::WHITE);
+        assert!((area(&solid) - 400.0).abs() < 1e-3, "{}", area(&solid));
+
+        let pierced = even_odd_mesh(&[square(10.0), square(4.0)], Color32::WHITE);
+        assert!((area(&pierced) - 336.0).abs() < 1e-3, "{}", area(&pierced));
+    }
+
+    #[test]
+    fn a_concave_ring_is_filled_without_bridging_its_notch() {
+        let notched = vec![
+            egui::pos2(0.0, 0.0),
+            egui::pos2(10.0, 0.0),
+            egui::pos2(10.0, 10.0),
+            egui::pos2(6.0, 10.0),
+            egui::pos2(6.0, 4.0),
+            egui::pos2(4.0, 4.0),
+            egui::pos2(4.0, 10.0),
+            egui::pos2(0.0, 10.0),
+        ];
+        let mesh = even_odd_mesh(&[notched], Color32::WHITE);
+        assert!((area(&mesh) - 88.0).abs() < 1e-3, "{}", area(&mesh));
     }
 }

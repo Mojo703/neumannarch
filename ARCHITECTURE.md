@@ -198,13 +198,18 @@ send is still forming.
   where it has not, `None` where the want is no pick at all. A `Stage`
   carries the seat, the row and the asteroid it placed at, so the draft
   alone answers what is free, what a seat has placed and which stages
-  ran out unplaced, and the panel is drawn from it with nothing derived;
-  nothing counts the reserve, which no placement spends until the clock
-  starts. `State::apply` treats a want of one as a pick:
-  `Rejected::NotYet` before the stage, `Rejected::AsteroidTaken` at an
-  asteroid a placement took, otherwise the asteroid is taken there and
-  then, so two picks in one tick are first come first served in the
-  batch's own order. `State::close_draft` passes a stage that has run
+  ran out unplaced, and the panel is drawn from it with nothing derived.
+  `State::apply` treats a want of one of a row the seat still holds in
+  reserve as a pick: `Rejected::NotYet` before the stage,
+  `Rejected::AsteroidTaken` where `State::is_taken` says any seat has an
+  entity homed, otherwise the stage is placed and `State::place_from_reserve`
+  spends the reserve and spawns the row there and then, so the structure
+  stands from the pick and two picks in one tick are first come first
+  served in the batch's own order. `State::held_by(seat)` is the asteroids
+  where the seat's structures stand and `State::occupied_by(seat)` every
+  asteroid it has an entity homed at, both sorted and deduplicated; the
+  standings count a team's asteroids through `held_by`, and the agents'
+  `Survey` mirrors both off the view. `State::close_draft` passes a stage that has run
   out and ends the draft on the tick every stage has placed, or at
   `GRACE` after the last stage ended. While it runs, `State::step`
   applies commands and advances the tick and does nothing else: no phase
@@ -273,7 +278,13 @@ send is still forming.
   zero, else `Unit`; `Row::steering` is its `Weights`, one per term of
   the holding rule, and `Row::standoff()` is half its longest weapon
   range, `None` where it has no damage weapon, so an unarmed row cannot
-  chase. No `Copy` of a row lives anywhere but the roster.
+  chase. A row names its `role` and its `tier`, two facts its stats do
+  not carry, and `Row::glyph()` is the key the display draws it by:
+  `Glyph { frame, role, material, tier }`, the frame from its kind and
+  whether it is armed, the material from its extract weapon. `Role` and
+  `Tier` hold every value the design language has, shipped row or not,
+  so a new row names an existing drawing. No `Copy` of a row lives
+  anywhere but the roster.
 - A `Frame`'s progress is the work done so far, in cost units. Nothing
   complete is ever scrapped, so no entity carries work of its own; surplus
   is `count` above `want` and is read where it is needed, never stored.
@@ -761,9 +772,9 @@ impl View {
   panel reads `Draft::stages` for the order with each stage's seat, row and
   asteroid, `Draft::running` for the stage now running and `Draft::began` for
   the tick it began; a stage before the running one with no asteroid is one
-  that ran out. A bot asks `Draft::running` whether it is picking,
-  `Draft::took` what is spoken for, `Draft::placements` what it has placed
-  itself, and `Draft::ended` when the clock started.
+  that ran out. A bot asks `Draft::running` whether it is picking and
+  `Draft::ended` when the clock started; what is taken and what it has
+  placed it reads off the bodies standing, since a pick places at once.
 - It derives nothing itself; every fact is asked of the type that owns
   it — `State::holdings` for what each seat holds at each asteroid,
   `Frame::fraction` and `Frame::starved_material` for a frame,
@@ -841,11 +852,11 @@ pub enum Entry {
     Building(Building),
     Arriving { count: u32, from: AsteroidId },
     Wanted { count: u32, dashed: bool },
-    Placed,                          // a draft placement, until the clock starts
 }
 pub enum Fill { Solid, Hollow, Filling(f32), Dashed }
 pub enum WheelButton { Plus(u32), Minus(u32) }
-pub struct Client<'a> { selection, pointed, gesture, fights: &'a Fights }
+pub struct Client<'a> { selection, asked: Vec<AsteroidId>, gesture, fights: &'a Fights }
+pub struct EntityView { seat, glyph, pos, range: Option<f64> }
 
 impl Scene {
     pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene;
@@ -870,18 +881,20 @@ impl ButtonAt {
   belt's inner and outer radii are the sim's constants, carried on the
   `View` as the zone is and copied onto the scene, so the display never
   reads the map's layout off the asteroids it happens to draw.
-- A scene carries a wheel for every asteroid a seat holds a composition
-  at, and for the selection and the asteroid under the pointer, whose
-  own sector stands empty until it wants something: without it no first
-  want could be placed, and a bare asteroid could not grow before its
-  click. A sector holds only the rows that have an entry; another seat's
-  sector never carries a wanted or a building entry, since wants and
-  frames are its own. The one exception is the draft: while it runs,
-  every placed stage of `View::draft` stands on its asteroid as
-  `Entry::Placed` in the placing seat's sector, in place of the viewer's
-  own wanted entry for that row, and a small wheel shows that line, the
-  one wanted line it ever shows, so a taken asteroid reads as taken from
-  the belt.
+- A scene carries a wheel only for the asteroids the client asks for:
+  the selection and `Client::asked`, which `Play` fills with the asteroid
+  under the pointer and the asteroids whose wheels are still shrinking
+  away. An asked asteroid's own sector stands empty until it wants
+  something: without it no first want could be placed, and a bare
+  asteroid could not grow before its click. A sector holds only the rows
+  that have an entry; another seat's sector never carries a wanted or a
+  building entry, since wants and frames are its own. The fight arcs of
+  every asteroid ride on `Scene::fights`, so the HUD draws a fight bar
+  where no wheel stands and the wheel lights its spine where one does.
+- A structure has no body of its own in the sim, so `Scene::from_view`
+  stands an asteroid's structures in a ring about it at one spacing off
+  its surface, in id order, `STRUCTURE_RING_STEP_RADIANS` apart from the
+  asteroid's radial direction; a ship is drawn where the sim has it.
 - `Entry` is one fact about a row at an asteroid, and its variants are what
   DISPLAY.md's states are. `Shown::previewed` is what the pointer says
   would change, drawn at half alpha; `Entry::dim` is what is dim by its
@@ -909,28 +922,23 @@ impl ButtonAt {
   off the units standing at the source, and `commands` is the two count
   edits per row it moves. One type, so the entries the scene dims and the
   edits the release issues cannot disagree.
-- `glyph::Glyph { frame, marks, size }`: `Glyph::of(&Row)` by DISPLAY.md's
-  three rules, a pure function with a test per rule. `glyph::HALF` is a
-  glyph's nominal half-width, which both layers size by, and
-  `LONG_RANGE_FROM_METERS` is the range at which a damage weapon's mark
-  becomes a bar instead of a dot.
+- `glyph::Drawing`: the one type that draws a glyph or a material icon,
+  its rings private. `Drawing::of(Glyph)` composes the row's glyph from
+  three private tables in the sixty-unit cell, the frame by kind and
+  tier, the role's cut-out, the tier's notches; `Drawing::icon(Material)`
+  is the extract cut-out alone, scaled to fill the cell. `paint(painter,
+  Cell, Look)` is the HUD's way in, `Look { colour, outline, fill, alpha,
+  starved }` saying how, and `texture(Color)` the belt's, a
+  `CELL_PIXELS` square rasterised even-odd. Nothing outside the module
+  sees a point. `glyph::HALF` is a glyph's half-width in points, which
+  both layers size by, and `Cell` is where a drawing lands on screen.
 - `tint::toward(base, caps, strength)`: an asteroid's colour from its caps, so
   a region reads as one hue. `belt` paints an asteroid's mesh with it; the
   zone circle on the HUD is one ink for every asteroid.
-- `icon::Icon`: one material's icon, the closed rings of its SVG in the
-  glyph's sixty-unit cell, parsed by `usvg` (no text, no fonts) from the
-  one sheet `game/icons/materials.svg`, `Icon::parse(sheet, group)`
-  reading the group with the material's id, into a `LazyLock` the first
-  time any glyph is drawn, which is the mesh catalog at boot; a group
-  that is missing or is not one closed filled path is a boot-time panic
-  naming the material.
-  `icon::of(material)` is the drawing and `placed(centre, width)` is it
-  as a `Primitive::Path`, so the glyph's Extract mark, the stockpile's
-  cells and the asteroid bars draw it through the same painter and
-  rasteriser as the dot, the line and the ring. A path is filled
-  even-odd on both layers: the rasteriser counts crossings, and
-  `stencil::Cell` fills it as a mesh of trapezoids, one per band between
-  vertex heights, so a nut's hole is a hole.
+- A drawing is filled even-odd on both layers: the rasteriser counts
+  crossings, and the painter fills it as a mesh of trapezoids, one per
+  band between vertex heights, so a cut-out is a hole and a nut's hole
+  is a hole.
 - `stockpile_bar::StockpileBar`: the stockpile and the clock, laid out
   across the top centre from `scene::StockpileBarView` (the seat's
   stockpile, income, spend, elapsed tick, clock and the `BarMark` a
@@ -958,20 +966,14 @@ impl ButtonAt {
   `spine_points` with `Side::Left`. The cap is a band of the count
   line's height in the hue lerped toward the backdrop by `CAP_ALPHA`,
   the pull the full hue laid over it from the right end; no scrim, no
-  outline. One drawing serves both states: small and faint at rest, full
-  and whole under the pointer or the selection, never a different shape,
-  every colour faded by the `Placed` alpha. `Bars::over` takes the
-  frame's `Placed` list and rests every asteroid without one at the
-  small scale and the resting alpha, which is what `at_rest` gives the
-  lobby, loading and results screens.
-- `stencil::Stencil`: one glyph painted on the HUD — the frame in its fill
-  state, its marks, the `alpha` it is drawn at, and the belt a starved
-  frame carries in its material's `hue`. Every HUD glyph goes through it,
-  so a glyph is drawn one way, and `DIM_ALPHA` is what a dimmed one takes.
+  outline. `Bars::over` takes the frame's `Placed` list and builds bars
+  for those asteroids alone, at each one's scale and alpha, so bars
+  stand only beside a wheel; the resting yield is the HUD's mark.
 - `glyph_quad::GlyphQuad`: a mesh value per `(Glyph, SeatId)`, its own
-  texture rasterized in the seat's colour, for the belt. One billboarded
-  quad per ship, one draw each; hollow, filling and dashed glyphs exist
-  only on wheels, so the catalog holds solid cells alone.
+  texture from `Drawing::texture` in the seat's colour, for the belt.
+  One billboarded quad per body, one draw each; hollow, filling and
+  dashed glyphs exist only on wheels, so the catalog holds solid cells
+  alone.
 - `wheel::Wheel`: one asteroid's wheel, laid out in screen points. Sectors
   stack down the asteroid's right in seat order, each as tall as its own
   sections, or one bar where it fights with nothing standing; within a
@@ -991,22 +993,19 @@ impl ButtonAt {
   no longer clamps at `MAX_WANT`: past the cap is the sim's refusal to
   make. `WheelButton::delta` is the signed step a
   hovered button shows beside its strip.
-- `wheel::Detail`: a wheel is drawn `Full` where the pointer or the
-  selection rests on it and `Small` everywhere else, two fixed scales and
-  two fixed slot counts, never a size that follows the crowd. A small
-  wheel carries a section only for the rows standing or moving there and
-  never a wanted slot, but for a draft placement's `Entry::Placed` line.
-  `Buttons { step, wants, refusals }` is passed only to a
-  full wheel, so a small wheel takes no input by construction, and the
-  buttons stand two to a section, between its glyph and its cells,
-  plus over minus. `ButtonRefusals { adding, removing }` is what the sim
-  says about one row's two buttons, one `State::admits_want` each with
-  the count that button would issue. `Sizing { detail,
-  scale }` is how a wheel is drawn this frame: the detail decides what
-  it shows and the scale, eased toward the detail's own, how large.
-- `wheel::Footprint`: the rectangle an asteroid's wheel would take at each
-  `Detail`, from the view alone, so the frame can lay wheels out and
-  decide what the pointer is over before any wheel is built.
+- `wheel::Placed { asteroid, centre, scale, alpha, shrinking }` is how a
+  wheel is drawn this frame: one detail, every mark shown, the scale
+  eased from nothing to one as the wheel is asked for and back to
+  nothing as it is not. `Buttons { step, wants, refusals }` is passed to
+  every wheel so a shrinking one keeps its shape, and the buttons stand
+  two to a section, between its glyph and its cells, plus over minus;
+  `Wheel::button_under`, the one gate under `button_at` and
+  `spoken_at`, refuses a shrinking wheel. `ButtonRefusals { adding,
+  removing }` is what the sim says about one row's two buttons, one
+  `State::admits_want` each with the count that button would issue.
+- `wheel::Footprint`: the rectangle an asteroid's wheel takes whole, from
+  the view alone, so the frame can lay wheels out and decide what the
+  pointer is over before any wheel is built.
 - `wheels::Wheels::over(scene, roster, viewport, aim, ease)`: the
   frame's layout and the frame's hit test in one pass. `Aim { viewer,
   pointer, hovered, step, view, state }` is what the pointer and the
@@ -1025,16 +1024,20 @@ impl ButtonAt {
   scale and alpha are eased toward their targets over `Span::Fast`:
   `Motion`, a store the play screen owns and steps once per frame by the
   engine's own `dt`, never egui's clock, in which a wheel first drawn
-  starts at rest so it grows rather than appears; `Still` in tests and
-  in `look`. Size and alpha are two axes: a wheel is full where the
-  pointer or the selection rests, so two may be full at once, and whole
-  only where the pointer is or, with nothing hovered, at the selection;
-  every other wheel is faint, a covered wheel no fainter; wheels are
-  painted faintest first. Which wheel is hovered is decided against the
-  footprints as they stood before any wheel grew, the smallest footprint
-  under the pointer winning so a small wheel inside the full one's reach
-  still takes the pointer, and a hovered wheel stays hovered until the
-  pointer leaves its full footprint by `HOVER_MARGIN`, so growing under
+  starts at nothing so it grows rather than appears, and `Motion` drops
+  a wheel's tweens once its scale target is nothing and its value is
+  under `GONE_SCALE`, reporting the asteroids still above it as
+  `shrinking` for the scene to keep asking; `Still` in tests and in
+  `look`. Size and alpha are two axes: the hovered and the selected
+  wheel are whole in size, any other in the scene is shrinking to
+  nothing; the hovered wheel is whole in alpha, or the selected wheel is
+  when nothing is hovered, and every other wheel is faint, a covered
+  wheel no fainter;
+  wheels are painted faintest first. Which wheel is hovered is decided
+  against the footprints, the smallest footprint under the pointer
+  winning so a narrow wheel inside a wide one's reach still takes the
+  pointer, and a hovered wheel stays hovered until the pointer leaves
+  its footprint by `HOVER_MARGIN`, so growing under
   the pointer never changes what is hovered and an overshoot closes
   nothing. `at`, `button_at` and `spoken_at` are what a click, a drag and
   the hover phrase read; `spoken_at` answers with a `Spoken`, a wheel's
@@ -1115,20 +1118,40 @@ impl Order {
   by screen-space distance to its projected centre against
   `wheel::PICK_RADIUS`, which is how an asteroid a seat holds nothing at is
   selected and its first want placed.
+- `zoom` holds the two pure functions of pixel size every floor and fade
+  on both layers go through. `floored(points, floor)` is a soft maximum
+  with one sharpness constant, so a body settles at its floor without a
+  snap; `faded(points, gone, whole)` is a smooth ramp from zero at
+  `gone` to one at `whole` in the logarithm of the size, so a fade is
+  even across zoom. Nothing here reads time.
 - Two draw modules, one per DISPLAY.md layer. `belt`: one function from a
   `Scene` and a `Viewport` to the engine's draws — the star at the origin
   as an emissive sphere of the scene's star radius, one point light there
-  of the scene's star light range, asteroids, and ships, in 3D. `hud`: one function from a `Scene`, a `Viewport` and an
-  `egui::Painter` to what is painted over the belt's own projection —
-  every asteroid's zone circle in one ink, every standing armed ship's range
-  circle in its owner's colour, and the flight lines. The wheels and the
-  bars are painted after it, through `Wheels::paint`, and the stockpile
-  bar after them over an opaque backdrop, so nothing on the belt covers a
-  wheel and nothing shows through it; `Wheels::clear_of(rect)`
-  drops every section and every bar whose frame intersects the stockpile bar's
-  box before painting or hit-testing, and `Controls::avoid(rect)` keeps
-  a hover note out of it, so nothing of the HUD is drawn inside the
-  box or half under its edge.
+  of the scene's star light range, every asteroid as a sphere whose drawn
+  diameter is its world diameter floored at `ASTEROID_FLOOR_POINTS`, and
+  every entity as a billboard of `ENTITY_SIDE_METERS` floored at
+  `ENTITY_FLOOR_POINTS`, none of them ever fading. `hud`: one function from a `Scene`, a
+  `Viewport` and an `egui::Painter` to what is painted over the belt's
+  own projection — every asteroid's zone circle in one ink and its yield
+  mark, three sectors of `SECTOR_RADIANS` from the screen's downward
+  direction, each reaching `YIELD_MARK_THICKNESS_POINTS` times the cap
+  less the pull against `Scene::largest_cap`, in the material's full
+  hue, from the zone's size on screen plus the bars'
+  gap floored at `YIELD_MARK_FLOOR_POINTS`; the wheel, the bars and the
+  fight bars stand off by `Wheel::stand_off`, the same reach floored at
+  the bodies' `ENTITY_FLOOR_POINTS`, so far out they draw tight against
+  the asteroid and clear of its bodies and near in they stand outside
+  the zone; every standing armed ship's range circle in its
+  owner's colour; the flight lines; and a fight bar per engaged seat at
+  every fighting asteroid that carries no wheel, drawn on the arc and
+  with the bar geometry a wheel there would use. Every resting mark's alpha is
+  `zoom::faded` of the zone's size on screen between
+  `RESTING_GONE_ZONE_POINTS` and `RESTING_WHOLE_ZONE_POINTS`, the fight
+  bar between its own two lower constants so it is the last to go. The
+  wheels and the bars are painted after it, through `Wheels::paint`, and
+  the stockpile bar after them over an opaque backdrop, so nothing on the
+  belt covers a wheel and the bar covers whatever lies under it;
+  `Controls::avoid(rect)` keeps a hover note out of the bar.
 - The binary is the playable: a `Game` whose `tick` and `frame` are the
   live screen's of the `Flow` (Game: net and screens, below) and nothing
   else; in `Play`, the tick inserts the local controllers' stamped
@@ -1194,11 +1217,13 @@ the sequence, so no caller does. `Scripted` is the shipped opponent: a
 `Personality`'s constants read through `Survey` into a `Plan`, stepping
 its `Commitments` and a `Dice`.
 
-- `Survey` is one decision's tally of one view and derives everything it
-  answers from that view alone, own and enemy alike: the asteroids a
-  seat holds, occupies and builds at, its army, the enemy's army and the
-  asteroids it holds, the threat at each asteroid, and the worst plating
-  and range the enemy fields. It does not derive income: the view
+- `Survey` is one decision's reading of one view. It keeps the view,
+  the roster, the roles and `mine`, the seat's own count per row per
+  asteroid, and it answers everything else by a method over them, own
+  and enemy alike, including the asteroids the seat holds, occupies and builds at, its
+  home, its army, the enemy's army and the asteroids it holds, every
+  asteroid any seat has taken, the threat at each asteroid, and the
+  worst plating and range the enemy fields. It does not derive income: the view
   carries the seat's own, measured by the sim, and a plan reads
   `view.income` rather than a second answer to one fact. An enemy is a
   seat the view says is on another team, so a teammate is neither a
@@ -1213,11 +1238,11 @@ its `Commitments` and a `Dice`.
   `Want`s, in priority order: the opening, defence, economy, then army.
   An attack commits to the nearest enemy asteroid once the army it can see it
   needs is standing.
-- `Plan::draft` is the whole of a bot's opening; there is no rule by
-  seat index any more. While its stage runs it asks for one of that
-  stage's row, and only that; off its stage it asks for nothing, and
-  while the draft runs it re-asserts the placements the draft records
-  for it so its own standing want is never dropped. The asteroid is the
+- `Plan::draft` is the whole of a bot's plan while the draft runs, and
+  the economy and the army wait for the clock; there is no rule by seat
+  index any more. It keeps what stands, since a pick places at once, and
+  while its stage runs it asks for one of that stage's row, and only
+  that; off its stage it asks for nothing more. The asteroid is the
   free asteroid with the greatest `fit × away / (1 + near / REACH)`,
   ties by lowest asteroid id, where `fit` is the asteroid's caps
   weighted by the shares of `Plan::intended`, the same cost mix the
@@ -1238,12 +1263,9 @@ its `Commitments` and a `Dice`.
   between them. A mix of one material that the first asteroid already
   supplies scores every free asteroid at zero, which the tie-break by
   lowest asteroid id settles.
-- The asteroid a bot's constructor drafts is its first expansion:
-  `Plan::draft` claims it in `Commitments` from the tick it lands, so
-  `expand` keeps the constructor there instead of counting it spare and
-  pulling it home, and the claim retires itself the moment a structure
-  stands there. The asteroid is in the survey's `developed` from the
-  start, since a builder stands at it, so the extractor rule wants
+- The asteroid a bot's constructor drafts is its first expansion: the
+  constructor stands there from the pick, and the asteroid is in the
+  survey's `developed` from the start, since a builder stands at it, so the extractor rule wants
   extractors there by income and the yards rule wants a yard there, in
   that order, and the constructor builds them. `Commitments` keeps its
   claims and bars in match time, not in steps. `Seated::issue` breaks
@@ -1666,7 +1688,8 @@ sim/src/
   post.rs           Post
   fixture.rs        the crate's one test world, behind cfg(test)
   roster/           mod.rs Roster and the movement limit; row.rs Row,
-                    Weapon, Kind, Weights; shipped.rs the seven
+                    Weapon, Kind, Weights; glyph.rs Glyph, Frame, Role,
+                    Tier, the key a row is drawn by; shipped.rs the nine
   orbit/            body.rs Body, Gravity; elements.rs Orbit;
                     stumpff.rs; universal.rs; lambert.rs
   state/            mod.rs State, Index impls, queries; seat.rs; asteroid.rs;
@@ -1715,9 +1738,11 @@ game/src/
   display/          mod.rs; scene.rs the frame's data; wheel.rs one asteroid's
                     wheel and wheels.rs the frame's layout and hit test;
                     glyph.rs glyph_quad.rs camera.rs viewport.rs
-                    stencil.rs tint.rs fights.rs send.rs belt.rs hud.rs,
+                    tint.rs fights.rs send.rs belt.rs hud.rs,
                     as before; stockpile_bar.rs the top centre's box;
                     ease.rs the one span and its step;
+                    zoom.rs the floor and the fade, pure functions of
+                    pixel size;
                     hue.rs the three materials' colours;
                     label.rs titled, is_a_phrase and the words test
   net/              controller.rs Controller, Human; transport.rs
@@ -1883,6 +1908,11 @@ it; a new one is added here in the unit that introduces it:
   the refusals of a rule, and carrying only the second to the view, would
   delete the four arms; it was left because the split ripples through
   every crate that reads an `Outcome`.
+- `State::apply` reads a want of one as a pick only while the seat still
+  holds that row in reserve, since a stage stays unplaced when the
+  reserve is spent through an ordinary want and a seat must still be
+  able to want one of that row where something stands. A pick command
+  distinct from a want of one would delete the rule.
 - `Play::previewed` takes a `Rejected` from `State::preview` as an empty
   preview. No hover can raise one: `Wheel::button_at` never answers with a
   button the sim refuses, so no refused want is ever previewed, and a

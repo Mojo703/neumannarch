@@ -135,6 +135,8 @@ impl ShortfallFilling {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::fixture::World;
     use crate::ids::{RowId, TeamId};
@@ -169,15 +171,18 @@ mod tests {
 
     #[test]
     fn a_want_the_reserve_fills_is_placed_and_costs_nothing() {
-        let world = world();
+        let world = World::stocked(
+            Materials::new(1e4, 1e4, 1e4),
+            BTreeMap::from([(SHIPYARD, 2)]),
+        );
 
-        let preview = previewed(&world, &[want(HERE, SHIPYARD, 1)]);
+        let preview = previewed(&world, &[want(HERE, SHIPYARD, 2)]);
 
         let filling = preview
             .shortfalls
             .get(&mine(HERE, SHIPYARD))
             .expect("the shipyard is wanted here");
-        assert_eq!(filling.from_reserve, 1, "the reserve holds one");
+        assert_eq!(filling.from_reserve, 2, "the reserve holds two");
         assert_eq!(filling.to_build, 0);
         assert_eq!(
             preview.cost_to_build(world.state.roster()),

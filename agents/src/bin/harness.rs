@@ -338,8 +338,11 @@ fn drafted(state: &State) -> String {
         .map(|seat| {
             let asteroids: Vec<String> = state
                 .draft()
-                .placements(*seat)
-                .map(|(asteroid, _)| {
+                .stages()
+                .iter()
+                .filter(|stage| stage.seat == *seat)
+                .filter_map(|stage| stage.placed)
+                .map(|asteroid| {
                     let caps = state[asteroid].caps();
                     format!("{} ({})", asteroid.0, caps.total() as u64)
                 })

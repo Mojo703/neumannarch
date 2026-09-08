@@ -9,32 +9,41 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The belt and the star, plan item 3, pulled ahead of every cleanup
-pass (owner, 2026-09-07: visual and gameplay changes first, the plan's
-order bent for them). One Opus agent, red-state: the fixed belt
-deleted first, the demolition reviewed, then the build. Built and
-verified 2026-09-08, awaiting the owner's review of the diff and the
-commit: the whole working tree (the owner's staged part and the
-resuming agent's unstaged part over it) is one unit. `./check.sh`
-passes; DESIGN.md, DISPLAY.md and ARCHITECTURE.md say what the code
-does and passed a fresh-eyes register review. Every number a rough
-first value to tune by play (owner, 2026-09-07): 200 candidates per
-seed kept by the density field into 100 to 200 asteroids, 25 km
-outer, the inner edge at the half-turn ratio, three one-octave
-fields at 8 km for density, caps and eccentricity (greatest 0.1),
-1 km excursion, one 2 m asteroid radius, no exclusion (owner,
-2026-09-08: simplify, add it back by ruling if play needs it), the
-star 2.5 km with a 75 km light, the focus floored at half the inner
-edge and ceilinged a tenth past the outer with a soft pan, the
-movement limit 80 and the burn share a half. Measured: a 2 km hop
-spends a median 205 m/s against 65 m/s orbital speed at the ring,
-three times the local speed, and needs three or four aim passes,
-never five. Ambient and the starfield are engine features the owner
-adds in parallel; the game takes them when they land. Left for the
-contraction audit from this unit: the soft pan sits on a hard clamp,
-two rules holding the focus inside the belt; `Orbit::tilted_ellipse`
-takes seven bare numbers where a struct of elements would name them;
-`Vec3::dot` went `pub` for the camera's pan.
+The display at every zoom (owner, 2026-09-08), built and verified,
+awaiting the owner's review of the diff and the commit. Ruled and
+built: the world layer draws every body at world scale with a soft
+pixel floor and ships haze below it, structures ringed about their
+asteroid by the display since the sim gives them no body; the screen
+layer draws nothing per asteroid at rest but the yield mark (three
+sectors, radius the cap, fill the pull), the fight bars and the
+flights, every resting mark fading as a pure function of zoom; the
+wheel and the bars exist only at the hovered and the selected
+asteroid, growing from nothing; a draft pick places the reserve row
+at once and an asteroid any body is homed at is taken; the bot's
+survey is methods; the sim owns `held_by`, `occupied_by` and
+`is_taken`; the glyphs are a strategic-icon language, solid
+silhouettes with the role cut out and tier notches on the base,
+drawn as polygons in one game module from the row's role and tier,
+with the roles no shipped row has yet drawn already (owner,
+2026-09-08, after the sheets in BAR, Supreme Commander and PA), the
+SVG sheets and the usvg dependency deleted; a hollow glyph is the
+dimmed silhouette so a wanted row still names what it builds; the
+yield mark reaches by what is left to take and rides outside the zone
+at a stand-off the wheel and the bars share, floored so everything
+draws tight into the asteroid far out (owner, 2026-09-08). Agreed and
+not yet built: the camera's focus becomes an orbit, the sim's own
+type, deleting the turn code and its rate cap. Every number a first
+value to tune by play: asteroid
+floor 6 pt, entity side 1 m floored at 26 pt, ship haze alpha 0.25
+below 0.5 pt, resting marks whole at a zone of 8 pt and gone at 1,
+fight bars whole at 4 and gone at 0.2, the yield mark from 15 to 30
+pt, the structure ring a spacing off the surface at an eighth turn a
+rung. Left for the contraction audit from the two units: the soft pan
+sits on a hard clamp; `Orbit::tilted_ellipse` takes seven bare
+numbers; `Vec3::dot`, `Vec3::normalized` and `Belt::SPACING_METERS`
+went `pub` for the display; `Stage.placed` records where a pick
+landed beside the body that stands there. Ambient and the starfield
+are engine features the owner adds in parallel.
 
 After it, the next visual and gameplay units in the owner's order:
 ship speed and combat feel through the harness; the asteroid bars and
@@ -77,6 +86,19 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
 - The mouse wheel over a wheel's line sets that row's want, as the
   buttons do. A DISPLAY.md Editing change; kept beside the hotkeys
   item.
+- The draw order (owner, 2026-09-08): the world by depth, then on the
+  screen layer the zone and range circles, the yield marks, the flight
+  lines and the fight bars, then the bars and the wheels with the hover
+  phrase, then the panels; fight bars and flight lines stay under a
+  wheel. The yield marks paint over the bodies today. Bodies will one
+  day be 3D models, with the glyph then a screen-layer icon over the
+  model as strategic icons are; a placeholder mesh per row, a cube,
+  through an enum the mesh catalog matches on, is a unit of its own.
+- A host who holds no seat and plays only bots is shown the first
+  bot's seat as if it were their own: its stockpile bar, its wheels with
+  buttons that issue nothing, its draft turn (found 2026-09-08). Ruled:
+  such a player is a spectator, read-only, able to change which seat
+  they watch, through a panel like the draft's. A unit of its own.
 - The wheel's wrapped columns stand about 130 px apart in the look
   tool's wheel and draft scenes, reading as three groups rather than
   one wheel. A small display item.
@@ -486,6 +508,12 @@ works around a gap.
 - No line or ribbon primitive in the engine: the HUD is painted in
   screen space through egui's painter over `Camera::pixel_of`.
 - Hand-rolled dimensional newtypes (owner: madness).
-- The small wheel and the asteroid bars at fixed pixels at every zoom,
-  overlapping when crowded; nothing hidden by zoom.
-- A deselected bare asteroid's wheel vanishes rather than shrinking.
+- Nothing hidden by zoom means the world is always drawn: bodies shrink
+  to a pixel floor and never vanish; a resting HUD mark fades as a pure
+  function of zoom and never pops (owner, 2026-09-08).
+- No small wheel: a wheel exists only at the hovered and the selected
+  asteroid (owner, 2026-09-08).
+- Structures have no body of their own in the sim and the display
+  rings them about the asteroid; no orbit, offset or frame for a
+  structure, ever (owner, 2026-09-08).
+- A draft pick places the reserve structure at once (owner, 2026-09-08).

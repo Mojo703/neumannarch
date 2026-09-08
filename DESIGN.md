@@ -49,9 +49,9 @@ probe; the win is holding the system when the clock runs out.
   moment its seat places, or after a stated span if it has not, and
   the next begins at once. A seat whose stage ran out keeps the right
   to place and may do so at any later tick, alongside the running
-  stage, first come first served. A placement lands at an asteroid no draft
-  placement has taken, and an asteroid a draft placement stands on is
-  taken. A reserve want before the seat's first stage has begun is
+  stage, first come first served. A placement puts the seat's reserve
+  row at the asteroid at once, complete, and an asteroid any seat has a
+  body homed at is taken. A reserve want before the seat's first stage has begun is
   refused by name; a want at a taken asteroid is refused by name. Any
   other want is accepted during the draft and stands as a want, the
   way a build order is queued before a round starts; it is filled once
