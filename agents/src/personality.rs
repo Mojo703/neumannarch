@@ -1,10 +1,12 @@
 use neumannarch_protocol::Bot;
-use neumannarch_sim::RowId;
 use neumannarch_sim::roster::Roster;
+use neumannarch_sim::{RowId, Time};
 
 use crate::roles::Roles;
 
 const PLATING_WORTH: f64 = 20.0;
+
+const ATTACK_RATIO_LASTS: f64 = 2.0 / 3.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mix {
@@ -16,13 +18,12 @@ pub enum Mix {
 pub struct Personality {
     pub name: &'static str,
     pub seed: u64,
-    pub asteroids: usize,
     pub stores: u32,
     pub yards: usize,
     pub masons: u32,
     pub claims: usize,
-    pub army_ratio: f64,
-    pub army_floor: f64,
+    pub garrison_floor: u32,
+    pub attack_floor: u32,
     pub defence_ratio: f64,
     pub attack_ratio: f64,
     pub mix: Mix,
@@ -35,13 +36,12 @@ impl Personality {
         Personality {
             name: "turtle",
             seed: 0x7075_7274_6c65,
-            asteroids: 3,
             stores: 2,
             yards: 1,
             masons: 1,
             claims: 1,
-            army_ratio: 1.3,
-            army_floor: 150.0,
+            garrison_floor: 3,
+            attack_floor: 8,
             defence_ratio: 2.0,
             attack_ratio: 1.1,
             mix: Mix::Counters,
@@ -54,13 +54,12 @@ impl Personality {
         Personality {
             name: "expand",
             seed: 0x6578_7061_6e64,
-            asteroids: 8,
             stores: 1,
             yards: 3,
             masons: 3,
             claims: 2,
-            army_ratio: 0.9,
-            army_floor: 90.0,
+            garrison_floor: 2,
+            attack_floor: 5,
             defence_ratio: 1.2,
             attack_ratio: 0.7,
             mix: Mix::Counters,
@@ -76,8 +75,16 @@ impl Personality {
         }
     }
 
-    pub fn army_value(&self, enemy: f64) -> f64 {
-        (self.army_ratio * enemy).max(self.army_floor)
+    pub fn armed_unit_cost(&self, roster: &Roster, weights: &[(RowId, f64)]) -> f64 {
+        weights
+            .iter()
+            .filter_map(|(row, share)| roster.get(*row).map(|row| row.cost.total() * share))
+            .sum()
+    }
+
+    pub fn attack_ratio_at(&self, time: Time, length: Time) -> f64 {
+        let spent = time.seconds() / (ATTACK_RATIO_LASTS * length.seconds()).max(f64::MIN_POSITIVE);
+        self.attack_ratio * (1.0 - spent).max(0.0)
     }
 
     pub fn named(name: &str) -> Option<Personality> {

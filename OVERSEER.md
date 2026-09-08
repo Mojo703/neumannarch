@@ -49,8 +49,9 @@ for the one that talks to the owner. Project state lives in TODO.md.
   standing authorization in this repo. Stop before a commit so the owner can
   verify the working tree.
 - A commit carries its documentation (owner, 2026-09-06): before the
-  commit, DESIGN.md, DISPLAY.md and ARCHITECTURE.md say what the code
-  now does, and TODO.md's ledger and queue are brought to the truth;
+  commit, DESIGN.md and DISPLAY.md say what the code now does,
+  INVARIANTS.md lists every hole it tolerates, and TODO.md's ledger and
+  queue are brought to the truth;
   TODO.md never describes a commit, the message is the record.
 - A question goes on the question tool in the same turn it arises, never
   deferred to a later turn (owner, 2026-09-06). Text in the same turn as
@@ -64,3 +65,34 @@ for the one that talks to the owner. Project state lives in TODO.md.
 - The engine is being polished through this game. Report a needed engine
   feature or an API friction to the owner clearly and at once, as its own
   item, never folded into a workaround.
+- Decide from the player's experience, never from the documents
+  (owner, 2026-09-08). DISPLAY.md records decisions; it is not their
+  source. A proposal is argued by what the player reads and does at
+  each zoom, not by "one owner per fact" or a sentence in a document.
+  When the owner is critical of a suggestion, the work is to reach a
+  unified decision, never to decide alone; and when the owner asks
+  for options, give options, each as a mechanism and its trade.
+- Prefer the deletion (owner, 2026-09-08): every proposal that adds a
+  rule, a type or a constant is suspect; ask first whether deleting
+  code would do. A rate cap, a haze, a class table, a parsed sheet with
+  a global map were each the wrong answer to a problem a deletion
+  solved.
+- Visuals are craft, not derivation (owner, 2026-09-08). Study what
+  other games do from their real files, never from search summaries;
+  a sheet the owner can judge and delete from beats an argument.
+  Look at every screenshot at every zoom before saying a thing is
+  done, and say what is wrong in it before the owner does.
+- Plain words. A coined term ("gravity slope", "semantic binding",
+  "haze") is corrected at once to the project's word, and the
+  overseer's own words are checked the same way.
+- Agents: one agent per unit, briefed once with the whole design,
+  run to completion before the overseer touches the tree; never two
+  agents and the overseer editing shared interfaces at once (owner,
+  2026-09-08: it cost a day of round trips). The overseer writes the
+  drawing code itself; bulk logic and research go to Opus, register
+  reviews to Sonnet. Keep the overseer's own output small; its tokens
+  are the expensive ones.
+- Questions go on the question tool, always, even mid-conversation;
+  "let's talk in chat" is for one exchange, not a standing rule.
+- Never edit with sed or a script, not even one line; it is the rule
+  the owner watches for.

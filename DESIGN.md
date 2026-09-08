@@ -1,8 +1,8 @@
 # Neumannarch — design
 
 The rules of the game, as the target. This document is the authority on what
-the simulation computes; ARCHITECTURE.md is the authority on how the code is
-shaped, DISPLAY.md on what the player sees. Where this document is silent,
+the simulation computes; DISPLAY.md is the authority on what the player
+sees, and the code on how it is shaped. Where this document is silent,
 prefer the reading that adds no new type, field, or rule. Numbers live in the
 roster in `sim`, never here. Distances are metres, times seconds and
 rates per second throughout. The roster is the table of rows a match is

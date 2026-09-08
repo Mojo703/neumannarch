@@ -1,6 +1,8 @@
 use neumannarch_sim::roster::{Kind, Roster, Row};
 use neumannarch_sim::{Material, RowId};
 
+use crate::ranking::Ranking;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Roles {
     pub yards: Vec<RowId>,
@@ -48,12 +50,10 @@ fn best(roster: &Roster, material: Material) -> Option<RowId> {
 }
 
 fn ranked(roster: &Roster, score: impl Fn(&Row) -> Option<f64>) -> Vec<RowId> {
-    let mut rated: Vec<(RowId, f64)> = roster
-        .iter()
-        .filter_map(|(id, row)| score(row).map(|score| (id, score)))
-        .collect();
-    rated.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    rated.into_iter().map(|(id, _)| id).collect()
+    Ranking::by(roster.iter().map(|(id, _)| id), |id| {
+        roster.get(id).and_then(&score)
+    })
+    .order()
 }
 
 #[cfg(test)]

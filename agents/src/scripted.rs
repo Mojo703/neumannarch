@@ -35,8 +35,8 @@ impl Scripted {
 
 impl Agent for Scripted {
     fn decide(&mut self, view: &View) -> Vec<Command> {
-        self.commitments.settle(view, &self.roster);
         let survey = Survey::of(view, &self.roster, &self.roles);
+        self.commitments.settle(&survey);
         let plan = Plan::of(
             &survey,
             &self.personality,
@@ -52,23 +52,24 @@ mod tests {
     use super::*;
     use neumannarch_sim::Post;
     use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD};
+    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
     use neumannarch_sim::state::{Asteroid, view::View};
     use neumannarch_sim::state::{Batch, Command, Seat, State};
     use neumannarch_sim::step::fire::Shots;
     use neumannarch_sim::{
-        AsteroidId, Materials, SeatId, Sequence, TICKS_PER_SECOND, TeamId, Time,
+        AsteroidId, Materials, SeatId, Sequence, Setup, TICKS_PER_SECOND, TeamId, Time,
     };
 
-    use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION, Mix};
+    use crate::played_match::{free_for_all, minutes};
+    use crate::{DECISION_INTERVAL, MAX_COMMANDS_PER_DECISION};
 
     const PLAYED: u64 = 420;
 
+    const PLAYED_MINUTES: u64 = 7;
+
+    const SEEDS: u64 = 8;
+
     const STOCK: Materials = Materials::new(300.0, 100.0, 100.0);
-
-    const RICH: f64 = 8.0;
-
-    const POOR: f64 = 1.0;
 
     fn neighbours() -> Vec<Asteroid> {
         let standing = |asteroid: &Asteroid| asteroid.orbit().at(Time::ZERO, Belt::GRAVITY).pos;
@@ -276,31 +277,47 @@ mod tests {
     }
 
     #[test]
-    fn a_bot_drafts_the_asteroid_richest_in_what_the_mix_it_means_to_build_wants_most() {
-        let state = start(Belt::from_seed(0), PLAYED);
-        let picking = state.draft().stages()[0].seat;
-        let mut view = View::of(&state, picking, &Shots::default());
-        let metals_at = AsteroidId(0);
-        for terrain in &mut view.terrain {
-            terrain.caps = match terrain.asteroid {
-                at if at == metals_at => Materials::new(RICH, POOR, POOR),
-                _ => Materials::new(POOR, RICH, RICH),
-            };
-        }
-        let hungry_for = |row| {
-            let personality = Personality {
-                mix: Mix::Pinned(vec![(row, 1.0)]),
-                ..Personality::turtle()
-            };
-            let opening = scripted(personality).decide(&view);
-            let Command::Want { asteroid, .. } = *opening.first().expect("a pick");
-            asteroid
-        };
+    fn a_bots_first_draft_pick_is_the_asteroid_richest_in_the_mix_it_means_to_build() {
+        let roster = Roster::shipped();
+        let personality = Personality::expand();
+        let shares = personality.weights(&roster, &Roles::of(&roster), 0.0, 0.0);
+        let mix = shares
+            .iter()
+            .map(|(row, share)| roster[*row].cost * *share)
+            .fold(Materials::ZERO, |mix, cost| mix + cost);
 
-        assert_eq!(
-            hungry_for(FRIGATE),
-            metals_at,
-            "the frigate's cost is metals before all else"
-        );
+        for seed in 0..SEEDS {
+            let setup =
+                Setup::new(free_for_all(2), seed, minutes(PLAYED_MINUTES)).expect("a match");
+            let state = State::start(&setup);
+            let picking = state.draft().stages()[0].seat;
+            let view = View::of(&state, picking, &Shots::default());
+            let fit = |at: AsteroidId| {
+                view.terrain_of(at).map_or(0.0, |terrain| {
+                    terrain
+                        .caps
+                        .amounts()
+                        .map(|(material, cap)| cap * mix[material])
+                        .sum::<f64>()
+                })
+            };
+            let richest = view
+                .terrain
+                .iter()
+                .map(|terrain| terrain.asteroid)
+                .max_by(|one, other| fit(*one).total_cmp(&fit(*other)).then(other.cmp(one)))
+                .expect("a belt of asteroids");
+
+            let opening = scripted(personality.clone()).decide(&view);
+
+            let Command::Want { asteroid, .. } = *opening.first().expect("a pick");
+            assert_eq!(
+                asteroid,
+                richest,
+                "seed {seed}: it took {asteroid:?} yielding {} where {richest:?} yields {}",
+                fit(asteroid),
+                fit(richest)
+            );
+        }
     }
 }

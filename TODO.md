@@ -9,45 +9,160 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The display at every zoom (owner, 2026-09-08), built and verified,
-awaiting the owner's review of the diff and the commit. Ruled and
-built: the world layer draws every body at world scale with a soft
-pixel floor and ships haze below it, structures ringed about their
-asteroid by the display since the sim gives them no body; the screen
-layer draws nothing per asteroid at rest but the yield mark (three
-sectors, radius the cap, fill the pull), the fight bars and the
-flights, every resting mark fading as a pure function of zoom; the
-wheel and the bars exist only at the hovered and the selected
-asteroid, growing from nothing; a draft pick places the reserve row
-at once and an asteroid any body is homed at is taken; the bot's
-survey is methods; the sim owns `held_by`, `occupied_by` and
-`is_taken`; the glyphs are a strategic-icon language, solid
-silhouettes with the role cut out and tier notches on the base,
-drawn as polygons in one game module from the row's role and tier,
-with the roles no shipped row has yet drawn already (owner,
-2026-09-08, after the sheets in BAR, Supreme Commander and PA), the
-SVG sheets and the usvg dependency deleted; a hollow glyph is the
-dimmed silhouette so a wanted row still names what it builds; the
-yield mark reaches by what is left to take and rides outside the zone
-at a stand-off the wheel and the bars share, floored so everything
-draws tight into the asteroid far out (owner, 2026-09-08). Agreed and
-not yet built: the camera's focus becomes an orbit, the sim's own
-type, deleting the turn code and its rate cap. Every number a first
-value to tune by play: asteroid
-floor 6 pt, entity side 1 m floored at 26 pt, ship haze alpha 0.25
-below 0.5 pt, resting marks whole at a zone of 8 pt and gone at 1,
-fight bars whole at 4 and gone at 0.2, the yield mark from 15 to 30
-pt, the structure ring a spacing off the surface at an eighth turn a
-rung. Left for the contraction audit from the two units: the soft pan
-sits on a hard clamp; `Orbit::tilted_ellipse` takes seven bare
-numbers; `Vec3::dot`, `Vec3::normalized` and `Belt::SPACING_METERS`
-went `pub` for the display; `Stage.placed` records where a pick
-landed beside the body that stands there. Ambient and the starfield
-are engine features the owner adds in parallel.
+The bot unit, built and verified 2026-09-08, awaiting the owner's
+review of the diff and the commit. The owner read the code and
+accepted it, accepted the non-test budget miss (2416 against 1817,
+289 of it the match runner and guarantee watchers shared by tests and
+`harness verify`), and ruled the three deviations stand: a frame with
+no builder may last one decision, garrisons grow only where a builder
+stands, and a near-full stockpile also wants one more yard at home
+since build is flow at the builders' rate. The guarantees run in
+`check.sh` as `harness verify 6` in release (seven seconds) rather
+than as tests (130 seconds). Renamed before review: brimming to
+stock_near_capacity, cramped to short_of_room, sink to
+spend_overflow, Trial to PlayedMatch. Fixed after the owner's play
+found thirty shipyards at one asteroid: the overflow yard is wanted
+at the staging asteroid, one frame at a time, never at home every
+second; the overflow warship is the row whose cost is most in the
+fullest material, at the building asteroid with no frame open; and
+the stockpile guarantee is stated as the defect measured, a full
+stockpile with spend under nine tenths of the builders' rate, since
+a besieged seat working every builder flat out is not hoarding. The
+mirror ends with four yards against two and armies of five hundred
+and two hundred, which the thousand-units-per-asteroid cost below
+now bears on. Found by the owner's play: the
+bots' names no longer say how they play, since expansion is
+failure-driven for both and a turtle claims as much as an expander
+(turtle against expand ends 8 to 7 asteroids); the personalities
+differ by claims, masons, yards and the army numbers alone. A balance
+pass item. Also from the owner's play: a bot builds shipyards at one
+asteroid while its warships are wanted at another, since yards go to
+home and the developed asteroids while the fill feeds whichever
+asteroid's force is furthest below its want, often a claim whose one
+constructor builds at a fifth of a yard's rate; the fill should weigh
+the build rate standing at the asteroid, or the yards should follow
+the forces. The same balance pass, with two more from the owner's
+questions (2026-09-08): the attack is a trickle by construction,
+since once committed every decision re-homes every spare armed unit
+to the target, so units go forward one at a time as they finish; the
+copied bots gather to a threshold and send the whole force, and the
+fix is a wave, a send only when the force at staging beyond its
+garrison meets the threshold, nothing forwarded between waves (owner:
+left for the balance pass). And the turtle personality is to be
+considered for removal (owner, 2026-09-08), since it is only a
+slower expander now and nothing in it says hold what you have; one
+personality is the deletion. Found by the agent, a sim item: `Composition::builder` is
+a yes or no while the bot needs the count of builders standing, and
+the flag disagrees with the row counts for a builder whose send is
+forming; the count belongs on the composition beside the flag.
 
-After it, the next visual and gameplay units in the owner's order:
-ship speed and combat feel through the harness; the asteroid bars and
-flight line unit (Docs ahead of code, below); camera and hotkeys.
+The unit was one Opus agent on the owner's ruling to copy the
+mechanisms of five open-source bots read from their source
+(CircuitAI, Petra, OpenRA, M27AI, Wesnoth; clones in the session
+scratchpad, the research report in the session). Measured before it:
+no bot ever fielded a warship, since the army value split by share
+and divided by cost truncated every row to zero; twelve frames sat
+open at asteroids where no builder stood because a claim closed on
+the first structure and the constructor left; both seats sat at
+stockpile capacity from five minutes. The design: the army
+fills the most-behind row one whole unit a decision; spending holds
+back only inside a band of 1.5 to 1.1 of the enemy's armed value and
+a material above 0.8 of capacity always buys the cheapest armed row;
+a want stands only where a builder stands or is arriving and is
+swept otherwise, the claim closing when nothing more is wanted there,
+open frames capped at two per builder; expansion is triggered by an
+extractor that could not be placed for lack of spare cap, no count
+per personality; forces per asteroid (owner, 2026-09-08: there is
+defence, and with no lanes a single army is wrong), every held
+asteroid wanting the enemy armed value at or toward it times the
+defence ratio floored at a garrison, the staging asteroid adding the
+offensive force, the fill feeding the most-behind asteroid's
+most-behind row; attack re-homes the staging force only, joining an
+attack already committed, the ratio falling to zero at two thirds of
+the clock; the plan as the target composition per asteroid. The
+demolition was reviewed 2026-09-08: the guarantees fail on the
+shipped bot, the first in the opening second; the match runner and
+the guarantee checks become library items shared by the tests and a
+`harness verify` command since a fifteen-minute match takes ninety
+seconds in debug. Three
+guarantees pinned first as failing tests: every frame has a builder
+standing or arriving; two bots field an army by a third of the clock
+and exchange shots by half; no stock sits at capacity for a minute
+while an armed row is affordable. The harness takes four names. The
+agent stops at red for the demolition review.
+
+Next, ruled 2026-09-08 after the owner saw slow motion late in a
+release match: the store unit. Measured on a fifteen-minute two-bot
+match in release: the tick grows about quadratically with entities,
+0.13 ms at 134, 1.7 at 480, 4.2 at 781 against 8.3 available, and
+the engine catches up at most eight ticks a frame, so with a frame of
+six to eight milliseconds (0.4 ms empty, 5.8 at 400 ships, 7.6 at the
+whole belt, offscreen) the clock falls behind. The game's own work
+around the step is under two percent. The flame graph (session
+scratchpad, late-game-flame.svg): the entity tree's own key search
+and comparison a quarter; `standing_at` walking the whole store per
+call a quarter, called per unit by the chase and per asteroid and
+material by extraction; the chase's threat ranking per unit 30
+percent; the field sums 18; the sweep 17; fire 12. The unit: a dense
+entity store in asteroid-then-id order with ids minted by the store,
+so who stands at an asteroid is a slice and a lookup cannot fail;
+the chase ranked once per asteroid per plating; the sweep deleted in
+favour of the slices; asteroid bodies solved once per tick; one hash
+re-baseline; every downstream reader (view, agents, game) propagated;
+timed before and after. Opus deletes, Fable writes it back (owner).
+Cuts the owner asked to be proposed are put to them beside it. The
+field sums are quadratic by design and wait for a DESIGN.md ruling.
+
+Held for after the bot fights: tiers, ruled 2026-09-08 to be designed
+in parallel and to land only once the bot fights. The mechanism as
+proposed: a builder builds a structure up to one tier above its own
+and a unit up to its own, read off the tier every row already
+carries; a frame opens only where a standing builder can build the
+row, else the want stands dashed as a want with no builder does; the
+reserve and surplus ignore tiers; no upgrade verb and no level on an
+asteroid. Costs the gate in fulfilment, the wheel's dashed phrase,
+the bot's roles per tier, and a re-stated roster (a tier-two yard and
+constructor; the lancer's tier).
+
+The next units after it, in the owner's order, each a design
+conversation on the owner's questions before a brief:
+
+1. Grouping icons at far zoom, the conversation opened 2026-09-08:
+   the owner ranks what a pile must read as who, what, where, how
+   much, with small position offsets allowed and some rows always
+   visible; measured that a force is a 60 m disc on a 50 km belt, so
+   above fight zoom every force is one glyph, and that the spacing
+   (0.5 m) is under the drawn side (1 m) so bodies overlap at world
+   scale too. Three shapes offered, gather-by-row recommended; the
+   owner noted the torn-down tally wheel and BAR's no-overlap footprint
+   and asked whether grouping is needed at all. No ruling yet; the
+   belt's size may change first.
+2. The camera's focus as an orbit, the sim's own type: clicking an
+   asteroid sets the focus to that asteroid's orbit exactly, a pan or a
+   zoom into empty space makes a circular orbit through the panned
+   point, the hand-rolled turn in `advance` and its rate cap are
+   deleted, the soft floor on the pan stays (agreed 2026-09-08).
+3. The spectator: a host who holds no seat watches read-only and can
+   change which seat, through a panel like the draft's.
+4. Bodies as 3D models with the glyph as a screen icon over them, and
+   a placeholder mesh per row through an enum the catalog matches on.
+5. Ship speed and combat feel through the harness; then hotkeys.
+
+Numbers of the display unit, each a first value to tune by play:
+asteroid floor 6 pt, entity side 1 m floored at 26 pt, resting marks
+whole at a zone of 2 pt and gone at a quarter, fight bars whole at 4
+and gone at 0.2, the yield mark's floor 5 pt and its thickness three
+tenths of its stand-off floored at 12 pt, slivers under 2 pt not
+drawn, the wheel's stand-off the zone plus the bars' gap floored at
+the bodies' floor, the structure ring a spacing off the surface at an
+eighth turn a rung. Left for the contraction audit: the soft pan sits
+on a hard clamp; `Orbit::tilted_ellipse` takes seven bare numbers;
+`Vec3::dot`, `Vec3::normalized` and `Belt::SPACING_METERS` went
+`pub` for the display; `Stage.placed` records where a pick landed
+beside the body that stands there; `Scene` copies five belt constants
+through `View`; `EntityView` copies the row's reach and glyph per
+entity. Ambient and the starfield are engine features the owner adds
+in parallel.
 
 Open from the time split: extraction, construction and fulfilment act
 per tick with a fixed second's worth of work rather than integrating
@@ -56,33 +171,17 @@ draft. The complete shape is every phase taking the step's match-time
 span, zero in the draft, and no early return. Contraction audit.
 
 Open from the draft unit:
-- `harness draft` on the seeded belt (2026-09-08): the first picker
-  won 4 of 8 with 1 drawn, so the fixed table's edge is gone. Found
-  behind it, verified by running the bot over seeds 0..8: a bot's
-  first draft pick is always asteroid 0, never the richest. On the
-  first pick the plan has no target yet, so `Plan::intended` is
-  empty, every asteroid's fit is zero and the tie falls to the lowest
-  id; the second pick works because the first placement is then a
-  target. A bot unit, with the initiative item below.
+- `harness draft` on the seeded belt with the rebuilt bot
+  (2026-09-08): the first picker won 5 of 8, none drawn, and both
+  sides held two asteroids at ninety seconds in all eight; the pick
+  is now the richest free asteroid on every seed. The first-picker
+  edge is a balance reading, not a defect.
 - The owner's arrival scene, the probes flying into the system during
   the draft: display only, not yet designed.
 
 ## Open, each for a ruling or a unit
 
 From the owner's play (2026-09-08), each for a ruling before a unit:
-- The asteroid bars crowd the belt when the camera is far out: at the
-  whole-ring zoom the bars and icons are most of what is drawn (the
-  look tool's belt and wheel scenes show it). The owner's proposal:
-  drop the icons and read the material by colour alone, stand the bars
-  upright over the asteroid so they pack tighter. A DISPLAY.md
-  Resources change; joins the asteroid bars and flight line unit.
-- The bars vanish where the stockpile bar would cover them
-  (`Wheels::clear_of` drops every section and bar meeting its box).
-  The owner wants them drawn behind it instead. A DISPLAY.md Two
-  layers change.
-- The bots take no initiative: they build no army and take no asteroid
-  by force. With the first-pick defect above, a bot unit through the
-  harness (plan item 4's bot-behaviour guarantees).
 - The mouse wheel over a wheel's line sets that row's want, as the
   buttons do. A DISPLAY.md Editing change; kept beside the hotkeys
   item.
@@ -102,9 +201,6 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
 - The wheel's wrapped columns stand about 130 px apart in the look
   tool's wheel and draft scenes, reading as three groups rather than
   one wheel. A small display item.
-- The bot draft test in agents/src/scripted.rs hands the subject its
-  answer (every cap overwritten by hand) and lost the lancer half of
-  its guarantee; with the first-pick defect above, the bot unit.
 - The naming pass over the sim crate (owner, 2026-09-06), the owner
   judging it from the diff: read-only Haiku surveyors in parallel, one
   per module group (state, step, orbit and roster, history and the
@@ -122,8 +218,8 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
   asteroid with a seat as a bare pair in `step/fire.rs`,
   `step/extraction.rs` (`Income`), `display/fights.rs`; a row at a
   post as a pair or triple in `agents/plan.rs` (`targets`,
-  `standing`); and tuple returns in `display/glyph.rs`, `icon.rs`,
-  `glyph_quad.rs`, `personality.rs`, `harness.rs`. One Sonnet sweep
+  `standing`); and tuple returns in `display/glyph.rs`,
+  `personality.rs`, `harness.rs`. One Sonnet sweep
   under the tuples rule, deferred behind the visual and gameplay
   units.
 - Second derivations in the agents, found 2026-09-06: `survey.rs`
@@ -176,6 +272,15 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
 - Fable's wheel proposals, not built, for the owner: asteroid names in
   phrases; total HP on the fight bar's hover; a live send line from
   wheel to pointer; the hint phrase advancing.
+- The holding rule, from the owner's play (2026-09-08): a constructor
+  with five raiders on it runs out of the zone under its caution term,
+  the raiders' chase pulls only toward an enemy inside the zone, and
+  the return term holds the constructor at the zone's edge, so neither
+  reaches the other. The owner's three changes to put as mechanism in
+  the combat-feel unit: a unit steers toward a target direction rather
+  than by a sum of forces, so a chase closes; a slower row does not
+  chase a faster one; a defending force holds near its structures. A
+  DESIGN.md Movement and combat change before the unit.
 - Held for the owner's play: asteroids sub-pixel at region zoom; the fight
   arc refilling on reinforcement; repair at 15 HP/s beating a frigate's
   12 DPS; elimination before the clock; a fresh-eyes judgement after
@@ -184,7 +289,7 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
 
 ## Docs ahead of code
 
-One line per sentence of DESIGN.md, DISPLAY.md or ARCHITECTURE.md the
+One line per sentence of DESIGN.md or DISPLAY.md the
 code does not yet do, naming the unit that lands it. A brief quotes its
 lines from here; landing deletes them; the overseer reads this section
 against the code at every session start.
@@ -210,6 +315,14 @@ against the code at every session start.
   Plan 6.
 - DESIGN World, Entity and Sends: one movement limit; the sim solves one
   schedule per row from a per-row acceleration. Plan 1e or the belt.
+- DESIGN Movement and combat, Chase: a unit chases an enemy inside the
+  zone; the code's chase targets any enemy homed at the asteroid
+  wherever it stands, and both the chase and the return term saturate
+  at the same speed past 7.5 m, so a chase with a heavier weight than
+  return pulls a unit out of the zone without bound and a caution-driven
+  unit runs until the enemy's field vanishes 15 m off (found by the
+  owner's play, 2026-09-08). The combat-feel unit, with the owner's
+  three changes listed under Open.
 
 ## Plan, in order
 
@@ -281,7 +394,7 @@ programme.
    apply by one integration against the tolerance and the limit; then a
    planner memo by place pair and quantised phase. The overseer's view:
    right if a played match shows the solve in the tick's budget.
-8. The structural programme, each unit rewriting ARCHITECTURE.md: the
+8. The structural programme, each unit updating INVARIANTS.md: the
    small collapses (View::want; Room folded into Socket; one
    belt-drawing preamble); a frame on its
    post; one asteroid type from sim to pixel; one mark state replacing Fill
@@ -354,8 +467,11 @@ programme.
   columns land without touching a rule.
 - Three line budgets reported separately, code, tests and docs; the
   code budget below zero and the test budget below zero unless a new
-  guarantee has no old test to replace. ARCHITECTURE.md sections are
-  the type block plus the facts the block cannot say.
+  guarantee has no old test to replace. No document describes the
+  code's shape (owner, 2026-09-08: ARCHITECTURE.md culled, since a
+  description of code goes stale and agents read code); a tolerated
+  runtime failure goes into INVARIANTS.md with its shape change, and a
+  new dependency into its table with the reason.
 - Words on screen: every user-facing string is a short phrase, no full
   stop, semicolon or dash; a comma is escalated to the owner before it
   is drawn (DISPLAY.md "Words on screen").

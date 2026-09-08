@@ -10,7 +10,34 @@ and the browser. **Read DESIGN.md before writing sim code and DISPLAY.md
 before writing display code.** They describe the target only and are the
 authority on the rules of the game and on what the player sees. If
 implementation reveals a problem with a design, stop and propose a change to
-the document; do not silently deviate.
+the document; do not silently deviate. How the code is shaped is read from
+the code; no document describes it. INVARIANTS.md holds what the code cannot
+say: the runtime failures it tolerates, each with the shape change that
+would delete it, and why each dependency was chosen.
+
+## Principles
+
+1. Invalid states are unrepresentable. Where the type system cannot say
+   it, one runtime check says it, listed in INVARIANTS.md with the shape
+   change that would delete the check.
+2. The step is a pure function: every phase reads the tick-start snapshot
+   and returns an effect value, and the next state is built from both.
+3. One law of motion, two kernels: a fixed elliptic orbit read at a tick
+   for asteroids, and one-tick propagation in universal variables for
+   ships; one test ties them together.
+4. Determinism by construction: `f64` only, `libm`, ordered containers,
+   id-ordered iteration, no clocks, no randomness; the state hash is
+   derived from every field, never listed.
+5. The sim knows nothing of the engine.
+
+Conventions: right-handed, +Y up, the belt plane is XZ, the central mass at
+the origin, the engine's frame exactly, so `game` converts scale and type
+and never axes. Lengths in metres, time in seconds inside `orbit` and in
+ticks everywhere else; angles in radians; a phase is a fraction of a turn
+in `0..1`. Every `f64` parameter or field states its unit in its name or
+its type. Iteration order is id order: a `BTreeMap` where a map is needed,
+a sorted `Vec` where a set is needed. `pub(crate)` by default; `pub` is the
+surface `lib.rs` re-exports.
 
 ## Layout
 
@@ -41,8 +68,8 @@ nothing in this repo and never on the engine.
 - No blocking calls (`block_on`, `std::thread::sleep`, sync file IO) in
   `game` or `sim`; the rule exists for wasm safety.
 - Prefer compile-time enforcement; a runtime check the type system
-  could not express is listed in ARCHITECTURE.md's Invariants with the
-  shape change that would delete it.
+  could not express is listed in INVARIANTS.md with the shape change
+  that would delete it.
 
 ## Code quality bar
 
@@ -89,8 +116,8 @@ off on without comments.
   and churn is no counterargument. Every place a failure is tolerated at
   runtime — a fallback, a silently ignored input, a cap — gets one of
   three verdicts: made unrepresentable by an API shape, moved to a
-  boot-time failure, or listed in ARCHITECTURE.md's Invariants with the
-  shape change that would delete it. A documented hole is still a hole.
+  boot-time failure, or listed in INVARIANTS.md with the shape change
+  that would delete it. A documented hole is still a hole.
 - No dead code, no placeholder stubs (an architecture-required item may
   land before its driver, but with a real body and a test of its contract),
   no `#[allow]`, no commented-out code.

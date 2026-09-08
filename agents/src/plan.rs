@@ -1,24 +1,29 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::roster::{Roster, Row};
+use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
-use neumannarch_sim::{AsteroidId, Materials, Posting, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, Material, Materials, Posting, RowId, SeatId};
 
 use crate::commitments::Commitments;
 use crate::dice::Dice;
 use crate::personality::Personality;
+use crate::ranking::Ranking;
 use crate::survey::Survey;
 
 const BUILD_HORIZON: f64 = 20.0;
 
 const STORE_TRIGGER: f64 = 0.9;
 
+const NEAR_CAPACITY_SHARE: f64 = 0.8;
+
 const REACH: f64 = 2_000.0;
 
 const CHOICES: usize = 2;
 
 const PAYBACK_HORIZON: f64 = 60.0;
+
+const TO_BUILD_PER_BUILDER: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -39,6 +44,7 @@ pub struct Plan {
     seat: SeatId,
     targets: BTreeMap<Posting, Target>,
     promised: BTreeMap<RowId, u32>,
+    to_build: BTreeMap<AsteroidId, u32>,
     budget: Materials,
 }
 
@@ -53,14 +59,12 @@ impl Plan {
             seat: survey.view.seat,
             targets: BTreeMap::new(),
             promised: BTreeMap::new(),
+            to_build: BTreeMap::new(),
             budget: survey.view.stockpile.stock() + survey.view.income * BUILD_HORIZON,
         };
         match survey.view.draft.ended() {
             None => plan.draft(survey, personality),
-            Some(_) => {
-                plan.economy(survey, personality, commitments, dice);
-                plan.army(survey, personality, commitments);
-            }
+            Some(_) => plan.play(survey, personality, commitments, dice),
         }
         plan
     }
@@ -75,25 +79,39 @@ impl Plan {
                 row: posting.row(),
                 count: 0,
             });
-        let mut changes: Vec<(Priority, Command)> = self
+        let mut changes: Vec<(&Posting, &Target)> = self
             .targets
             .iter()
             .filter(|(posting, target)| view.want_of(**posting) != target.count)
-            .map(|(posting, target)| {
-                (
-                    target.priority,
-                    Command::Want {
-                        asteroid: posting.asteroid(),
-                        row: posting.row(),
-                        count: target.count,
-                    },
-                )
-            })
             .collect();
-        changes.sort_by_key(|(priority, _)| *priority);
+        changes.sort_by_key(|(posting, target)| {
+            (target.count > view.want_of(**posting), target.priority)
+        });
         dropped
-            .chain(changes.into_iter().map(|(_, command)| command))
+            .chain(changes.into_iter().map(|(posting, target)| Command::Want {
+                asteroid: posting.asteroid(),
+                row: posting.row(),
+                count: target.count,
+            }))
             .collect()
+    }
+
+    fn play(
+        &mut self,
+        survey: &Survey,
+        personality: &Personality,
+        commitments: &mut Commitments,
+        dice: &mut Dice,
+    ) {
+        self.lower_where_no_builder(survey);
+        for asteroid in survey.developed() {
+            self.stand(survey, asteroid);
+        }
+        let short_of_room = self.extractors(survey, personality);
+        self.expand(survey, personality, commitments, dice, short_of_room);
+        self.yards(survey, personality);
+        self.stores(survey, personality);
+        self.army(survey, personality, commitments);
     }
 
     fn draft(&mut self, survey: &Survey, personality: &Personality) {
@@ -124,7 +142,7 @@ impl Plan {
             .fold(Materials::ZERO, |caps, terrain| caps + terrain.caps);
         let held = shares(drafted);
         let mut wanted = Materials::ZERO;
-        for (material, share) in shares(self.intended(survey, personality)).amounts() {
+        for (material, share) in shares(self.to_build(survey, personality)).amounts() {
             wanted[material] = share * (1.0 - held[material]);
         }
         wanted
@@ -132,8 +150,6 @@ impl Plan {
 
     fn fittest(&self, survey: &Survey, personality: &Personality) -> Option<AsteroidId> {
         let wanted = self.wanted_shares(survey, personality);
-        let taken = survey.taken();
-        let enemy_asteroids = survey.enemy_asteroids();
         let held = survey.held();
         let nearest = |from: AsteroidId, among: &[AsteroidId]| -> Option<f64> {
             among
@@ -141,91 +157,69 @@ impl Plan {
                 .map(|to| survey.between(from, *to))
                 .min_by(f64::total_cmp)
         };
-        survey
-            .view
-            .terrain
-            .iter()
-            .filter(|terrain| !taken.contains(&terrain.asteroid))
-            .map(|terrain| {
-                let asteroid = terrain.asteroid;
+        Ranking::by(
+            survey
+                .view
+                .terrain
+                .iter()
+                .map(|terrain| terrain.asteroid)
+                .filter(|asteroid| !survey.taken.contains(asteroid)),
+            |asteroid| {
+                let terrain = survey.view.terrain_of(asteroid)?;
                 let fit: f64 = terrain
                     .caps
                     .amounts()
                     .map(|(material, cap)| cap * wanted[material])
                     .sum();
-                let away =
-                    nearest(asteroid, &enemy_asteroids).map_or(1.0, |gap| gap / (gap + REACH));
+                let away = nearest(asteroid, &survey.enemy_asteroids)
+                    .map_or(1.0, |gap| gap / (gap + REACH));
                 let near = nearest(asteroid, &held).unwrap_or_default();
-                (asteroid, fit * away / (1.0 + near / REACH))
-            })
-            .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
-            .map(|(asteroid, _)| asteroid)
+                Some(fit * away / (1.0 + near / REACH))
+            },
+        )
+        .best()
     }
 
-    fn economy(
-        &mut self,
-        survey: &Survey,
-        personality: &Personality,
-        commitments: &mut Commitments,
-        dice: &mut Dice,
-    ) {
-        let Some(home) = survey.home() else {
-            return;
-        };
-        for asteroid in survey.developed() {
-            self.stand(survey, asteroid);
-        }
-        self.expand(survey, personality, commitments, dice, home);
-        self.extractors(survey, personality);
-        for asteroid in yards(survey, personality) {
-            for row in first(&survey.roles.yards) {
-                self.want(survey, Priority::Economy, asteroid, row, 1);
-            }
-        }
-        self.stores(survey, personality, home);
+    fn to_build(&self, survey: &Survey, personality: &Personality) -> Materials {
+        let weights = personality.weights(
+            survey.roster,
+            survey.roles,
+            survey.enemy_plating,
+            survey.enemy_range,
+        );
+        let armed = weights
+            .iter()
+            .filter_map(|(row, share)| survey.roster.get(*row).map(|row| row.cost * *share))
+            .fold(Materials::ZERO, |mix, cost| mix + cost);
+        let laid_down = survey.build_rate() * BUILD_HORIZON;
+        let units = (laid_down / armed.total().max(f64::MIN_POSITIVE)).max(1.0);
+        self.wanted(survey)
+            .fold(Materials::ZERO, |mix, cost| mix + cost)
+            + armed * units
     }
 
     fn demand(&self, survey: &Survey, personality: &Personality) -> Materials {
-        let mix = self.intended(survey, personality);
+        let mix = self.to_build(survey, personality);
         match mix.total() {
-            total if total > 0.0 => mix * (self.building_rate(survey) / total),
+            total if total > 0.0 => mix * (survey.build_rate() / total),
             _ => Materials::ZERO,
         }
     }
 
-    fn intended(&self, survey: &Survey, personality: &Personality) -> Materials {
-        let weights = personality.weights(
-            survey.roster,
-            survey.roles,
-            survey.enemy_plating(),
-            survey.enemy_range(),
-        );
-        let army = counted(survey, personality.army_value(survey.enemy()), &weights);
-        let army = army
-            .iter()
-            .filter_map(|(row, count)| survey.roster.get(*row).zip(Some(*count)));
-        self.wanted(survey)
-            .chain(army)
-            .map(|(row, count)| row.cost * f64::from(count))
-            .fold(Materials::ZERO, |mix, cost| mix + cost)
-    }
-
-    fn building_rate(&self, survey: &Survey) -> f64 {
-        self.wanted(survey)
-            .map(|(row, count)| row.builds().sum::<f64>() * f64::from(count))
-            .sum()
-    }
-
-    fn wanted<'a>(&'a self, survey: &'a Survey) -> impl Iterator<Item = (&'a Row, u32)> {
+    fn wanted<'a>(&'a self, survey: &'a Survey) -> impl Iterator<Item = Materials> + 'a {
         self.targets.iter().filter_map(|(posting, target)| {
-            survey.roster.get(posting.row()).zip(Some(target.count))
+            survey
+                .roster
+                .get(posting.row())
+                .map(|row| row.cost * f64::from(target.count))
         })
     }
 
-    fn extractors(&mut self, survey: &Survey, personality: &Personality) {
+    fn extractors(&mut self, survey: &Survey, personality: &Personality) -> bool {
         let wanted = self.demand(survey, personality);
         let left = survey.view.length.since(survey.view.time).seconds();
         let repaying = left.min(PAYBACK_HORIZON);
+        let mut short_of_room = false;
         for (material, row) in &survey.roles.extractors {
             let Some(stats) = survey.roster.get(*row) else {
                 continue;
@@ -246,6 +240,7 @@ impl Plan {
             }
             while short > 0.0 {
                 let Some(asteroid) = widest(&spare) else {
+                    short_of_room = true;
                     break;
                 };
                 let pulls = rate.min(spare[&asteroid]);
@@ -260,22 +255,79 @@ impl Plan {
                 self.want(survey, Priority::Economy, asteroid, *row, count);
             }
         }
+        short_of_room
+    }
+
+    fn lower_where_no_builder(&mut self, survey: &Survey) {
+        let wanted: Vec<Posting> = survey
+            .view
+            .plans
+            .iter()
+            .filter(|(_, plan)| plan.want > 0)
+            .map(|(posting, _)| *posting)
+            .collect();
+        for posting in wanted {
+            let asteroid = posting.asteroid();
+            if survey.builds_at(asteroid) {
+                continue;
+            }
+            let standing = survey.standing(asteroid, posting.row());
+            self.keep(Priority::Economy, asteroid, posting.row(), standing);
+        }
     }
 
     fn stand(&mut self, survey: &Survey, asteroid: AsteroidId) {
-        let standing = survey.mine.get(&asteroid).into_iter().flatten();
-        for (row, count) in standing.filter(|(row, _)| survey.is_structure(**row)) {
-            self.keep(Priority::Economy, asteroid, *row, *count);
+        let standing: Vec<(RowId, u32)> = survey
+            .mine
+            .get(&asteroid)
+            .into_iter()
+            .flatten()
+            .filter(|(row, _)| survey.is_structure(**row))
+            .map(|(row, held)| (*row, held.present + held.leaving))
+            .collect();
+        for (row, count) in standing {
+            self.keep(Priority::Economy, asteroid, row, count);
         }
     }
 
-    fn stores(&mut self, survey: &Survey, personality: &Personality, home: AsteroidId) {
+    fn yards(&mut self, survey: &Survey, personality: &Personality) {
+        let Some(row) = survey.roles.yards.first().copied() else {
+            return;
+        };
+        let home = survey.home();
+        let mut asteroids: Vec<AsteroidId> = home.into_iter().collect();
+        asteroids.extend(
+            survey
+                .developed()
+                .into_iter()
+                .filter(|asteroid| Some(*asteroid) != home),
+        );
+        asteroids.truncate(personality.yards);
+        for asteroid in asteroids {
+            self.want(survey, Priority::Economy, asteroid, row, 1);
+        }
+        let Some(staging) = survey.staging().filter(|_| stock_near_capacity(survey)) else {
+            return;
+        };
+        let yard_building = survey
+            .view
+            .plans
+            .get(&self.posting(staging, row))
+            .is_some_and(|plan| plan.building.is_some());
+        if !yard_building {
+            let standing = self.planned(staging, row).max(survey.count(staging, row));
+            self.want(survey, Priority::Economy, staging, row, standing + 1);
+        }
+    }
+
+    fn stores(&mut self, survey: &Survey, personality: &Personality) {
+        let (Some(home), Some(row)) = (survey.home(), survey.roles.stores.first().copied()) else {
+            return;
+        };
         let stockpile = &survey.view.stockpile;
         let full = stockpile.stock().total() >= STORE_TRIGGER * stockpile.capacity().total();
-        for row in first(&survey.roles.stores) {
-            let count = personality.stores + u32::from(full);
-            self.want(survey, Priority::Economy, home, row, count);
-        }
+        let count = personality.stores + u32::from(full);
+        self.want(survey, Priority::Economy, home, row, count);
     }
 
     fn expand(
@@ -284,40 +336,49 @@ impl Plan {
         personality: &Personality,
         commitments: &mut Commitments,
         dice: &mut Dice,
-        home: AsteroidId,
+        short_of_room: bool,
     ) {
-        let Some(mason) = first(&survey.roles.masons).next() else {
+        let (Some(home), Some(mason)) = (survey.home(), survey.roles.masons.first().copied())
+        else {
             return;
         };
-        let at_home = survey.count(home, mason);
+        for asteroid in survey.occupied().into_iter().filter(|at| *at != home) {
+            self.keep(
+                Priority::Economy,
+                asteroid,
+                mason,
+                survey.standing(asteroid, mason),
+            );
+        }
+        let at_home = survey.standing(home, mason);
         let mut spare = at_home.saturating_sub(personality.masons);
         let mut sent = 0;
         let mut short = 0;
-        for claim in claimed(survey, commitments) {
+        for claim in commitments.claimed_asteroids() {
             let arriving = survey.count(claim, mason);
             if arriving > 0 {
                 self.keep(Priority::Economy, claim, mason, arriving);
             } else if spare > 0 {
                 spare -= 1;
                 sent += 1;
-                self.want(survey, Priority::Economy, claim, mason, 1);
+                self.keep(Priority::Economy, claim, mason, 1);
             } else {
                 short += 1;
             }
         }
 
+        let claiming = short_of_room && commitments.claims() < personality.claims;
         if spare > 0
-            && wants_another(survey, personality, commitments)
+            && claiming
             && let Some(asteroid) = expansion(survey, commitments, dice)
         {
             spare -= 1;
             sent += 1;
             commitments.claim(asteroid, survey.view.time);
-            self.want(survey, Priority::Economy, asteroid, mason, 1);
+            self.keep(Priority::Economy, asteroid, mason, 1);
         }
 
-        let wanted = short > 0 || wants_another(survey, personality, commitments);
-        let replacing = u32::from(sent == 0 && spare == 0 && wanted);
+        let replacing = u32::from(sent == 0 && spare == 0 && (short > 0 || claiming));
         let staying = at_home.saturating_sub(sent).max(personality.masons);
         self.want(survey, Priority::Economy, home, mason, staying + replacing);
     }
@@ -326,41 +387,209 @@ impl Plan {
         let weights = personality.weights(
             survey.roster,
             survey.roles,
-            survey.enemy_plating(),
-            survey.enemy_range(),
+            survey.enemy_plating,
+            survey.enemy_range,
         );
-        let mut left = personality.army_value(survey.enemy());
-        let occupied = survey.occupied();
-        let mut threatened: Vec<(AsteroidId, f64)> = survey
-            .threats()
-            .into_iter()
-            .filter(|(asteroid, _)| occupied.contains(asteroid))
-            .collect();
-        threatened.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-        for (asteroid, threat) in threatened {
-            let value = threat * personality.defence_ratio;
-            self.force(survey, Priority::Defence, asteroid, value, &weights);
-            left -= value;
-        }
-        if left <= 0.0 {
-            return;
-        }
-        let Some(asteroid) = staging(survey, personality, commitments) else {
+        let unit = personality.armed_unit_cost(survey.roster, &weights);
+        let Some(staging) = survey.staging().filter(|_| unit > 0.0) else {
             return;
         };
-        self.force(survey, Priority::Army, asteroid, left, &weights);
+        let marching = self.attacked(survey, personality, commitments, staging, unit);
+        commitments.committed = marching;
+        if marching.is_some() {
+            self.hold_garrison(survey, personality, &weights, staging, unit);
+        }
+        for asteroid in survey.occupied() {
+            if marching.is_some() && asteroid == staging {
+                continue;
+            }
+            for (row, _) in &weights {
+                let posting = Posting::of(asteroid, self.seat, *row);
+                let carried = survey
+                    .view
+                    .want_of(posting)
+                    .max(survey.count(asteroid, *row));
+                self.want(
+                    survey,
+                    self.rank(asteroid, staging),
+                    asteroid,
+                    *row,
+                    carried,
+                );
+            }
+        }
+        if !commitments.holding_back_army {
+            self.fill(survey, personality, &weights, staging, unit);
+        }
+        self.spend_overflow(survey, &weights, staging);
+        if let Some(target) = marching {
+            self.send_forward(survey, &weights, target);
+        }
     }
 
-    fn force(
+    fn hold_garrison(
         &mut self,
         survey: &Survey,
-        priority: Priority,
-        asteroid: AsteroidId,
-        value: f64,
+        personality: &Personality,
         weights: &[(RowId, f64)],
+        staging: AsteroidId,
+        unit: f64,
     ) {
-        for (row, count) in counted(survey, value, weights) {
-            self.want(survey, priority, asteroid, row, count);
+        let units = (self.garrison(survey, personality, staging, unit) / unit)
+            .ceil()
+            .max(0.0);
+        for (row, share) in weights {
+            let stays = whole(share * units).min(survey.standing(staging, *row));
+            self.keep(Priority::Defence, staging, *row, stays);
+        }
+    }
+
+    fn send_forward(&mut self, survey: &Survey, weights: &[(RowId, f64)], target: AsteroidId) {
+        for (row, _) in weights {
+            let spare: u32 = survey
+                .occupied()
+                .into_iter()
+                .map(|at| {
+                    survey
+                        .count(at, *row)
+                        .saturating_sub(self.planned(at, *row))
+                        .min(survey.at_home(at, *row))
+                })
+                .sum();
+            let short: u32 = survey
+                .occupied()
+                .into_iter()
+                .filter(|at| *at != target)
+                .map(|at| {
+                    self.planned(at, *row)
+                        .saturating_sub(survey.count(at, *row))
+                })
+                .sum();
+            let sent = spare.saturating_sub(short);
+            self.keep(
+                Priority::Army,
+                target,
+                *row,
+                survey.count(target, *row) + sent,
+            );
+        }
+    }
+
+    fn attacked(
+        &self,
+        survey: &Survey,
+        personality: &Personality,
+        commitments: &Commitments,
+        staging: AsteroidId,
+        unit: f64,
+    ) -> Option<AsteroidId> {
+        if let Some(committed) = commitments.committed {
+            return Some(committed);
+        }
+        let target = survey.nearest(staging, &survey.enemy_asteroids)?;
+        let ratio = personality.attack_ratio_at(survey.view.time, survey.view.length);
+        let enough = (ratio * survey.threat_at(target))
+            .min(f64::from(personality.attack_floor) * unit)
+            .max(0.0);
+        let offensive =
+            survey.armed_value(staging) - self.garrison(survey, personality, staging, unit);
+        (offensive > 0.0 && offensive >= enough).then_some(target)
+    }
+
+    fn garrison(
+        &self,
+        survey: &Survey,
+        personality: &Personality,
+        asteroid: AsteroidId,
+        unit: f64,
+    ) -> f64 {
+        (survey.threat_at(asteroid) * personality.defence_ratio)
+            .max(f64::from(personality.garrison_floor) * unit)
+    }
+
+    fn wanted_force(
+        &self,
+        survey: &Survey,
+        personality: &Personality,
+        asteroid: AsteroidId,
+        staging: AsteroidId,
+        unit: f64,
+    ) -> f64 {
+        let garrison = self.garrison(survey, personality, asteroid, unit);
+        if asteroid != staging {
+            return garrison;
+        }
+        let ratio = personality.attack_ratio_at(survey.view.time, survey.view.length);
+        let target = survey.nearest(staging, &survey.enemy_asteroids);
+        let offensive = target
+            .map_or(0.0, |at| ratio * survey.threat_at(at))
+            .max(f64::from(personality.attack_floor) * unit);
+        garrison + offensive
+    }
+
+    fn fill(
+        &mut self,
+        survey: &Survey,
+        personality: &Personality,
+        weights: &[(RowId, f64)],
+        staging: AsteroidId,
+        unit: f64,
+    ) {
+        let needing = Ranking::by(survey.building(), |asteroid| {
+            let want = self.wanted_force(survey, personality, asteroid, staging, unit);
+            let force = survey.armed_value(asteroid);
+            (want > 0.0 && force < want).then_some((want - force) / want)
+        })
+        .best();
+        let Some(asteroid) = needing else {
+            return;
+        };
+        let force = f64::from(survey.armed_count(asteroid) + 1);
+        let raising = Ranking::by(weights.iter().copied().map(|(row, _)| row), |row| {
+            let share = weights
+                .iter()
+                .find(|(id, _)| *id == row)
+                .map(|(_, share)| *share)?;
+            Some(share * force - f64::from(survey.count(asteroid, row)))
+        })
+        .best();
+        let Some(row) = raising else {
+            return;
+        };
+        let rank = self.rank(asteroid, staging);
+        self.want(survey, rank, asteroid, row, self.planned(asteroid, row) + 1);
+    }
+
+    fn spend_overflow(&mut self, survey: &Survey, weights: &[(RowId, f64)], staging: AsteroidId) {
+        let Some(fullest) = material_near_capacity(survey) else {
+            return;
+        };
+        let spending_it = Ranking::by(weights.iter().copied().map(|(row, _)| row), |row| {
+            let cost = survey.roster.get(row)?.cost;
+            (cost[fullest] > 0.0).then(|| cost[fullest] / cost.total().max(f64::MIN_POSITIVE))
+        })
+        .best();
+        let Some(row) = spending_it else {
+            return;
+        };
+        let idle = Ranking::by(survey.building(), |asteroid| {
+            (!survey.frame_open_at(asteroid)).then(|| survey.build_rate_at(asteroid))
+        })
+        .best()
+        .unwrap_or(staging);
+        self.want(
+            survey,
+            Priority::Army,
+            idle,
+            row,
+            self.planned(idle, row) + 1,
+        );
+    }
+
+    fn rank(&self, asteroid: AsteroidId, staging: AsteroidId) -> Priority {
+        match asteroid == staging {
+            true => Priority::Army,
+            false => Priority::Defence,
         }
     }
 
@@ -373,13 +602,26 @@ impl Plan {
         count: u32,
     ) {
         let planned = self.planned(asteroid, row);
-        let count = count.min(MAX_WANT).max(planned);
+        let homed = survey.count(asteroid, row);
+        let floor = planned.max(homed);
+        let ceiling = match survey.builds_at(asteroid) {
+            true => floor.saturating_add(self.room(survey, asteroid)),
+            false => floor,
+        };
+        let count = count.min(MAX_WANT).min(ceiling).max(planned);
         let owned = survey.owned(row);
         let promised = self.promised(row);
-        let building = |promised: u32| promised.saturating_sub(owned);
-        let extra = building(promised + count - planned) - building(promised);
+        let to_build = |promised: u32| promised.saturating_sub(owned);
+        let extra = to_build(promised + count - planned) - to_build(promised);
         let bought = self.affordable(survey.roster, row, extra);
-        self.keep(priority, asteroid, row, count - (extra - bought));
+        let count = count - (extra - bought);
+        self.keep(priority, asteroid, row, count);
+        *self.to_build.entry(asteroid).or_default() += count.saturating_sub(floor);
+    }
+
+    fn room(&self, survey: &Survey, asteroid: AsteroidId) -> u32 {
+        let opened = self.to_build.get(&asteroid).copied().unwrap_or_default();
+        (TO_BUILD_PER_BUILDER * survey.builders(asteroid)).saturating_sub(opened)
     }
 
     fn keep(&mut self, priority: Priority, asteroid: AsteroidId, row: RowId, count: u32) {
@@ -434,366 +676,140 @@ impl Plan {
     }
 }
 
-fn counted(survey: &Survey, value: f64, weights: &[(RowId, f64)]) -> Vec<(RowId, u32)> {
-    weights
-        .iter()
-        .filter_map(|(row, share)| {
-            let count = (value * share / survey.roster.get(*row)?.cost.total()) as u32;
-            (count > 0).then_some((*row, count))
-        })
-        .collect()
+fn stock_near_capacity(survey: &Survey) -> bool {
+    material_near_capacity(survey).is_some()
 }
 
-fn widest(spare: &BTreeMap<AsteroidId, f64>) -> Option<AsteroidId> {
-    spare
-        .iter()
-        .filter(|(_, room)| **room > 0.0)
-        .max_by(|a, b| a.1.total_cmp(b.1).then(b.0.cmp(a.0)))
-        .map(|(asteroid, _)| *asteroid)
+fn material_near_capacity(survey: &Survey) -> Option<Material> {
+    let stockpile = &survey.view.stockpile;
+    Ranking::by(Material::EVERY, |material| {
+        let capacity = stockpile.capacity()[material];
+        let filled = stockpile.stock()[material] / capacity.max(f64::MIN_POSITIVE);
+        (capacity > 0.0 && filled > NEAR_CAPACITY_SHARE).then_some(filled)
+    })
+    .best()
 }
 
 fn affords(budget: Materials, cost: Materials) -> bool {
     (budget - cost).amounts().all(|(_, left)| left >= 0.0)
 }
 
-fn first(rows: &[RowId]) -> impl Iterator<Item = RowId> + '_ {
-    rows.iter().copied().take(1)
+fn whole(count: f64) -> u32 {
+    let rounded = count.round();
+    match rounded >= 0.0 && rounded <= f64::from(MAX_WANT) {
+        true => rounded as u32,
+        false => MAX_WANT,
+    }
 }
 
-fn yards(survey: &Survey, personality: &Personality) -> Vec<AsteroidId> {
-    let home = survey.home();
-    let mut asteroids: Vec<AsteroidId> = home.into_iter().collect();
-    asteroids.extend(
-        survey
-            .developed()
-            .into_iter()
-            .filter(|asteroid| Some(*asteroid) != home),
-    );
-    asteroids.truncate(personality.yards);
-    asteroids
-}
-
-fn claimed(survey: &Survey, commitments: &Commitments) -> Vec<AsteroidId> {
-    survey
-        .view
-        .terrain
-        .iter()
-        .map(|terrain| terrain.asteroid)
-        .filter(|asteroid| commitments.claimed(*asteroid))
-        .collect()
-}
-
-fn wants_another(survey: &Survey, personality: &Personality, commitments: &Commitments) -> bool {
-    survey.held().len() + commitments.claims() < personality.asteroids
-        && commitments.claims() < personality.claims
+fn widest(spare: &BTreeMap<AsteroidId, f64>) -> Option<AsteroidId> {
+    Ranking::by(spare.keys().copied(), |asteroid| {
+        spare.get(&asteroid).copied().filter(|room| *room > 0.0)
+    })
+    .best()
 }
 
 fn expansion(survey: &Survey, commitments: &Commitments, dice: &mut Dice) -> Option<AsteroidId> {
     let from = survey.home()?;
     let occupied = survey.occupied();
-    let enemy_asteroids = survey.enemy_asteroids();
-    let mut rated: Vec<(AsteroidId, f64)> = survey
-        .view
-        .terrain
-        .iter()
-        .map(|terrain| terrain.asteroid)
-        .filter(|asteroid| !occupied.contains(asteroid))
-        .filter(|asteroid| !commitments.claimed(*asteroid) && !commitments.barred(*asteroid))
-        .filter(|asteroid| !enemy_asteroids.contains(asteroid))
-        .filter_map(|asteroid| {
-            let caps = survey.view.terrain_of(asteroid)?.caps.total();
-            let reach = 1.0 + survey.between(from, asteroid) / REACH;
-            Some((asteroid, caps / reach))
-        })
-        .collect();
-    rated.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    let close = rated.len().min(CHOICES);
-    let at = dice.below(close)?;
-    rated.get(at).map(|(asteroid, _)| *asteroid)
-}
-
-fn staging(
-    survey: &Survey,
-    personality: &Personality,
-    commitments: &mut Commitments,
-) -> Option<AsteroidId> {
-    let enemy_asteroids = survey.enemy_asteroids();
-    if let Some(asteroid) = commitments.committed {
-        let taken = survey.held().contains(&asteroid) || !enemy_asteroids.contains(&asteroid);
-        if taken {
-            commitments.committed = None;
-        } else {
-            return Some(asteroid);
-        }
-    }
-    let target = nearest(survey, &enemy_asteroids);
-    let army = survey.army();
-    if let Some(asteroid) = target
-        && army > 0.0
-        && army >= personality.attack_ratio * defended(survey, asteroid)
-    {
-        commitments.committed = Some(asteroid);
-        return Some(asteroid);
-    }
-    match target {
-        Some(asteroid) => survey
-            .building()
-            .into_iter()
-            .min_by(|a, b| {
-                survey
-                    .between(*a, asteroid)
-                    .total_cmp(&survey.between(*b, asteroid))
-            })
-            .or(survey.home()),
-        None => survey.home(),
-    }
-}
-
-fn defended(survey: &Survey, asteroid: AsteroidId) -> f64 {
-    survey.threats().get(&asteroid).copied().unwrap_or_default()
-}
-
-fn nearest(survey: &Survey, asteroids: &[AsteroidId]) -> Option<AsteroidId> {
-    let from = survey.home()?;
-    asteroids.iter().copied().min_by(|a, b| {
+    let rated = Ranking::by(
         survey
-            .between(from, *a)
-            .total_cmp(&survey.between(from, *b))
-    })
+            .view
+            .terrain
+            .iter()
+            .map(|terrain| terrain.asteroid)
+            .filter(|asteroid| !occupied.contains(asteroid))
+            .filter(|asteroid| !commitments.claimed(*asteroid) && !commitments.barred(*asteroid))
+            .filter(|asteroid| !survey.enemy_asteroids.contains(asteroid)),
+        |asteroid| {
+            let caps = survey.view.terrain_of(asteroid)?.caps.total();
+            Some(caps / (1.0 + survey.between(from, asteroid) / REACH))
+        },
+    )
+    .order();
+    let at = dice.below(rated.len().min(CHOICES))?;
+    rated.get(at).copied()
 }
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::belt::Belt;
+    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::state::view::View;
+    use neumannarch_sim::state::{Batch, Command as Verb, Issued, Seat, State};
+    use neumannarch_sim::step::fire::Shots;
+    use neumannarch_sim::{Material, TICKS_PER_SECOND, TeamId, Time};
     use std::collections::BTreeMap;
 
-    use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::roster::{
-        CONSTRUCTOR, ENERGY_EXTRACTOR, METALS_EXTRACTOR, RAIDER, SHIPYARD, VOLATILES_EXTRACTOR,
-    };
-    use neumannarch_sim::state::view::View;
-    use neumannarch_sim::state::{Batch, Issued, Seat, State};
-    use neumannarch_sim::step::fire::Shots;
-    use neumannarch_sim::{Material, Materials, SeatId, TICKS_PER_SECOND, TeamId, Tick, Time};
-
     use super::*;
-    use crate::personality::Personality;
     use crate::roles::Roles;
 
-    const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
-
-    const ALLY_ASTEROID: AsteroidId = AsteroidId(4);
-
-    const ENEMY_ASTEROID: AsteroidId = AsteroidId(9);
+    const CLOCK: Time = Time(7 * 60 * TICKS_PER_SECOND as u64);
 
     const HOME: AsteroidId = AsteroidId(0);
 
-    const ALIKE_ASTEROID: AsteroidId = AsteroidId(1);
+    const STOCK: Materials = Materials::new(1e4, 1e4, 1e4);
 
-    const UNLIKE_ASTEROID: AsteroidId = AsteroidId(2);
-
-    const RICH: Materials = Materials::new(1e4, 1e4, 1e4);
-
-    const EXTRACTORS: [(Material, RowId); 3] = [
-        (Material::Metals, METALS_EXTRACTOR),
-        (Material::Volatiles, VOLATILES_EXTRACTOR),
-        (Material::Energy, ENERGY_EXTRACTOR),
-    ];
-
-    fn mining(standing: u32) -> View {
-        let mut batch = Batch::new();
-        for (seq, (row, count)) in [(SHIPYARD, 1), (METALS_EXTRACTOR, standing)]
-            .into_iter()
-            .enumerate()
-        {
-            let seq = u32::try_from(seq).expect("two commands");
-            assert_eq!(batch.insert(want(0, seq, HOME, row, count)), Ok(()));
-        }
-        let reserve = BTreeMap::from([(SHIPYARD, 1), (METALS_EXTRACTOR, standing)]);
-        let (state, outcome) = opened(sided(reserve)).step(&batch);
-        assert_eq!(outcome.rejected, Vec::new());
-        View::of(&state, SeatId(0), &Shots::default())
-    }
-
-    fn opened(state: State) -> State {
-        let mut state = state;
-        while state.drafting() {
-            let (next, _) = state.step(&Batch::new());
-            state = next;
-        }
-        state
-    }
-
-    fn planned(view: &View) -> Plan {
-        let roster = Roster::shipped();
-        let roles = Roles::of(&roster);
-        let survey = Survey::of(view, &roster, &roles);
-        Plan::of(
-            &survey,
-            &Personality::expand(),
-            &mut Commitments::default(),
-            &mut Dice::new(0),
-        )
-    }
-
-    fn sided(reserve: BTreeMap<RowId, u32>) -> State {
-        let seat = |team| Seat::new(TeamId(team), RICH, reserve.clone());
-        State::new(
-            Time(CLOCK.0),
+    fn drafted(caps: Materials) -> View {
+        let reserve = BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]);
+        let seat = |team| Seat::new(TeamId(team), STOCK, reserve.clone());
+        let mut state = State::new(
+            CLOCK,
             0,
             Belt::GRAVITY,
             Roster::shipped(),
             Belt::from_seed(0),
-            vec![seat(0), seat(0), seat(1)],
-        )
-    }
-
-    fn want(seat: u8, seq: u32, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
-        Issued {
-            seat: SeatId(seat),
-            seq,
-            command: Command::Want {
-                asteroid,
-                row,
-                count,
+            vec![seat(0), seat(1)],
+        );
+        let opening = state.draft().stages()[0];
+        let mut batch = Batch::new();
+        let placing = Issued {
+            seat: opening.seat,
+            seq: 0,
+            command: Verb::Want {
+                asteroid: HOME,
+                row: opening.row,
+                count: 1,
             },
-        }
-    }
-
-    #[test]
-    fn a_bots_second_draft_pick_complements_its_first() {
-        let mut state = sided(BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]));
-        let opening = state.draft().stages()[2];
-        while state.draft().running() != Some(opening) {
-            state = state.step(&Batch::new()).0;
-        }
-        let mut batch = Batch::new();
-        let placing = want(opening.seat.0, 0, HOME, opening.row, 1);
+        };
         assert_eq!(batch.insert(placing), Ok(()));
-        let mut view = View::of(&state.step(&batch).0, opening.seat, &Shots::default());
-        let metals = Materials::new(RICH[Material::Metals], 0.0, 0.0);
-        let beside = view
-            .terrain_of(ALIKE_ASTEROID)
-            .expect("a free asteroid")
-            .orbit;
+        state = state.step(&batch).0;
+        let mut view = View::of(&state, opening.seat, &Shots::default());
         for terrain in &mut view.terrain {
-            terrain.caps = match terrain.asteroid {
-                HOME | ALIKE_ASTEROID => metals,
-                UNLIKE_ASTEROID => RICH - metals,
-                _ => Materials::ZERO,
-            };
-        }
-        view.terrain[UNLIKE_ASTEROID.0 as usize].orbit = beside;
-
-        let picked = planned(&view).commands(&view);
-
-        assert_eq!(
-            picked
-                .first()
-                .map(|Command::Want { asteroid, .. }| *asteroid),
-            Some(UNLIKE_ASTEROID),
-            "it took the asteroid as poor as the one it opened on, not the one that completes it"
-        );
-    }
-
-    #[test]
-    fn no_extractor_is_wanted_at_a_asteroid_whose_headroom_cannot_feed_it() {
-        let roster = Roster::shipped();
-        for standing in [0, 3] {
-            let view = mining(standing);
-            let plan = planned(&view);
-
-            let terrain = view.terrain_of(HOME).expect("the home asteroid");
-            for (material, row) in EXTRACTORS {
-                let rate = roster[row].extracts_of(material);
-                let headroom = terrain.caps[material] - terrain.pull[material];
-                let fed = f64::from(plan.planned(HOME, row).saturating_sub(1)) * rate;
-                assert!(fed < headroom, "{material:?}: {fed} past {headroom}");
+            if terrain.asteroid == HOME {
+                terrain.caps = caps;
             }
         }
+        view
     }
 
-    #[test]
-    fn a_bot_whose_income_covers_its_builders_wants_no_further_extractor() {
-        let mut view = mining(0);
-        view.income = RICH;
-
-        let plan = planned(&view);
-
-        for (_, row) in EXTRACTORS {
-            assert_eq!(plan.planned(HOME, row), 0, "{row:?} wanted");
-        }
-    }
-
-    #[test]
-    fn a_bot_near_the_clocks_end_wants_no_extractor_that_cannot_repay() {
-        let mut view = mining(0);
-        assert!(
-            planned(&view).planned(HOME, METALS_EXTRACTOR) > 0,
-            "with a match to play"
-        );
-        view.time = view.length.since(Time(1));
-
-        let plan = planned(&view);
-
-        for (_, row) in EXTRACTORS {
-            assert_eq!(plan.planned(HOME, row), 0, "{row:?} wanted");
-        }
-    }
-
-    #[test]
-    fn a_standing_extractor_is_never_wanted_away_by_the_economy() {
-        let mut covered = mining(3);
-        covered.income = RICH;
-
-        assert_eq!(planned(&covered).planned(HOME, METALS_EXTRACTOR), 3);
-        assert!(
-            planned(&mining(3)).planned(HOME, METALS_EXTRACTOR) >= 3,
-            "a shortfall asks for more, never for fewer"
-        );
-    }
-
-    #[test]
-    fn an_allys_army_is_no_threat_and_its_asteroid_is_never_attacked() {
-        let mut batch = Batch::new();
-        for (seat, asteroid) in [(1, ALLY_ASTEROID), (2, ENEMY_ASTEROID)] {
-            for (seq, row) in [SHIPYARD, RAIDER].into_iter().enumerate() {
-                let count = if row == RAIDER { 4 } else { 1 };
-                assert_eq!(
-                    batch.insert(want(seat, seq as u32, asteroid, row, count)),
-                    Ok(())
-                );
-            }
-        }
-        let reserve = BTreeMap::from([(SHIPYARD, 1), (RAIDER, 4)]);
-        let (state, outcome) = opened(sided(reserve)).step(&batch);
-        assert_eq!(outcome.rejected, Vec::new());
-        let view = View::of(&state, SeatId(0), &Shots::default());
-        assert!(
-            view.present.iter().any(|it| it.seat == SeatId(1)),
-            "the ally's force is in the view like any other"
-        );
-
+    fn shares(view: &View) -> Materials {
         let roster = Roster::shipped();
         let roles = Roles::of(&roster);
-        let survey = Survey::of(&view, &roster, &roles);
-
-        assert_eq!(survey.enemy_asteroids(), vec![ENEMY_ASTEROID]);
-        assert_eq!(survey.threats().get(&ALLY_ASTEROID), None);
-        assert!(survey.threats().contains_key(&ENEMY_ASTEROID));
-        assert_eq!(survey.enemy(), state[RAIDER].cost.total() * 4.0);
-
+        let survey = Survey::of(view, &roster, &roles);
         let plan = Plan::of(
             &survey,
             &Personality::expand(),
             &mut Commitments::default(),
             &mut Dice::new(0),
         );
+        plan.wanted_shares(&survey, &Personality::expand())
+    }
+
+    #[test]
+    fn the_shares_a_pick_is_weighed_by_discount_what_the_asteroids_already_drafted_supply() {
+        let metals = Materials::new(1e3, 0.0, 0.0);
+
+        let even = shares(&drafted(Materials::new(1.0, 1.0, 1.0)));
+        let mined = shares(&drafted(metals));
 
         assert!(
-            plan.commands(&view)
-                .iter()
-                .all(|Command::Want { asteroid, .. }| *asteroid != ALLY_ASTEROID),
-            "the plan asked for something at the ally's asteroid"
+            mined[Material::Metals] < even[Material::Metals],
+            "metals kept their weight: {} against {}",
+            mined[Material::Metals],
+            even[Material::Metals]
         );
+        assert!(mined[Material::Volatiles] > even[Material::Volatiles]);
+        assert!(mined[Material::Energy] > even[Material::Energy]);
     }
 }

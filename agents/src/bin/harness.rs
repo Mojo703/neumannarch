@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use neumannarch_agents::{Mix, Personality, Scripted, Seated};
+use neumannarch_agents::{
+    Guarantees, Mix, Personality, PlayedMatch, Scripted, Seated, free_for_all, minutes,
+};
 use neumannarch_protocol::Record;
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
@@ -64,6 +66,14 @@ fn main() {
         }
         ["replay"] => replayed(),
         ["rollback"] => rolled_back(),
+        ["verify"] => verified(CLOCK),
+        ["verify", over] => match over.parse::<u64>() {
+            Ok(over) => verified(minutes(over)),
+            Err(_) => {
+                println!("verify takes a whole number of minutes");
+                false
+            }
+        },
         ["matrix"] => {
             matrix();
             true
@@ -78,7 +88,7 @@ fn main() {
         }
         _ => {
             println!(
-                "usage: harness match [turtle|expand|none] [turtle|expand|none]\n       harness replay\n       harness rollback\n       harness matrix\n       harness draft\n       harness sweep"
+                "usage: harness match [turtle|expand|none] .. up to four\n       harness verify [minutes]\n       harness replay\n       harness rollback\n       harness matrix\n       harness draft\n       harness sweep"
             );
             true
         }
@@ -89,38 +99,65 @@ fn main() {
 }
 
 fn played(named: &[&str]) {
-    let sides = [
-        *named.first().unwrap_or(&"turtle"),
-        *named.get(1).unwrap_or(&"none"),
-    ];
-    let Some(seats) = seats(&sides) else {
+    let sides: Vec<&str> = match named.is_empty() {
+        true => vec!["turtle", "none"],
+        false => named.to_vec(),
+    };
+    let Some(seated) = seats(&sides) else {
         println!("unknown personality: one of turtle, expand, none");
         return;
     };
-    let mut run = Match::new(CLOCK, seats);
-    println!("match {} vs {}", sides[0], sides[1]);
+    let mut run = PlayedMatch::new(setup(CLOCK, SEED, sides.len().max(SEATS.len())), seated);
+    println!("match {}", sides.join(" vs "));
     while !run.over() {
-        run.tick();
-        let tick = run.session.state().tick();
+        run.advance();
+        let tick = run.state().tick();
         if tick
             .0
             .is_multiple_of(TRACE_INTERVAL * u64::from(TICKS_PER_SECOND))
         {
-            println!("  {}", line(run.session.state()));
+            println!("  {}", line(run.state()));
         }
     }
-    println!("  {}", line(run.session.state()));
-    report(run.session.state());
+    println!("  {}", line(run.state()));
+    report(run.state());
+}
+
+fn verified(clock: Tick) -> bool {
+    println!(
+        "guarantees over {} minutes, expand against expand",
+        clock.seconds() / 60.0
+    );
+    let guarantees = Guarantees::over(&[Personality::expand(), Personality::expand()], clock);
+    let trading = guarantees.both_sides_arm_and_trade_shots();
+    held(
+        "no frame a bot opens outlives a decision at an asteroid with no builder of its seat",
+        guarantees.no_frame_outlives_a_decision_without_a_builder(),
+    ) & held(
+        "two bots field armed units early and trade shots by the middle of the clock",
+        trading.as_deref(),
+    ) & held(
+        "no bot sits at its capacity for a minute with builders idle while an armed row is affordable",
+        guarantees.no_stockpile_sits_full_with_builders_idle(),
+    )
+}
+
+fn held(what: &str, breach: Option<&str>) -> bool {
+    let passed = check(what, breach.is_none());
+    if let Some(breach) = breach {
+        println!("     {breach}");
+    }
+    passed
 }
 
 fn replayed() -> bool {
-    let mut run = Match::new(CHECK_CLOCK, both());
+    let mut run = played_over(CHECK_CLOCK, both());
     while !run.over() {
-        run.tick();
+        run.advance();
     }
-    let live = run.session.state();
-    let settled = run.session.settled();
-    let record = Record::of(&run.session);
+    let live = run.state();
+    let settled = run.session().settled();
+    let record = Record::of(run.session());
     let replay = record.replay(settled);
     println!(
         "ticks {}, settled {}, {} commands",
@@ -136,32 +173,32 @@ fn replayed() -> bool {
     );
     passed &= check(
         "the record reproduces the live hash",
-        Some(replay.hash()) == run.session.hash_at(settled),
+        Some(replay.hash()) == run.session().hash_at(settled),
     );
     passed &= check("the record reproduces the whole state", &replay == live);
 
-    let mut again = Match::new(CHECK_CLOCK, both());
+    let mut again = played_over(CHECK_CLOCK, both());
     while !again.over() {
-        again.tick();
+        again.advance();
     }
-    println!("repeat hash  {:#018x}", again.session.state().hash());
+    println!("repeat hash  {:#018x}", again.state().hash());
     passed &= check(
         "the same match twice reproduces the hash",
-        again.session.state().hash() == live.hash(),
+        again.state().hash() == live.hash(),
     );
     println!("{}", line(live));
     passed
 }
 
 fn rolled_back() -> bool {
-    let mut run = Match::new(CHECK_CLOCK, both());
-    let mut hashes = vec![run.session.state().hash()];
+    let mut run = played_over(CHECK_CLOCK, both());
+    let mut hashes = vec![run.state().hash()];
     let mut issued: Vec<Stamped> = Vec::new();
     while !run.over() {
-        issued.extend(run.tick());
-        hashes.push(run.session.state().hash());
+        issued.extend(run.advance());
+        hashes.push(run.state().hash());
     }
-    let end = run.session.state().tick();
+    let end = run.state().tick();
     println!(
         "{} commands over {} ticks, on time {:#018x}",
         issued.len(),
@@ -169,8 +206,12 @@ fn rolled_back() -> bool {
         hashes[end.0 as usize]
     );
 
-    let mut late = Session::new(setup(CHECK_CLOCK, SEED), Retention::shipped(), &[])
-        .expect("a session owning no seat seats nothing to refuse");
+    let mut late = Session::new(
+        setup(CHECK_CLOCK, SEED, SEATS.len()),
+        Retention::shipped(),
+        &[],
+    )
+    .expect("a session owning no seat seats nothing to refuse");
     let mut deliveries = scrambled(&issued);
     let mut pending = issued.clone();
     let mut refused = 0;
@@ -254,11 +295,11 @@ fn matrix() {
                 Seated::new(SeatId(0), Box::new(Scripted::new(mine.clone(), roster()))),
                 Seated::new(SeatId(1), Box::new(Scripted::new(yours.clone(), roster()))),
             ];
-            let mut run = Match::new(MATRIX_CLOCK, seats);
+            let mut run = played_over(MATRIX_CLOCK, seats);
             while !run.over() {
-                run.tick();
+                run.advance();
             }
-            let standings = run.session.state().standings();
+            let standings = run.state().standings();
             let teams = standings.teams();
             let asteroids = |at: usize| teams.get(at).map_or(0, |team| team.asteroids);
             let verdict = match standings.leaders().as_slice() {
@@ -291,16 +332,19 @@ fn drafts() {
                 Box::new(Scripted::new(Personality::expand(), roster())),
             )
         };
-        let mut run = Match::seeded(MATRIX_CLOCK, seed, Vec::from(SEATS.map(mirrored)));
+        let mut run = PlayedMatch::new(
+            setup(MATRIX_CLOCK, seed, SEATS.len()),
+            Vec::from(SEATS.map(mirrored)),
+        );
         let mut settled = [0, 0];
         while !run.over() {
-            run.tick();
-            if run.session.state().time() == SETTLED {
-                settled = held(run.session.state());
+            run.advance();
+            if run.state().time() == SETTLED {
+                settled = standing(run.state());
             }
         }
         spread += usize::from(settled.iter().all(|asteroids| *asteroids >= 2));
-        let state = run.session.state();
+        let state = run.state();
         let first = TeamId(state.draft().stages()[0].seat.0);
         let leaders = state.standings().leaders();
         let verdict = match leaders.as_slice() {
@@ -326,7 +370,7 @@ fn drafts() {
     println!("  both teams held two asteroids at ninety seconds in {spread} of {MIRRORS}");
 }
 
-fn held(state: &State) -> [u32; 2] {
+fn standing(state: &State) -> [u32; 2] {
     let standings = state.standings();
     let asteroids = |at: usize| standings.teams().get(at).map_or(0, |team| team.asteroids);
     [asteroids(0), asteroids(1)]
@@ -373,50 +417,12 @@ fn compositions() -> Vec<(&'static str, Personality)> {
     ]
 }
 
-struct Match {
-    session: Session,
-    seated: Vec<Seated>,
+fn setup(clock: Tick, seed: u64, seats: usize) -> Setup {
+    Setup::new(free_for_all(seats), seed, clock).expect("one seat per team is a match")
 }
 
-impl Match {
-    fn new(clock: Tick, seated: Vec<Seated>) -> Match {
-        Match::seeded(clock, SEED, seated)
-    }
-
-    fn seeded(clock: Tick, seed: u64, seated: Vec<Seated>) -> Match {
-        Match {
-            session: Session::new(setup(clock, seed), Retention::shipped(), &SEATS)
-                .expect("one seat per team seats both checks"),
-            seated,
-        }
-    }
-
-    fn tick(&mut self) -> Vec<Stamped> {
-        let session = &self.session;
-        let issued: Vec<Stamped> = self
-            .seated
-            .iter_mut()
-            .flat_map(|seated| seated.issue(session))
-            .collect();
-        for stamped in &issued {
-            let taken = self.session.insert(*stamped);
-            assert!(
-                taken.is_ok(),
-                "an agent's own command was refused: {taken:?}"
-            );
-        }
-        self.session.advance();
-        issued
-    }
-
-    fn over(&self) -> bool {
-        self.session.state().standings().over()
-    }
-}
-
-fn setup(clock: Tick, seed: u64) -> Setup {
-    let teams = SEATS.iter().map(|seat| TeamId(seat.0)).collect();
-    Setup::new(teams, seed, clock).expect("one seat per team is a match")
+fn played_over(clock: Tick, seated: Vec<Seated>) -> PlayedMatch {
+    PlayedMatch::new(setup(clock, SEED, SEATS.len()), seated)
 }
 
 fn both() -> Vec<Seated> {
@@ -474,16 +480,29 @@ fn line(state: &State) -> String {
 
 fn report(state: &State) {
     let standings: Standings = state.standings();
+    let roster = roster();
     for team in standings.teams() {
+        let mut owned: BTreeMap<&str, u32> = BTreeMap::new();
+        for entity in state
+            .entities()
+            .filter(|entity| state[entity.seat()].team() == team.team)
+        {
+            *owned.entry(roster[entity.row()].name).or_default() += 1;
+        }
+        let owned: Vec<String> = owned
+            .into_iter()
+            .map(|(name, count)| format!("{count} {name}"))
+            .collect();
         println!(
-            "team {}: {} asteroids, {} army value, {}",
+            "team {}: {} asteroids, {} army value, {}; {}",
             team.team.0,
             team.asteroids,
             team.value as u64,
             match team.alive {
                 true => "in",
                 false => "out",
-            }
+            },
+            owned.join(", ")
         );
     }
     let leaders: Vec<String> = standings

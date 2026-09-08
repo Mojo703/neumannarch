@@ -4,7 +4,9 @@ use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{SeatId, Sequence, Session, Stamped, TICKS_PER_SECOND, Tick};
 
 pub use dice::Dice;
+pub use guarantees::Guarantees;
 pub use personality::{Mix, Personality};
+pub use played_match::{PlayedMatch, free_for_all, minutes};
 pub use roles::Roles;
 pub use scripted::Scripted;
 
@@ -35,7 +37,7 @@ impl Seated {
         self.sequence.seat()
     }
 
-    pub fn issue(&mut self, session: &Session) -> Vec<Stamped> {
+    pub fn deciding(&self, session: &Session) -> bool {
         let tick = session.state().tick();
         let interval = DECISION_INTERVAL.0;
         let staged = session
@@ -43,9 +45,14 @@ impl Seated {
             .draft()
             .running()
             .is_some_and(|stage| stage.seat == self.seat());
-        if !staged && tick.0 % interval != u64::from(self.seat().0) % interval {
+        staged || tick.0 % interval == u64::from(self.seat().0) % interval
+    }
+
+    pub fn issue(&mut self, session: &Session) -> Vec<Stamped> {
+        if !self.deciding(session) {
             return Vec::new();
         }
+        let tick = session.state().tick();
         let quiet = Shots::default();
         let shots = session.outcome().map_or(&quiet, |outcome| &outcome.shots);
         let view = View::of(session.state(), self.seat(), shots);
@@ -60,8 +67,11 @@ impl Seated {
 
 mod commitments;
 mod dice;
+mod guarantees;
 mod personality;
 mod plan;
+mod played_match;
+mod ranking;
 mod roles;
 mod scripted;
 mod survey;
