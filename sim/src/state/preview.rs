@@ -4,7 +4,7 @@ use crate::ids::{AsteroidId, SeatId};
 use crate::materials::Materials;
 use crate::posting::Posting;
 use crate::roster::Roster;
-use crate::state::{Command, Issued, Rejected, State};
+use crate::state::{Command, Issued, Rejected, Rolls, State};
 use crate::step::fulfilment::Fulfilment;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -44,7 +44,7 @@ impl Preview {
     }
 
     fn of(state: &State, seat: SeatId) -> Preview {
-        let assigned = Fulfilment::of(state).run();
+        let assigned = Fulfilment::of(state, &Rolls::called(state)).run();
         let mut shortfalls: BTreeMap<Posting, ShortfallFilling> = BTreeMap::new();
         for posting in assigned
             .placements

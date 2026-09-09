@@ -35,6 +35,20 @@ impl Roles {
             }),
         }
     }
+
+    pub fn yields_on_completion(&self) -> Vec<RowId> {
+        let mut rows: Vec<RowId> = self
+            .yards
+            .iter()
+            .chain(&self.masons)
+            .chain(&self.stores)
+            .copied()
+            .chain(self.extractors.iter().map(|(_, row)| *row))
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
 }
 
 fn builds(row: &Row) -> f64 {

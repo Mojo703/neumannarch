@@ -1,4 +1,4 @@
-use neumannarch_sim::roster::{RAIDER, Roster, SHIPYARD, VOLATILES_EXTRACTOR};
+use neumannarch_sim::roster::{METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD, VOLATILES_EXTRACTOR};
 
 use neumannarch_sim::{AsteroidId, RowId};
 
@@ -42,67 +42,85 @@ fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32
 }
 
 #[test]
-fn one_more_armed_unit_is_asked_for_at_the_staging_asteroid_before_a_shot_is_worth_firing() {
+fn one_more_armed_unit_is_asked_for_at_every_asteroid_where_it_builds() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
     let fixture = Fixture::drafted([Some(personality.clone()), None]);
     let view = fixture.view(0);
     let survey = surveyed(&view, &roster);
-    let staging = survey.staging().expect("it builds somewhere");
+    let building = survey.building();
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
 
-    assert_eq!(
-        survey.armed_value(staging),
-        0.0,
-        "the fixture already stands an armed force"
+    assert!(
+        building.len() > 1,
+        "the fixture builds at one asteroid, so nothing tells a spread ask from a single one"
     );
+    for asteroid in &building {
+        assert_eq!(
+            survey.armed_value(*asteroid),
+            0.0,
+            "the fixture already stands an armed force at {asteroid:?}"
+        );
+        let asked: u32 = proposals
+            .iter()
+            .filter(|proposal| proposal.posting.asteroid() == *asteroid)
+            .map(|proposal| proposal.count)
+            .sum();
+        assert_eq!(asked, 1, "it asked for {asked} armed units at {asteroid:?}");
+    }
     assert!(
         proposals
             .iter()
-            .all(|proposal| proposal.posting.asteroid() == staging),
-        "it armed an asteroid it does not stage at"
-    );
-    assert_eq!(
-        proposals
-            .iter()
-            .filter(|proposal| proposal.count > 0)
-            .count(),
-        1,
-        "one whole unit a decision: {proposals:?}"
+            .all(|proposal| building.contains(&proposal.posting.asteroid())),
+        "it armed an asteroid no builder of its own stands at"
     );
 }
 
 #[test]
-fn every_armed_unit_beyond_the_garrison_is_homed_at_the_target_when_the_force_is_enough() {
+fn no_armed_unit_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_completion() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
-    let worth_sending = |fixture: &Fixture| {
-        let view = fixture.view(0);
-        let survey = surveyed(&view, &roster);
-        let Some(staging) = survey.staging() else {
-            return false;
-        };
-        let unit_cost = personality.armed_unit_cost(&roster, &personality.shares(&survey));
-        !survey.enemy_asteroids.is_empty()
-            && survey.armed_value(staging)
-                > personality.garrison(survey.threat_at(staging), unit_cost) + unit_cost
-    };
-    let mut fixture = Fixture::drafted([Some(personality.clone()), Some(Personality::turtle())]);
-    fixture.until(worth_sending);
+    let mut fixture = Fixture::drafted([None, None]);
+    let mine = fixture.free(1)[0];
+    fixture.want(0, mine, SHIPYARD, 1);
+    fixture.want(0, mine, METALS_EXTRACTOR, 1);
     let view = fixture.view(0);
     let survey = surveyed(&view, &roster);
-    let staging = survey.staging().expect("it builds somewhere");
+    assert!(
+        survey.short_of(mine, &survey.roles.yields_on_completion()),
+        "nothing at {mine:?} is short of a row that pays on completion"
+    );
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
 
-    let target = proposals
+    for proposal in proposals
         .iter()
-        .map(|proposal| proposal.posting.asteroid())
-        .find(|asteroid| *asteroid != staging)
-        .expect("a wave names the asteroid it flies at");
+        .filter(|proposal| proposal.posting.asteroid() == mine)
+    {
+        let row = proposal.posting.row();
+        assert!(
+            proposal.count <= survey.count(mine, row),
+            "it asked for {} {} at {mine:?}, over the {} standing, while an extractor is unbuilt there",
+            proposal.count,
+            roster[row].name,
+            survey.count(mine, row)
+        );
+    }
+}
+
+#[test]
+fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
+    let roster = Roster::shipped();
+    let personality = Personality::expand();
+    let (fixture, mine, theirs) = armed_against_a_yard();
+    let view = fixture.view(0);
+    let survey = surveyed(&view, &roster);
+
+    let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
+
     let unit_cost = personality.armed_unit_cost(&roster, &personality.shares(&survey));
-    let garrison = personality.garrison(survey.threat_at(staging), unit_cost);
+    let garrison = personality.garrison(survey.threat_at(mine), unit_cost);
     let count = |at: AsteroidId, row: RowId| {
         proposals
             .iter()
@@ -110,22 +128,26 @@ fn every_armed_unit_beyond_the_garrison_is_homed_at_the_target_when_the_force_is
             .map_or_else(|| survey.count(at, row), |proposal| proposal.count)
     };
     let mut kept = 0.0;
+    let mut flown = 0;
     for (row, _) in personality.shares(&survey) {
-        let flying = count(target, row) - survey.count(target, row);
+        let flying = count(theirs, row) - survey.count(theirs, row);
+        let held = count(mine, row).min(survey.standing(mine, row));
         assert_eq!(
-            count(staging, row) + flying,
-            survey.count(staging, row),
+            held + flying,
+            survey.standing(mine, row),
             "the wave neither lost nor invented a {row:?}"
         );
-        kept += f64::from(count(staging, row)) * roster[row].cost.total();
+        flown += flying;
+        kept += f64::from(held) * roster[row].cost.total();
     }
+    assert!(flown > 0, "the wave sent nothing: {proposals:?}");
     assert!(
         kept <= garrison + unit_cost,
-        "it held {kept} back at {staging:?} where its garrison is {garrison}"
+        "it held {kept} back at {mine:?} where its garrison is {garrison}"
     );
     assert!(
-        survey.enemy_asteroids.contains(&target),
-        "the wave flies at {target:?}, which no enemy holds"
+        survey.enemy_asteroids.contains(&theirs),
+        "the wave flies at {theirs:?}, which no enemy holds"
     );
 }
 

@@ -4,7 +4,7 @@ use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::posting::Posting;
 use crate::roster::Kind;
-use crate::state::State;
+use crate::state::{Rolls, State};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Cancellation {
@@ -47,37 +47,32 @@ impl Assigned {
 
 pub(crate) struct Fulfilment<'a> {
     state: &'a State,
+    rolls: &'a Rolls<'a>,
     posted: BTreeMap<Posting, u32>,
     frames: BTreeMap<Posting, Vec<usize>>,
-    surplus: BTreeMap<SeatId, BTreeMap<RowId, Vec<Surplus>>>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Surplus {
-    entity: EntityId,
-    asteroid: AsteroidId,
+    surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>>,
 }
 
 impl<'a> Fulfilment<'a> {
-    pub(crate) fn of(state: &'a State) -> Fulfilment<'a> {
+    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Fulfilment<'a> {
         let posted = posted(state);
         let frames = framed(state);
-        let mut surplus: BTreeMap<SeatId, BTreeMap<RowId, Vec<Surplus>>> = BTreeMap::new();
-        for (posting, over) in surpluses(state, &posted, &frames) {
+        let mut surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>> =
+            BTreeMap::new();
+        for (posting, mut over) in surpluses(state, &posted, &frames) {
             if state[posting.row()].kind() == Kind::Unit {
+                over.reverse();
                 surplus
                     .entry(posting.seat())
                     .or_default()
                     .entry(posting.row())
                     .or_default()
-                    .extend(over.into_iter().map(|entity| Surplus {
-                        entity,
-                        asteroid: posting.asteroid(),
-                    }));
+                    .insert(posting.asteroid(), over);
             }
         }
         Fulfilment {
             state,
+            rolls,
             posted,
             frames,
             surplus,
@@ -94,8 +89,8 @@ impl<'a> Fulfilment<'a> {
                 assigned.placements.push(posting);
             }
             let sent = self.nearest_surplus(posting, shortfall - from_reserve);
-            for surplus in &sent {
-                assigned.sent_to.insert(surplus.entity, posting.asteroid());
+            for entity in &sent {
+                assigned.sent_to.insert(*entity, posting.asteroid());
             }
             still_short.insert(posting, shortfall - from_reserve - sent.len() as u32);
         }
@@ -132,37 +127,38 @@ impl<'a> Fulfilment<'a> {
         giving
     }
 
-    fn nearest_surplus(&mut self, posting: Posting, asked: u32) -> Vec<Surplus> {
+    fn nearest_surplus(&mut self, posting: Posting, asked: u32) -> Vec<EntityId> {
         let mut taking = Vec::new();
+        let rolls = self.rolls;
         let Some(surplus) = self
             .surplus
             .get_mut(&posting.seat())
             .and_then(|rows| rows.get_mut(&posting.row()))
+            .filter(|_| asked > 0)
         else {
             return taking;
         };
-        let here = self.state.asteroid_body(posting.asteroid()).pos;
-        while taking.len() < asked as usize {
-            let nearest = surplus
-                .iter()
-                .enumerate()
-                .filter(|(_, surplus)| surplus.asteroid != posting.asteroid())
-                .min_by(|(_, a), (_, b)| {
-                    let (first, second) = (
-                        self.state.asteroid_body(a.asteroid).pos.distance(here),
-                        self.state.asteroid_body(b.asteroid).pos.distance(here),
-                    );
-                    first
-                        .total_cmp(&second)
-                        .then(a.asteroid.cmp(&b.asteroid))
-                        .then(b.entity.cmp(&a.entity))
-                })
-                .map(|(at, _)| at);
-            match nearest {
-                Some(at) => taking.push(surplus.remove(at)),
-                None => break,
+        let here = rolls[posting.asteroid()].body().pos;
+        let mut nearest: Vec<(f64, AsteroidId, &mut Vec<EntityId>)> = surplus
+            .iter_mut()
+            .filter(|(asteroid, _)| **asteroid != posting.asteroid())
+            .map(|(asteroid, held)| (rolls[*asteroid].body().pos.distance(here), *asteroid, held))
+            .collect();
+        nearest.sort_unstable_by(|(one, first, _), (other, second, _)| {
+            one.total_cmp(other).then(first.cmp(second))
+        });
+        for (_, _, held) in &mut nearest {
+            while taking.len() < asked as usize {
+                match held.pop() {
+                    Some(entity) => taking.push(entity),
+                    None => break,
+                }
+            }
+            if taking.len() == asked as usize {
+                break;
             }
         }
+        surplus.retain(|_, held| !held.is_empty());
         taking
     }
 

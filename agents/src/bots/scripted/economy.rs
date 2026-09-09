@@ -19,7 +19,19 @@ impl Economy {
         proposals.extend(Economy::yards(survey));
         proposals.extend(Economy::stores(survey, personality));
         proposals.extend(Economy::masons(survey, personality, commitments));
+        Economy::one_at_a_time(survey, proposals)
+    }
+
+    fn one_at_a_time(survey: &Survey, proposals: Vec<Proposal>) -> Vec<Proposal> {
+        let yielding = survey.roles.yields_on_completion();
         proposals
+            .into_iter()
+            .filter(|proposal| {
+                let (asteroid, row) = (proposal.posting.asteroid(), proposal.posting.row());
+                proposal.count <= survey.count(asteroid, row)
+                    || !survey.short_of(asteroid, &yielding)
+            })
+            .collect()
     }
 
     fn extractors(survey: &Survey, personality: &Personality) -> Vec<Proposal> {

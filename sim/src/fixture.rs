@@ -129,9 +129,7 @@ impl World {
             for step in moved.iter() {
                 self.state.steer(step.entity, step.body);
             }
-            for arrival in moved.arrived() {
-                self.state.arrive(*arrival);
-            }
+            self.state.arrive(moved.arrived());
             self.state.advance();
         }
     }
@@ -165,6 +163,10 @@ impl World {
     pub fn free(&mut self, seat: u8, row: RowId, asteroid: AsteroidId, body: Body) -> EntityId {
         self.state
             .spawn(SeatId(seat), row, asteroid, Motion::Steered { body })
+    }
+
+    pub fn send(&mut self, entity: EntityId, to: AsteroidId) {
+        self.state.re_home(&BTreeMap::from([(entity, to)]));
     }
 
     pub fn count(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> u32 {

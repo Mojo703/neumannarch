@@ -173,25 +173,29 @@ impl Entities {
         self.passes[at] = pass;
     }
 
-    pub(crate) fn re_home(&mut self, id: EntityId, destination: AsteroidId) {
-        let at = self.place_of(id);
-        let from = self.homes[at];
-        self.forget_transit(id, from);
-        self.homes[at] = destination;
-        self.berths[at] = Berth::Flying { from };
-        self.passes[at] = Pass::Running;
-        let flying = self.in_transit.entry(destination).or_default();
-        if let Err(place) = flying.binary_search(&id) {
-            flying.insert(place, id);
+    pub(crate) fn re_home(&mut self, sent: &BTreeMap<EntityId, AsteroidId>) {
+        for (id, destination) in sent {
+            let at = self.place_of(*id);
+            let from = self.homes[at];
+            self.forget_transit(*id, from);
+            self.homes[at] = *destination;
+            self.berths[at] = Berth::Flying { from };
+            self.passes[at] = Pass::Running;
+            let flying = self.in_transit.entry(*destination).or_default();
+            if let Err(place) = flying.binary_search(id) {
+                flying.insert(place, *id);
+            }
         }
         self.settle();
     }
 
-    pub(crate) fn arrive(&mut self, id: EntityId) {
-        let at = self.place_of(id);
-        let home = self.homes[at];
-        self.forget_transit(id, home);
-        self.berths[at] = Berth::Standing(home);
+    pub(crate) fn arrive(&mut self, arrived: &[EntityId]) {
+        for id in arrived {
+            let at = self.place_of(*id);
+            let home = self.homes[at];
+            self.forget_transit(*id, home);
+            self.berths[at] = Berth::Standing(home);
+        }
         self.settle();
     }
 
@@ -406,7 +410,7 @@ mod tests {
         let flier = world.hold(0, FRIGATE, HOME, 0.0);
         let stayer = world.hold(0, FRIGATE, HOME, 2.0);
 
-        world.state.re_home(flier, AWAY);
+        world.send(flier, AWAY);
 
         assert_eq!(ids(&world), vec![stayer, flier], "the flier sorts last");
         assert_eq!(world.state.entity(flier).id(), flier);
@@ -430,7 +434,7 @@ mod tests {
             "it is homed where it flies to"
         );
 
-        world.state.arrive(flier);
+        world.state.arrive(&[flier]);
 
         assert_eq!(ids(&world), vec![stayer, flier]);
         assert_eq!(world.state.entity(flier).standing(), Some(AWAY));
@@ -486,7 +490,7 @@ mod tests {
         let unit = world.hold(0, FRIGATE, HOME, 0.0);
         world.state.entities.set_pass(unit, Pass::Returning);
 
-        world.state.re_home(unit, AWAY);
+        world.send(unit, AWAY);
 
         assert_eq!(
             world.state.entity(unit).pass(),

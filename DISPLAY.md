@@ -476,8 +476,8 @@ follows Controls, above.
   one panel, the third inside a match, titled Draft: the order, drawn
   as an initiative list at the screen's left edge over the belt, never
   over the stockpile bar, in the screens' style, packed as tight as its rows
-  read. One row per stage in the order the stages run, the first round
-  then the second: the glyph of the structure that stage places,
+  read. One row per placement stage in the order they run, the first
+  round then the second: the glyph of the structure that stage places,
   filled in the seat's colour once placed and hollow in the seat's
   colour before, so the glyph carries the seat; the seat's name (You,
   the bot's name, a guest's name); and at the right a bar of one fixed

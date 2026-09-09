@@ -144,6 +144,18 @@ adds it here in the same change; a unit that deletes one removes it.
   reads the want at zero and the frame is cancelled. A bot that surveyed
   and funded every tick would delete it, at a survey and a funding pass
   per seat per tick rather than one a second.
+- A machine expects its own controller's command to be one the tick it
+  stamps can still take, and the bot meets the thirty-two command cap
+  exactly, since its plan ends in a take of that many. A second source of
+  commands on one seat at one tick, a draft pick beside a funded plan,
+  refuses the thirty-third and panics the process. A controller handing
+  over a type that cannot hold more than one tick's commands would delete
+  it, since the refusal would have no arm left to reach.
+- A relayed command a machine refuses as late or as early is dropped
+  without a word, so that machine's history lacks it for good and its
+  next hash disagrees, which ends the match. Nothing reads the refusal. A
+  relay that could carry only a command the receiving tick can still
+  take would delete it.
 
 ## Dependencies
 

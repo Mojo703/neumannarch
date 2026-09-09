@@ -235,6 +235,11 @@ impl<'a> Survey<'a> {
             .is_some_and(|plan| plan.building.is_some())
     }
 
+    pub fn short_of(&self, asteroid: AsteroidId, rows: &[RowId]) -> bool {
+        rows.iter()
+            .any(|row| self.want(asteroid, *row) > self.count(asteroid, *row))
+    }
+
     pub fn frame_no_builder_fills(&self, posting: Posting) -> bool {
         self.frame_open(posting.asteroid(), posting.row()) && !self.builds_at(posting.asteroid())
     }

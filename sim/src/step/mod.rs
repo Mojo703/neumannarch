@@ -36,7 +36,7 @@ impl State {
         let shots = Fire::of(snap, &rolls).run();
         let steering = Holding::of(snap, &rolls, &shots).run();
         let moved = Propagation::of(snap, &steering.thrusts).run();
-        let filled = Fulfilment::of(snap).run();
+        let filled = Fulfilment::of(snap, &rolls).run();
         let income = Income::extracted(snap, &rolls);
         let work = Construction::of(snap, &rolls).run();
         let next = State::next(snap, &moved, &steering, &filled, &income, &work, &shots);
@@ -73,18 +73,14 @@ fn move_bodies(next: &mut State, moved: &Moved) {
     for step in moved.iter() {
         next.steer(step.entity, step.body);
     }
-    for arrival in moved.arrived() {
-        next.arrive(*arrival);
-    }
+    next.arrive(moved.arrived());
 }
 
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
     for placement in &filled.placements {
         next.place_from_reserve(placement.post(), placement.row());
     }
-    for (entity, destination) in &filled.sent_to {
-        next.re_home(*entity, *destination);
-    }
+    next.re_home(&filled.sent_to);
     for opening in &filled.openings {
         next.add_frame(Frame::new(opening.post(), opening.row(), 0.0, snap.time()));
     }

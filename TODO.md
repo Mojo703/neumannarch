@@ -9,6 +9,46 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
+Uncommitted and verified green by the overseer's own gate, replay and
+rollback (2026-09-09): the bot spends what it pulls. Its army was
+wanted at one asteroid only, and one asteroid holds one frame per row
+fed by the builders standing on it, so the whole army throughput was
+three frames while 687 a second of build rate sat idle across fifty
+rocks. Arming now asks at every asteroid where a builder of its own
+stands, waves muster from everywhere and send only what stands, the
+economy builds one income row at a time at an asteroid since a row that
+pays on completion finishes sooner alone, and `check.sh` runs `verify
+11`, the shortest whole-minute clock that reaches the failure on the
+old code. With it, the worst tick: `Entities::re_home` and `arrive`
+settled the whole store once per unit, so a wave re-homing two hundred
+units ran two hundred full re-sorts; both now take the batch and settle
+once, and `Fulfilment` reads asteroid positions from the roll the tick
+already builds instead of solving the orbit twice per comparison.
+Measured: armed units at fifteen minutes 25 to 1503, spend 39 a second
+to 638 of 885 available, income through the opening six minutes roughly
+doubled, worst tick 95.84 ms to 4.10, ticks over the 8.33 ms budget 38
+to none, every minute's hash unchanged.
+
+Three holes that work opened, none of them fixed:
+- `game/src/net/machine.rs` expects its own controller's command to be
+  taken, and the bot clears the thirty-two command cap with no margin,
+  since `Plan::commands` ends in `take(MAX_COMMANDS_PER_TICK)` and emits
+  exactly thirty-two. A second command source on one seat at one tick,
+  a draft pick beside a funded plan, panics the game process. This is
+  the likeliest explanation for the crashes the owner saw and blamed on
+  an agent. The fix is for the controller to hand over a type that
+  cannot hold more than a tick's commands, so the refusal has no arm to
+  reach.
+- `Machine::apply` drops a refused relayed command silently, so a
+  machine that learns a command late or early loses it for good and
+  desyncs at the next hash. A silently ignored input with no entry.
+- The bot now fields about fifteen hundred armed units by the clock,
+  half its entities. That is the fight the owner was missing, and
+  whether it is the right amount is a balance question nobody has asked.
+
+Everything below this line about the bot unit is its history and landed
+in e3dc9a9; prune it in the next session that has the budget.
+
 The bot unit, built and verified 2026-09-08, awaiting the owner's
 review of the diff and the commit. The owner read the code and
 accepted it, accepted the non-test budget miss (2416 against 1817,

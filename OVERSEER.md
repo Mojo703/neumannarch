@@ -92,6 +92,12 @@ for the one that talks to the owner. Project state lives in TODO.md.
   drawing code itself; bulk logic and research go to Opus, register
   reviews to Sonnet. Keep the overseer's own output small; its tokens
   are the expensive ones.
+- A scratch copy keeps a lasting cargo target directory (overseer's
+  lesson, 2026-09-09): 226 cold builds across three workflows were the
+  day's largest cost and none of it was thinking. One directory per
+  tree, never one shared between trees, since two workspaces of the
+  same package names clobber each other's artifacts silently. One agent
+  runs the full gate; the rest read.
 - A research agent is resumed for the unit its research shaped
   (owner, 2026-09-08): it holds the context a fresh agent would have
   to rebuild, so the brief goes to it by message rather than to a new

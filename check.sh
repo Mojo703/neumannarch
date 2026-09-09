@@ -13,8 +13,10 @@ cargo build -p neumannarch-game --features look --all-targets
 # Hosting is on by default and its dependencies are native-only, so the
 # browser build below is what proves the game builds without the server.
 cargo test --workspace
-# The bot's guarantees play a six-minute match, seven seconds in release.
-cargo run --release -p neumannarch-agents --bin harness -- verify 6
+# The bot's guarantees play an eleven-minute match, the shortest clock a bot
+# can reach its stockpile's capacity and sit there a minute on, plus the
+# fifteen-minute growth match; two minutes in release.
+cargo run --release -p neumannarch-agents --bin harness -- verify 11
 # The playable's own headless drive, which needs a GPU and an X display.
 xvfb-run -a cargo test -p neumannarch-game --features look --bin neumannarch-game
 # The game ships in the browser, and the sim with it.

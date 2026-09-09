@@ -305,12 +305,12 @@ impl State {
         self.entities.steer(id, body);
     }
 
-    pub(crate) fn re_home(&mut self, id: EntityId, destination: AsteroidId) {
-        self.entities.re_home(id, destination);
+    pub(crate) fn re_home(&mut self, sent: &BTreeMap<EntityId, AsteroidId>) {
+        self.entities.re_home(sent);
     }
 
-    pub(crate) fn arrive(&mut self, id: EntityId) {
-        self.entities.arrive(id);
+    pub(crate) fn arrive(&mut self, arrived: &[EntityId]) {
+        self.entities.arrive(arrived);
     }
 
     pub(crate) fn heal(&mut self, id: EntityId, hp: f64) {

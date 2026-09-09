@@ -126,7 +126,7 @@ fn farthest(state: &State) -> (AsteroidId, AsteroidId) {
 
 fn flying(world: &mut World, row: RowId, from: AsteroidId, to: AsteroidId) -> EntityId {
     let unit = world.hold(0, row, from, 0.0);
-    world.state.re_home(unit, to);
+    world.send(unit, to);
     unit
 }
 
@@ -775,7 +775,7 @@ fn an_arrived_force_holds_inside_its_destinations_zone() {
         .enumerate()
         .map(|(at, row)| {
             let unit = world.hold(0, row, from, at as f64 * 3.0);
-            world.state.re_home(unit, to);
+            world.send(unit, to);
             unit
         })
         .collect();
