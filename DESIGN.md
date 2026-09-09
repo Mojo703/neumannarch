@@ -25,8 +25,10 @@ probe; the win is holding the system when the clock runs out.
    judgement. The player never references a unit.
 2. **One verb.** Set the count of a row at an asteroid. Everything else
    the player does is a client gesture that issues that verb.
-3. **Emergent, deterministic outcomes.** Counters and roles come from stats
-   and geometry, never from tables of types. No randomness.
+3. **Emergent, deterministic outcomes.** Counters come from stats and
+   geometry, never from tables of types. A row states its role, and the
+   role decides only the row's glyph and whether it runs passes or holds
+   its station. No randomness.
 4. **Short matches.** A match ends at the clock, minutes rather than hours.
 5. **Two to four players in any team shape.** One against one is the balance
    baseline; four-player free-for-all is a mode.
@@ -42,24 +44,25 @@ probe; the win is holding the system when the clock runs out.
   the placement draft, with time stopped: no body moves, nothing is
   extracted and nothing builds until the clock starts, and the belt is
   whole and visible, its asteroids and their caps read by everyone. The
-  draft is a sequence of stages, one per reserve structure per seat:
-  the first round's stages in an order drawn from the seed, the second
+  draft is a sequence of placement stages, one per reserve structure per
+  seat: the first round's in an order drawn from the seed, the second
   round's in the reverse order, so the seat that went first goes last
-  for its second asteroid. One stage runs at a time. A stage ends the
-  moment its seat places, or after a stated span if it has not, and
-  the next begins at once. A seat whose stage ran out keeps the right
-  to place and may do so at any later tick, alongside the running
-  stage, first come first served. A placement puts the seat's reserve
-  row at the asteroid at once, complete, and an asteroid any seat has a
-  body homed at is taken. A reserve want before the seat's first stage has begun is
-  refused by name; a want at a taken asteroid is refused by name. Any
-  other want is accepted during the draft and stands as a want, the
-  way a build order is queued before a round starts; it is filled once
-  the clock runs. The draft ends, and the clock starts, on the tick
-  every seat has placed both structures, or a stated span after the
-  last stage ended, whichever is first; a seat still holding reserve
-  then places from the asteroids left free, at any time. A bot places on
-  the first tick of its stage.
+  for its second asteroid. One placement stage runs at a time. It ends
+  the moment its seat places, or after a stated span if it has not, and
+  the next begins at once. A seat whose placement stage ran out keeps
+  the right to place and may do so at any later tick, alongside the
+  running one, first come first served. A placement puts the seat's
+  reserve row at the asteroid at once, complete, and an asteroid any
+  seat has a body homed at is taken. A reserve want before the seat's
+  first placement stage has begun is refused by name; a want at a taken
+  asteroid is refused by name. Any other want is accepted during the
+  draft and stands as a want, the way a build order is queued before a
+  round starts; it is filled once the clock runs. The draft ends, and
+  the clock starts, on the tick every seat has placed both structures,
+  or a stated span after the last placement stage ended, whichever is
+  first; a seat still holding reserve then places from the asteroids
+  left free, at any time. A bot places on the first tick of its
+  placement stage.
 - Teammates share nothing but a side. A player edits only their own
   compositions.
 - Agents play through the same view and the same verb as humans.
@@ -134,8 +137,9 @@ HP, and its home asteroid.
 
 | field | notes |
 |---|---|
+| role | what the row is for; it decides the glyph, and short-range fire runs passes where every other role holds its station; nothing else reads it |
 | manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and asteroids |
-| holding weights | one weight per term of the holding rule |
+| holding weights | one weight per term of the holding rule; the station weight is zero for a row that takes no station |
 | HP | |
 | plating | flat damage reduction per hit |
 | weapons | see Weapons |
@@ -150,7 +154,8 @@ HP, and its home asteroid.
   asteroid.
 - **Units** have manoeuvring above zero and move at the movement limit.
 - All builders build everything. A shipyard is a fast builder.
-- Roles emerge from ratios. There is no role field.
+- Counters come from the stats. The role is a field, read only by the
+  glyph and by the pass.
 
 ## Weapons
 
@@ -176,14 +181,16 @@ stockpile covers, and resumes as income arrives. Spend never exceeds the work a
 frame has left. Lowering a count cancels frames and refunds what they consumed.
 Build targets: shortfalls, then repair. A completed frame becomes an entity at
 the asteroid: a structure at the asteroid's state, a unit at its asteroid's
-position, offset along the asteroid's radial direction by one spacing per unit
-already there, so no two spawn coincident. The spacing is one constant of the
-zone.
+position, offset along the asteroid's radial direction by the floor the
+return term keeps, the asteroid's radius and one spacing, and one further
+spacing per unit already there, so nothing spawns inside the asteroid and no
+two spawn coincident. The spacing is one constant of the zone.
 
-**Target selection is by threat.** A weapon fires at the enemy in range
-with the highest damage per second through the shooter's plating per
-point of its HP;
-ties by nearest, then lowest id. Range is the only gate.
+**Target selection is by threat.** A weapon keeps the target it last
+fired at while that target is alive and in range, whatever else stands
+in range. Where it kept none, it fires at the enemy in range with the
+highest damage per second through the shooter's plating per point of its
+HP; ties by nearest, then lowest id. Range is the only gate on either.
 
 **Shots resolve in order.** Every weapon carries the instant it is next
 ready. Within a tick, shots resolve in ready-time order, then shooter id,
@@ -230,7 +237,8 @@ sets one count.
 - **The zone.** Every asteroid has a zone: the region within one radius of
   it, the same radius for every asteroid, one constant of the belt. A unit at
   an asteroid holds inside the zone, a builder reaches
-  everything inside it, a unit chases any enemy inside it, and the
+  everything inside it, a unit of a row whose role runs passes chases
+  any enemy inside it, and the
   display draws it. Zones are small against the spacing of asteroids, so
   two rarely meet, and where two do the rules read no distance: a unit is
   at its home and nowhere else.
@@ -254,16 +262,6 @@ sets one count.
   tick it is re-homed until it arrives; and while it flies it counts
   toward its destination and is neither a shooter nor a target. In flight
   a unit thrusts by this rule alone.
-- **Power.** Every unit has a power: its damage per second, through no
-  plating, times its remaining HP. It is the one number the fields below
-  sum and it falls as a unit is hurt.
-- **The fields.** Each tick, at each asteroid, each side has a strength
-  field: at any point, the sum over that side's units at the asteroid of
-  the unit's power times a smooth kernel of its distance from the point,
-  the kernel's scale a constant of the zone. A unit reads the two fields
-  at its own position, its side's and the enemy's, and the fraction of
-  the strength there that is its own side's, so it knows who is strong
-  here without knowing any absolute number.
 - **Holding.** At its asteroid a unit moves by the holding rule. Each tick it
   sums the steering terms below and thrusts by the sum, capped at its
   row's manoeuvring limit. Each term's weight is the row's. A term that
@@ -280,36 +278,84 @@ sets one count.
   the asteroid. Separation: a weak push from any ship of any seat nearer
   than the spacing, the distance a pair settles at; weak, since
   space is large. Station: every armed unit holds a place on the
-  asteroid's stage. The stage is a point a stated distance outward from
-  the asteroid's body along its radial, inside the zone, so a fight sits
-  below the asteroid on the player's screen, where the star is always
-  up, and never under the structures, whichever sides own them. The
-  stage's axis is the asteroid's orbital tangent, so forces face each
-  other left and right across it, and its lateral is the radial, so a
-  row spreads up and down the screen. Sides take their places by team
-  order: the lowest team on the retrograde side, the next on the
-  prograde side, and more teams divide the circle about the stage evenly
-  in team order. A unit's station is on its side, at its row's stand-off
-  from the stage's centre along the axis, half its longest weapon range,
-  so long-range rows stand behind short-range rows; along the lateral
-  the units of a row stand side by side at the station spacing, one
-  constant of the belt, in id order, and a row wider than the stage
-  wraps into a further rank behind. A side alone at an asteroid holds
-  its side of the stage, so a garrison stands before an attacker
-  arrives, and an arrival walks from the rim to its station. A unit with
-  no damage weapon takes no station and keeps its motion about the
-  asteroid, wander and return. No row chases a faster row, and heading
-  never gates fire. Pass: a unit of a short-range row runs at the target
-  the fire rule gives it, fires whenever the target is in range, breaks
-  at a stated fraction of its range along a direction turned off its
-  approach by an angle drawn from its id and the tick within a stated
-  band, returns to its station and runs again; a long-range row holds
-  its station and fires from it; return stays in the sum throughout, so
-  a pass never leaves the zone. The fire rule keeps its target from one
-  tick to the next while the target is in range and alive, and passes
-  over a target whose assigned damage this tick already kills it, so a
-  force spreads its fire along the enemy line. There is no facing. The
-  rule is one module and is replaceable whole.
+  asteroid's fight stage. The stage's centre is a point half the
+  roster's longest weapon range outward from the asteroid's body along
+  its radial, inside the zone, so a fight sits below the asteroid on the
+  player's screen, where the star is always up, and never under the
+  structures, whichever sides own them. Its plane stands off the body
+  along the orbit's normal by the asteroid's radius and one spacing, the
+  floor the return term keeps, so no station stands on the body whatever
+  side a team takes. The stage's lateral is the radial exactly and its
+  axis is what is left of the asteroid's orbital tangent once the
+  lateral is taken out of it, normalised, so the frame is square on
+  every orbit, eccentric or not, and the stage's plane runs parallel to
+  the orbit's, the floor above it. The teams that hold a station at the
+  asteroid divide the circle about the stage evenly between them in team
+  order, the lowest on the retrograde side and each next one an even
+  turn further round, so two teams face each other across the stage and
+  three or four stand evenly about it; the circle is divided again the
+  tick a team takes its first station there or loses its last.
+  A line is a whole team's units of one row at the asteroid, the seats
+  of that team pooled into one, since a side belongs to a team and not
+  to a seat. A unit's station is its place in that line, on its team's
+  side, at its row's stand-off from the
+  stage's centre. The stand-off is half the row's damage range less half
+  a stated distance, one constant of the belt, so two teams' lines of
+  one row stand that distance inside their range and long-range rows
+  stand behind short-range rows. Three or four teams divide the circle
+  more finely: two of their lines of one row stand no further apart than
+  that, and nearer the closer their sides, so they close further inside
+  their range. Where three or more sides divide the circle a line
+  spreads no further each way than its own stand-off, and the wrap below
+  carries what will not fit into the ranks behind, so no station stands
+  nearer another team's side than its own and no two lines cross. Two
+  sides stand opposite and their lines run parallel, so at two teams a
+  line spreads its full width. A roster with a weapon that
+  reaches no further than that distance cannot be built, nor one whose
+  stations would stand outside the zone. A row lies
+  centred on its stand-off point and spreads both ways square to it, in
+  id order, a stated count of stations each way at the station spacing,
+  both constants of the belt, so a row leans neither way. A row of more
+  units wraps into a further rank one station spacing
+  behind, the stage holds a stated count of ranks, one constant of the
+  belt, and the counts are set so every station stands inside the zone;
+  a row of more units than the stage has stations fills it again from
+  the front, so two units share a station and separation parts them. A
+  side alone at an asteroid holds its side of the stage, so a garrison
+  stands before an attacker arrives, and an arrival walks from the rim
+  to its station. A unit with no damage weapon takes no station and
+  keeps its motion about the asteroid, wander, return and separation.
+  Heading never gates fire.
+  Pass: a unit of a row whose role runs passes runs at the enemy of the
+  highest threat standing inside the zone, at any distance, taking that
+  enemy afresh every tick and keeping none, and breaks off for its
+  station on the tick that same enemy hits it; reaching it, it runs
+  again. A hit from any other enemy turns it nowhere, and a hit
+  on its way home starts no second return, so a run lasts at least as
+  long as the enemy it runs at takes to reload, and a run at an enemy
+  that never fires back, a builder or an extractor, lasts until one of
+  them dies. Range gates the turn through the shot alone: a shot lands
+  only from inside the shooter's range, so the enemy it runs at turns it
+  where that enemy can reach it and no nearer. A pass counts its station
+  reached within a stated distance, one constant of the belt, and a unit
+  sent to another asteroid arrives running. Where no enemy stands in the
+  zone the unit steers to its station and stays in its run, so a pass
+  begins from the station the tick an enemy appears.
+  A pass is no term of its own and carries no weight: it names the place
+  the station term steers to, in the station's stead, at the row's
+  station weight, so a runner and a row that holds its station steer by
+  the same sum and differ only in where that place stands. The enemy a
+  unit runs at and the enemy its weapons fire at are two separate
+  choices: the pass takes one enemy in the zone to run at, its weapons
+  take their own targets by the rule under Weapons, and the two need not
+  be the same. Only the enemy it runs at can turn it around, so a runner
+  fires at whatever stands in its weapons' range as it runs, and holds
+  its run through fire from anyone else. A row whose role
+  holds its station holds it and fires from it; return stays in the sum
+  throughout, so a pass never leaves the zone. A weapon passes over a
+  target whose assigned damage this tick already kills it, so a force
+  spreads its fire along the enemy line. There is no facing. The rule is
+  one module and is replaceable whole.
 - A flying unit is neither a shooter nor a target: battles happen at
   asteroids.
 

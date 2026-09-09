@@ -17,6 +17,12 @@ pub(crate) enum Motion {
     Steered { body: Body },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Pass {
+    Running,
+    Returning,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Entities {
     ids: Vec<EntityId>,
@@ -26,6 +32,7 @@ pub(crate) struct Entities {
     berths: Vec<Berth>,
     hp: Vec<Real>,
     motions: Vec<Motion>,
+    passes: Vec<Pass>,
     in_transit: BTreeMap<AsteroidId, Vec<EntityId>>,
     ids_ascending: Vec<EntityId>,
     places_ascending: Vec<u32>,
@@ -64,6 +71,7 @@ impl Entities {
             berths: Vec::new(),
             hp: Vec::new(),
             motions: Vec::new(),
+            passes: Vec::new(),
             in_transit: BTreeMap::new(),
             ids_ascending: Vec::new(),
             places_ascending: Vec::new(),
@@ -90,6 +98,7 @@ impl Entities {
         self.berths.insert(at, berth);
         self.hp.insert(at, Real(hp));
         self.motions.insert(at, motion);
+        self.passes.insert(at, Pass::Running);
         for place in &mut self.places_ascending {
             *place += u32::from(*place >= at as u32);
         }
@@ -159,12 +168,18 @@ impl Entities {
         self.motions[at] = Motion::Steered { body };
     }
 
+    pub(crate) fn set_pass(&mut self, id: EntityId, pass: Pass) {
+        let at = self.place_of(id);
+        self.passes[at] = pass;
+    }
+
     pub(crate) fn re_home(&mut self, id: EntityId, destination: AsteroidId) {
         let at = self.place_of(id);
         let from = self.homes[at];
         self.forget_transit(id, from);
         self.homes[at] = destination;
         self.berths[at] = Berth::Flying { from };
+        self.passes[at] = Pass::Running;
         let flying = self.in_transit.entry(destination).or_default();
         if let Err(place) = flying.binary_search(&id) {
             flying.insert(place, id);
@@ -193,7 +208,7 @@ impl Entities {
     pub(crate) fn reap(&mut self) -> Vec<EntityId> {
         let dead: Vec<EntityId> = self
             .in_id_order()
-            .filter(|entity| entity.hp() <= 0.0)
+            .filter(|entity| !entity.is_alive())
             .map(Entity::id)
             .collect();
         if dead.is_empty() {
@@ -204,7 +219,7 @@ impl Entities {
             self.forget_transit(*id, self.homes[at]);
         }
         let surviving: Vec<u32> = (0..self.ids.len() as u32)
-            .filter(|at| self.hp[*at as usize].0 > 0.0)
+            .filter(|at| self.at(*at as usize).is_alive())
             .collect();
         self.reorder(&surviving);
         dead
@@ -232,6 +247,7 @@ impl Entities {
         self.berths = gather(&self.berths, order);
         self.hp = gather(&self.hp, order);
         self.motions = gather(&self.motions, order);
+        self.passes = gather(&self.passes, order);
         self.reindex();
     }
 
@@ -321,11 +337,19 @@ impl<'a> Entity<'a> {
         self.entities.hp[self.at].0
     }
 
+    pub(crate) fn is_alive(self) -> bool {
+        self.hp() > 0.0
+    }
+
     pub(crate) fn steered(self) -> Option<Body> {
         match self.entities.motions[self.at] {
             Motion::Fixed => None,
             Motion::Steered { body } => Some(body),
         }
+    }
+
+    pub(crate) fn pass(self) -> Pass {
+        self.entities.passes[self.at]
     }
 }
 
@@ -426,5 +450,48 @@ mod tests {
 
         let next = world.fix(0, SHIPYARD, HOME);
         assert_eq!(next.0, last.0 + 1, "a dead id is never minted again");
+    }
+
+    #[test]
+    fn reaping_takes_an_entity_whose_hit_points_are_no_number_with_the_dead() {
+        let mut world = world();
+        let sound = world.hold(0, FRIGATE, HOME, 0.0);
+        let unnumbered = world.hold(0, FRIGATE, HOME, 2.0);
+        world.state.entities.hurt(unnumbered, f64::NAN);
+
+        assert_eq!(
+            world.state.reap(),
+            vec![unnumbered],
+            "an entity of no hit points was dropped without being reaped"
+        );
+        assert_eq!(ids(&world), vec![sound]);
+    }
+
+    #[test]
+    fn a_reap_carries_every_survivors_pass_to_its_new_place() {
+        let mut world = world();
+        let doomed = world.hold(0, FRIGATE, HOME, 0.0);
+        let returning = world.hold(0, FRIGATE, HOME, 2.0);
+        world.state.entities.set_pass(returning, Pass::Returning);
+        world.state.entities.hurt(doomed, f64::MAX);
+
+        world.state.reap();
+
+        assert_eq!(world.state.entity(returning).pass(), Pass::Returning);
+    }
+
+    #[test]
+    fn a_unit_sent_away_starts_its_next_pass_from_the_run() {
+        let mut world = world();
+        let unit = world.hold(0, FRIGATE, HOME, 0.0);
+        world.state.entities.set_pass(unit, Pass::Returning);
+
+        world.state.re_home(unit, AWAY);
+
+        assert_eq!(
+            world.state.entity(unit).pass(),
+            Pass::Running,
+            "it kept a return it began at the asteroid it left"
+        );
     }
 }

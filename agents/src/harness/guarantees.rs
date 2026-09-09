@@ -30,9 +30,29 @@ pub struct Guarantees {
     fielded: BTreeMap<SeatId, Time>,
     traded: Option<Time>,
     full_since: BTreeMap<SeatId, Time>,
-    highest_income: BTreeMap<SeatId, (f64, Time)>,
+    extraction: BTreeMap<SeatId, Extraction>,
     income_fell: Option<String>,
     growth: Option<String>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Extraction {
+    highest_per_second: f64,
+    falling_since: Time,
+}
+
+impl Extraction {
+    fn read(&mut self, pulled: f64, now: Time) -> f64 {
+        if pulled >= self.highest_per_second {
+            self.highest_per_second = pulled;
+            self.falling_since = now;
+        }
+        now.since(self.falling_since).seconds()
+    }
+
+    fn excused(&mut self, now: Time) {
+        self.falling_since = now;
+    }
 }
 
 impl Guarantees {
@@ -49,7 +69,7 @@ impl Guarantees {
             fielded: BTreeMap::new(),
             traded: None,
             full_since: BTreeMap::new(),
-            highest_income: BTreeMap::new(),
+            extraction: BTreeMap::new(),
             income_fell: None,
             growth: None,
         };
@@ -125,23 +145,22 @@ impl Guarantees {
         if self.income_fell.is_some() || !self.plays(view.seat, Bot::Expand) {
             return;
         }
-        let income = view.income.total();
-        let (highest, at) = self
-            .highest_income
-            .get(&view.seat)
-            .copied()
-            .unwrap_or((income, view.time));
-        let fallen = view.time.since(at).seconds() >= FALLING_SECONDS;
-        if income >= highest || (fallen && !free_within_reach(view)) {
-            self.highest_income.insert(view.seat, (income, view.time));
-        } else if fallen {
-            self.income_fell = Some(format!(
-                "seat {} pulled {income:.1} a second at {:.0}s, under the {highest:.1} it pulled at {:.0}s, with a free asteroid still within reach",
-                view.seat.0,
-                view.time.seconds(),
-                at.seconds()
-            ));
+        let pulled = view.income.total();
+        let extraction = self.extraction.entry(view.seat).or_default();
+        let falling = extraction.read(pulled, view.time);
+        if falling < FALLING_SECONDS {
+            return;
         }
+        if !free_within_reach(view) {
+            extraction.excused(view.time);
+            return;
+        }
+        let highest = extraction.highest_per_second;
+        self.income_fell = Some(format!(
+            "seat {} pulled {pulled:.1} a second at {:.0}s, under the {highest:.1} it had pulled, for the {falling:.0}s since it last matched that, with a free asteroid within reach at the end of it",
+            view.seat.0,
+            view.time.seconds()
+        ));
     }
 
     fn read_growth(&mut self, played: &PlayedMatch) {
@@ -198,7 +217,7 @@ impl Guarantees {
                 .and_then(|composition| composition.rows.get(&posting.row()))
                 .map_or(0, |held| held.present + held.arriving);
             self.unbuilt_frame = Some(format!(
-                "at {:.0}s seat {} still wants {want} {} at {:?} where {homed} are homed, and no builder of its own stands or arrives there",
+                "at {:.0}s seat {} still wants {want} {} at {:?} a decision on, where {homed} are homed and no builder of its own stands or arrives",
                 view.time.seconds(),
                 view.seat.0,
                 named(roster, posting.row()),
@@ -299,4 +318,60 @@ fn builds(roster: &Roster, row: RowId) -> bool {
 
 fn named(roster: &Roster, row: RowId) -> &str {
     roster.get(row).map_or("an unknown row", |row| row.name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neumannarch_sim::TICKS_PER_SECOND;
+
+    fn at(seconds: u64) -> Time {
+        Time(seconds * u64::from(TICKS_PER_SECOND))
+    }
+
+    #[test]
+    fn a_fall_is_measured_from_the_last_tick_the_seat_matched_the_most_it_ever_pulled() {
+        let mut extraction = Extraction::default();
+
+        assert_eq!(extraction.read(10.0, at(10)), 0.0);
+        assert_eq!(
+            extraction.read(4.0, at(30)),
+            20.0,
+            "the fall did not run from the tick the bar was last matched"
+        );
+        assert_eq!(
+            extraction.read(9.0, at(70)),
+            60.0,
+            "climbing back short of the bar cleared the fall"
+        );
+        assert_eq!(
+            extraction.highest_per_second, 10.0,
+            "the bar fell to what the seat pulls now"
+        );
+
+        assert_eq!(
+            extraction.read(10.0, at(80)),
+            0.0,
+            "matching the most it ever pulled did not clear the fall"
+        );
+    }
+
+    #[test]
+    fn an_excused_fall_runs_again_from_the_tick_it_was_excused() {
+        let mut extraction = Extraction::default();
+        extraction.read(10.0, at(10));
+        assert_eq!(extraction.read(4.0, at(70)), 60.0);
+
+        extraction.excused(at(70));
+
+        assert_eq!(
+            extraction.read(4.0, at(100)),
+            30.0,
+            "an excused seat is measured from before it was excused"
+        );
+        assert_eq!(
+            extraction.highest_per_second, 10.0,
+            "the excuse lowered the bar the seat is held to"
+        );
+    }
 }

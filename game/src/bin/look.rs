@@ -25,15 +25,16 @@ use neumannarch_game::screens::panel::Panel;
 use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
 use neumannarch_sim::Session as Match;
 use neumannarch_sim::belt::Belt;
+use neumannarch_sim::orbit::Body;
 use neumannarch_sim::roster::{
     ENERGY_EXTRACTOR, FRIGATE, Glyph, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD,
 };
 use neumannarch_sim::state::view::{Building, View};
-use neumannarch_sim::state::{Command, STAGE_SPAN, State};
+use neumannarch_sim::state::{Command, FightStage, Line, STAGE_SPAN, State};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Material, Materials, Posting, Retention, RowId, SeatId, Sequence, Stockpile, Time,
-    Vec3,
+    AsteroidId, Material, Materials, Posting, Retention, RowId, SeatId, Sequence, Stockpile,
+    TeamId, Time, Vec3,
 };
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
@@ -47,6 +48,8 @@ const YOU: SeatId = SeatId(0);
 const TAKEN: AsteroidId = AsteroidId(0);
 
 const HOME: Vec3 = Vec3::new(20_000.0, 0.0, 0.0);
+
+const PROGRADE: Vec3 = Vec3::new(0.0, 0.0, -1.0);
 
 const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
 
@@ -69,7 +72,7 @@ fn main() {
             on_the_ring(region_scene(&watched)),
             region_camera(),
         ),
-        ("fight", on_the_ring(fight_scene()), fight_camera()),
+        ("fight", fight_scene(), fight_camera()),
         (
             "stockpile",
             on_the_ring(stockpile_scene()),
@@ -446,15 +449,36 @@ fn region_camera() -> BeltCamera {
 }
 
 fn fight_scene() -> Scene {
-    let asteroids = vec![asteroid(0, Vec3::ZERO, 6.0)];
+    let radius = 6.0;
+    let asteroids = vec![asteroid(0, HOME, radius)];
 
-    let entities = vec![
-        ship(0, FRIGATE, Vec3::new(5.0, 0.0, 1.0)),
-        ship(0, LANCER, Vec3::new(6.0, 0.0, -2.0)),
-        ship(0, RAIDER, Vec3::new(4.0, 0.0, 4.0)),
-        ship(1, FRIGATE, Vec3::new(-5.0, 0.0, 1.0)),
-        ship(1, RAIDER, Vec3::new(-6.0, 0.0, -2.0)),
-    ];
+    let roster = Roster::shipped();
+    let lines: Vec<Line> = [
+        (0u8, RAIDER),
+        (0, FRIGATE),
+        (0, LANCER),
+        (1, RAIDER),
+        (1, FRIGATE),
+    ]
+    .into_iter()
+    .map(|(seat, row)| Line {
+        team: TeamId(seat),
+        row,
+        standing: 1,
+    })
+    .collect();
+    let stage = FightStage::of(Body::new(HOME, PROGRADE), radius, &roster, &lines);
+    let entities: Vec<EntityView> = lines
+        .iter()
+        .map(|line| {
+            let station = stage
+                .stations_of(line.team, line.row)
+                .first()
+                .copied()
+                .expect("an armed row takes a station");
+            ship(line.team.0, line.row, station)
+        })
+        .collect();
 
     let wheels = vec![wheel(
         0,

@@ -7,6 +7,7 @@ pub use shipped::{
     VOLATILES_EXTRACTOR,
 };
 
+use crate::belt::Belt;
 use crate::ids::RowId;
 use crate::real::Real;
 
@@ -22,6 +23,7 @@ impl Roster {
             movement_limit: Real(shipped::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED),
             rows: shipped::rows(),
         }
+        .checked()
     }
 
     pub fn units_by(self, adjust: impl Fn(Row) -> Row) -> Roster {
@@ -36,16 +38,53 @@ impl Roster {
                 .collect(),
             ..self
         }
+        .checked()
+    }
+
+    fn checked(self) -> Roster {
+        self.check();
+        self
+    }
+
+    fn check(&self) {
+        let reach = self.longest_damage_range();
+        for row in &self.rows {
+            let Some(standoff) = row.standoff() else {
+                continue;
+            };
+            assert!(
+                row.fires_past_its_lines(),
+                "{} fires {} meters, no further than the {} meters its lines stand inside their range",
+                row.name,
+                row.max_damage_range(),
+                Belt::LINES_INSIDE_RANGE_METERS
+            );
+            let furthest = Belt::furthest_station_meters(reach, standoff);
+            assert!(
+                furthest < Belt::ZONE_RADIUS_METERS,
+                "{} stands its furthest station {furthest} meters off the body, outside the {} meter zone",
+                row.name,
+                Belt::ZONE_RADIUS_METERS
+            );
+        }
     }
 
     pub(crate) fn movement_limit(&self) -> Real {
         self.movement_limit
     }
 
+    pub(crate) fn longest_damage_range(&self) -> f64 {
+        self.rows
+            .iter()
+            .map(Row::max_damage_range)
+            .fold(0.0, f64::max)
+    }
+
     #[cfg(test)]
     pub(crate) fn add(&mut self, row: Row) -> RowId {
         let id = RowId(u16::try_from(self.rows.len()).expect("a roster holds at most 65536 rows"));
         self.rows.push(row);
+        self.check();
         id
     }
 
@@ -101,19 +140,13 @@ mod tests {
     #[test]
     fn units_by_adjusts_every_unit_row_and_leaves_the_structures_alone() {
         let shipped = Roster::shipped();
-        let bolder = shipped.clone().units_by(|row| Row {
-            steering: Weights {
-                chase: Real(row.steering.chase.0 * 3.0),
-                ..row.steering
-            },
+        let frailer = shipped.clone().units_by(|row| Row {
+            hp: Real(row.hp.0 * 0.5),
             ..row
         });
-        assert_eq!(
-            bolder[LANCER].steering.chase,
-            Real(shipped[LANCER].steering.chase.0 * 3.0)
-        );
-        assert_eq!(bolder[LANCER].hp, shipped[LANCER].hp);
-        assert_eq!(bolder[SHIPYARD].steering, Weights::STILL);
+        assert_eq!(frailer[RAIDER].hp, Real(shipped[RAIDER].hp.0 * 0.5));
+        assert_eq!(frailer[RAIDER].manoeuvring, shipped[RAIDER].manoeuvring);
+        assert_eq!(frailer[SHIPYARD].hp, shipped[SHIPYARD].hp);
     }
 
     #[test]
@@ -125,6 +158,37 @@ mod tests {
         for (id, row) in roster.iter() {
             assert_eq!(&roster[id], row);
         }
+    }
+
+    fn reaching(roster: &Roster, meters: f64) -> Row {
+        Row {
+            name: "variant",
+            weapons: vec![Weapon::Damage {
+                range: Real(meters),
+                rate: Real(1.0),
+                damage: Real(1.0),
+                falloff: Real(0.0),
+            }],
+            ..roster[RAIDER].clone()
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "no further than")]
+    fn a_row_that_fires_no_further_than_its_lines_stand_inside_their_range_is_refused() {
+        let mut roster = Roster::shipped();
+        let short = reaching(&roster, Belt::LINES_INSIDE_RANGE_METERS);
+
+        roster.add(short);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside the")]
+    fn a_row_whose_stations_would_stand_outside_the_zone_is_refused() {
+        let mut roster = Roster::shipped();
+        let far = reaching(&roster, 4.0 * Belt::ZONE_RADIUS_METERS);
+
+        roster.add(far);
     }
 
     #[test]

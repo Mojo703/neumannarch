@@ -190,7 +190,9 @@ mod tests {
     use crate::TICKS_PER_SECOND;
     use crate::ids::{AsteroidId, RowId, TeamId};
     use crate::roster::{FRIGATE, METALS_EXTRACTOR, SHIPYARD};
-    use crate::state::{Command, Issued, MAX_COMMANDS_PER_TICK, Motion, STAGE_SPAN, Stage};
+    use crate::state::{
+        Command, Issued, MAX_COMMANDS_PER_TICK, Motion, PlacementStage, STAGE_SPAN,
+    };
     use crate::time::Time;
 
     const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
@@ -267,12 +269,12 @@ mod tests {
         script
     }
 
-    fn stages() -> Vec<Stage> {
+    fn stages() -> Vec<PlacementStage> {
         State::start(&setup()).draft().stages().to_vec()
     }
 
     fn worked() -> AsteroidId {
-        let mine = |stage: &&Stage| stage.seat == SeatId(0) && stage.row == SHIPYARD;
+        let mine = |stage: &&PlacementStage| stage.seat == SeatId(0) && stage.row == SHIPYARD;
         let at = stages().iter().position(|stage| mine(&stage));
         asteroid(at.expect("seat zero drafts a shipyard") as u32)
     }

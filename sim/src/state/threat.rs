@@ -4,9 +4,16 @@ use std::collections::BTreeMap;
 use super::State;
 use super::entities::Entity;
 use super::roll::Roll;
+use crate::belt::Belt;
 use crate::ids::{EntityId, TeamId};
 use crate::real::Real;
 use crate::vec3::Vec3;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Reach {
+    WithinMeters(f64),
+    WholeZone,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Aim {
@@ -73,18 +80,21 @@ impl Threats {
         &self,
         shooter: Shooter,
         from: Vec3,
-        range: f64,
+        reach: Reach,
         dealt: &AssignedDamage,
+        kept: Option<EntityId>,
         roll: &Roll,
     ) -> Option<Aim> {
-        let ranked = &self
+        let ranking = self
             .rankings
             .iter()
-            .find(|ranking| ranking.shooter == shooter)?
-            .ranked;
+            .find(|ranking| ranking.shooter == shooter)?;
+        if let Some(held) = kept.and_then(|id| ranking.still_prey(id, from, reach, dealt, roll)) {
+            return Some(held);
+        }
         let mut best: Option<Aim> = None;
         let mut taken = 0.0;
-        for target in ranked {
+        for target in &ranking.ranked {
             if best.is_some() && target.threat < taken {
                 break;
             }
@@ -92,10 +102,11 @@ impl Threats {
             if !dealt.survived(prey) {
                 continue;
             }
-            let distance = roll.body_of(prey).pos.distance(from);
-            if distance > range {
+            let at = roll.body_of(prey).pos;
+            if !reach.covers(at, from, roll) {
                 continue;
             }
+            let distance = at.distance(from);
             if best.is_none_or(|aim| distance < aim.distance) {
                 best = Some(Aim {
                     target: prey.id(),
@@ -108,6 +119,15 @@ impl Threats {
     }
 }
 
+impl Reach {
+    fn covers(self, target: Vec3, from: Vec3, roll: &Roll) -> bool {
+        match self {
+            Reach::WithinMeters(meters) => target.distance(from) <= meters,
+            Reach::WholeZone => target.distance(roll.body().pos) <= Belt::ZONE_RADIUS_METERS,
+        }
+    }
+}
+
 impl AssignedDamage {
     pub(crate) fn take(&mut self, target: EntityId, damage: f64) {
         *self.0.entry(target).or_default() += damage;
@@ -115,6 +135,29 @@ impl AssignedDamage {
 
     pub(crate) fn survived(&self, target: Entity) -> bool {
         target.hp() > self.0.get(&target.id()).copied().unwrap_or(0.0)
+    }
+}
+
+impl Ranking {
+    fn still_prey(
+        &self,
+        kept: EntityId,
+        from: Vec3,
+        reach: Reach,
+        dealt: &AssignedDamage,
+        roll: &Roll,
+    ) -> Option<Aim> {
+        let prey = self
+            .ranked
+            .iter()
+            .map(|target| roll.at(target.at as usize))
+            .find(|prey| prey.id() == kept)
+            .filter(|prey| dealt.survived(*prey))?;
+        let at = roll.body_of(prey).pos;
+        reach.covers(at, from, roll).then_some(Aim {
+            target: kept,
+            distance: at.distance(from),
+        })
     }
 }
 
@@ -168,13 +211,31 @@ mod tests {
         rolls[HOME].best(
             shooting(&world.state, shooter),
             world.state.body_of(world.state.entity(shooter)).pos,
-            range,
+            Reach::WithinMeters(range),
             &AssignedDamage::default(),
+            None,
         )
     }
 
     fn aimed(world: &World, shooter: EntityId) -> Option<Aim> {
         aimed_within(world, shooter, Belt::ZONE_RADIUS_METERS)
+    }
+
+    fn kept_within(
+        world: &World,
+        shooter: EntityId,
+        range: f64,
+        kept: EntityId,
+        dealt: &AssignedDamage,
+    ) -> Option<Aim> {
+        let rolls = Rolls::called(&world.state);
+        rolls[HOME].best(
+            shooting(&world.state, shooter),
+            world.state.body_of(world.state.entity(shooter)).pos,
+            Reach::WithinMeters(range),
+            dealt,
+            Some(kept),
+        )
     }
 
     #[test]
@@ -229,12 +290,13 @@ mod tests {
         let shooter = shooting(&world.state, hunter);
         let mut dealt = AssignedDamage::default();
 
-        let first = rolls[HOME].best(shooter, from, Belt::ZONE_RADIUS_METERS, &dealt);
+        let reach = Reach::WithinMeters(Belt::ZONE_RADIUS_METERS);
+        let first = rolls[HOME].best(shooter, from, reach, &dealt, None);
         assert_eq!(first.map(|aim| aim.target), Some(dangerous));
 
         dealt.take(dangerous, world.state.entity(dangerous).hp());
 
-        let second = rolls[HOME].best(shooter, from, Belt::ZONE_RADIUS_METERS, &dealt);
+        let second = rolls[HOME].best(shooter, from, reach, &dealt, None);
         assert_eq!(second.map(|aim| aim.target), Some(harmless));
     }
 
@@ -246,6 +308,86 @@ mod tests {
         world.hold(1, CONSTRUCTOR, HOME, 6.0);
 
         assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(near));
+    }
+
+    #[test]
+    fn a_kept_target_in_reach_is_taken_over_a_nearer_higher_threat() {
+        let mut world = world();
+        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
+        let dangerous = world.hold(1, RAIDER, HOME, 2.0);
+        let kept = world.hold(1, CONSTRUCTOR, HOME, 4.0);
+        assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(dangerous));
+
+        let aim = kept_within(
+            &world,
+            hunter,
+            Belt::ZONE_RADIUS_METERS,
+            kept,
+            &AssignedDamage::default(),
+        );
+
+        assert_eq!(aim.map(|aim| aim.target), Some(kept));
+        assert_eq!(aim.map(|aim| aim.distance), Some(4.0));
+    }
+
+    #[test]
+    fn a_kept_target_out_of_reach_is_dropped_for_the_highest_threat_in_it() {
+        let mut world = world();
+        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
+        let dangerous = world.hold(1, RAIDER, HOME, 2.0);
+        let far = world.hold(1, CONSTRUCTOR, HOME, 8.0);
+
+        let aim = kept_within(&world, hunter, 4.0, far, &AssignedDamage::default());
+
+        assert_eq!(aim.map(|aim| aim.target), Some(dangerous));
+    }
+
+    #[test]
+    fn a_kept_target_this_ticks_damage_already_kills_is_passed_over() {
+        let mut world = world();
+        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
+        let doomed = world.hold(1, RAIDER, HOME, 2.0);
+        let other = world.hold(1, CONSTRUCTOR, HOME, 4.0);
+        let mut dealt = AssignedDamage::default();
+        dealt.take(doomed, world.state.entity(doomed).hp());
+
+        let aim = kept_within(&world, hunter, Belt::ZONE_RADIUS_METERS, doomed, &dealt);
+
+        assert_eq!(aim.map(|aim| aim.target), Some(other));
+    }
+
+    #[test]
+    fn the_whole_zone_reaches_an_enemy_no_weapon_range_would() {
+        let mut world = world();
+        let hunter = world.hold(0, RAIDER, HOME, 0.0);
+        let far = world.hold(1, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+        let strayed = world.hold(1, RAIDER, HOME, 2.0 * Belt::ZONE_RADIUS_METERS);
+        let rolls = Rolls::called(&world.state);
+        let from = world.state.body_of(world.state.entity(hunter)).pos;
+        let shooter = shooting(&world.state, hunter);
+
+        let chased = rolls[HOME].best(
+            shooter,
+            from,
+            Reach::WholeZone,
+            &AssignedDamage::default(),
+            None,
+        );
+
+        assert_eq!(
+            chased.map(|aim| aim.target),
+            Some(far),
+            "the chase stops at the zone, whatever the weapon reaches"
+        );
+        assert!(
+            world
+                .state
+                .body_of(world.state.entity(strayed))
+                .pos
+                .distance(world.state.asteroid_body(HOME).pos)
+                > Belt::ZONE_RADIUS_METERS,
+            "the strayed enemy stands inside the zone"
+        );
     }
 
     #[test]

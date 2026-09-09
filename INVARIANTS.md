@@ -91,11 +91,52 @@ adds it here in the same change; a unit that deletes one removes it.
   units at. A `Preview` of a want and a refusal of it in one type, so the
   display could not hold the first without answering the second, would
   delete the arm.
-- A bot's frame may stand for one decision at an asteroid where no
-  builder of its seat stands or arrives: a unit lost in the step a want
-  lands in leaves a shortfall the plan answers at its next decision. A
-  plan that saw the step's deaths before its wants landed would delete it,
-  which the one-verb view cannot give.
+- `FightStage::of` takes its lateral by normalising the asteroid's
+  position and its axis by normalising what is left of the asteroid's
+  velocity once that lateral is taken out of it, and answers the zero
+  vector where either has no direction; `State::spawn_body` takes the
+  radial the same way. An asteroid's orbit is a bounded ellipse about a
+  central mass, so the position is never zero and the velocity never runs
+  along it, and no fight can reach the fallback: it would collapse a
+  stage onto the asteroid and leave its plane no normal to lift it off
+  the body or to spread a line across. An orbit that answered directions
+  rather than vectors, so a body
+  carried a radial and a tangent that exist by construction, would delete
+  both.
+- `Asteroid::toward_shell` answers the zero vector for a point at exactly
+  the asteroid's centre, where there is no direction out, so the return
+  term only damps a ship standing there. The term pushes out from every
+  other point inside the floor, a unit spawns at the floor or beyond it
+  and the stage's own plane stands off the body, so nothing steers to
+  that point. A push read from the asteroid's own radial, which every
+  orbit has, rather than from the ship's offset, which a ship at the
+  centre has not, would delete it, at the price of a push that leans one
+  way at every other point inside the floor.
+- `Threats::best` answers with no target where the shooter's team and
+  plating name no ranking of the roll. A ranking is built for every armed
+  row standing at the asteroid, and only a unit standing there and armed
+  ever asks, so the arm cannot be reached. A ranking read by the asking
+  entity rather than by a pair of values would delete it, at one ranking
+  per unit rather than one per pair.
+- `Ready` names a weapon by its place in its row, so a ready weapon that
+  is not a damage weapon is representable, and two arms answer for one:
+  `Fire::run` passes over a ready whose place holds no damage stats, and
+  `Fire::keep_stands` drops the keep of a ready whose place states no
+  range. Neither is reachable, since `ReadyWeapons::armed` arms only the
+  places `Row::damage_weapons` names and an entity never changes row. A
+  place minted only by `Row::damage_weapons`, with the damage stats
+  lifted out of `Weapon::Damage` into a type the row answers with rather
+  than an option, would delete both arms.
+- A bot's frame stands for one decision at an asteroid where no builder
+  of its seat stands or arrives. The funding pass justifies a want once
+  a decision, a second apart, while `Fulfilment` opens frames every tick
+  off the tick-start snapshot, so a builder killed or sent away between
+  two decisions leaves the want standing and a frame opens behind it.
+  The frame spends nothing, since no builder reaches it, and at the next
+  decision `Survey::frame_no_builder_fills` answers yes, `justified`
+  reads the want at zero and the frame is cancelled. A bot that surveyed
+  and funded every tick would delete it, at a survey and a funding pass
+  per seat per tick rather than one a second.
 
 ## Dependencies
 

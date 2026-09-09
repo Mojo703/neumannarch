@@ -21,16 +21,22 @@ impl Offence {
         };
         let garrison = personality.garrison(survey.threat_at(staging), unit_cost);
         let sending = match Offence::attacked(survey, personality, commitments, staging, garrison) {
-            Some(target) => {
+            Some(target) if Offence::wave_landed(survey, &weights, target) => {
                 commitments.committed = Some(target);
                 Offence::wave(survey, &weights, staging, target, garrison / unit_cost)
             }
-            None => Vec::new(),
+            _ => Vec::new(),
         };
         match sending.is_empty() {
             true => Offence::fill(survey, &weights, staging),
             false => sending,
         }
+    }
+
+    fn wave_landed(survey: &Survey, weights: &[(RowId, f64)], target: AsteroidId) -> bool {
+        weights
+            .iter()
+            .all(|(row, _)| survey.arriving(target, *row) == 0)
     }
 
     fn attacked(
@@ -67,13 +73,13 @@ impl Offence {
             if sent == 0 {
                 continue;
             }
-            let standing = survey.count(target, *row);
+            let homed = survey.count(target, *row);
             proposals.push(Proposal::at(
                 survey,
                 Reason::Offence,
                 target,
                 *row,
-                standing + sent,
+                homed + sent,
             ));
             proposals.push(stays);
         }

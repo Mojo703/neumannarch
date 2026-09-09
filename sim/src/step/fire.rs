@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::post::Post;
 use crate::roster::Weapon;
-use crate::state::{AssignedDamage, Ready, Rolls, Shooter, State};
+use crate::state::{AssignedDamage, Reach, Ready, Rolls, Shooter, State};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,9 +42,10 @@ impl<'a> Fire<'a> {
     pub(crate) fn run(self) -> Shots {
         let mut shots = Shots::default();
         let mut assigned = AssignedDamage::default();
-        for ready in self.ready() {
+        for ready in self.due() {
             let shooter = self.state.entity(ready.entity());
             let Some(here) = shooter.standing() else {
+                shots.lapse(&ready);
                 continue;
             };
             let Some(Weapon::Damage {
@@ -66,9 +67,11 @@ impl<'a> Fire<'a> {
                     plating: self.state[shooter.row()].plating,
                 },
                 roll.body_of(shooter).pos,
-                range.0,
+                Reach::WithinMeters(range.0),
                 &assigned,
+                ready.kept(),
             ) else {
+                shots.lapse(&ready);
                 continue;
             };
             let plating = self.state[self.state.entity(aim.target).row()].plating.0;
@@ -84,27 +87,57 @@ impl<'a> Fire<'a> {
                 ready.entity(),
                 ready.weapon(),
                 self.next_ready(ready.at(), rate.0),
+                Some(aim.target),
             ));
+        }
+        for ready in self.reloading() {
+            if !self.keep_stands(ready) {
+                shots.lapse(ready);
+            }
         }
         shots.exchanges = Shots::exchanged(&shots.hits, self.state);
         shots
     }
 
-    fn ready(&self) -> Vec<Ready> {
+    fn due(&self) -> Vec<Ready> {
         let now = Moment::at(self.state.time().next());
-        let mut ready: Vec<Ready> = self
+        let mut due: Vec<Ready> = self
             .state
             .ready()
             .filter(|ready| ready.at() < now)
             .cloned()
             .collect();
-        ready.sort_by(|a, b| {
+        due.sort_by(|a, b| {
             a.at()
                 .cmp(&b.at())
                 .then(a.entity().cmp(&b.entity()))
                 .then(a.weapon().cmp(&b.weapon()))
         });
-        ready
+        due
+    }
+
+    fn reloading(&self) -> impl Iterator<Item = &Ready> {
+        let now = Moment::at(self.state.time().next());
+        self.state.ready().filter(move |ready| ready.at() >= now)
+    }
+
+    fn keep_stands(&self, ready: &Ready) -> bool {
+        let Some(kept) = ready.kept() else {
+            return true;
+        };
+        let shooter = self.state.entity(ready.entity());
+        let Some(here) = shooter.standing() else {
+            return false;
+        };
+        let target = self.state.entity(kept);
+        if target.standing() != Some(here) {
+            return false;
+        }
+        let Some(range) = self.state[shooter.row()].damage_range(ready.weapon()) else {
+            return false;
+        };
+        let roll = &self.rolls[here];
+        roll.body_of(target).pos.distance(roll.body_of(shooter).pos) <= range
     }
 
     fn next_ready(&self, at: Moment, rate: f64) -> Moment {
@@ -114,6 +147,19 @@ impl<'a> Fire<'a> {
 }
 
 impl Shots {
+    fn lapse(&mut self, ready: &Ready) {
+        if ready.kept().is_some() {
+            self.ready
+                .push(Ready::new(ready.entity(), ready.weapon(), ready.at(), None));
+        }
+    }
+
+    pub(crate) fn hit_by(&self, target: EntityId, shooter: EntityId) -> bool {
+        self.hits
+            .iter()
+            .any(|hit| hit.target == target && hit.shooter == shooter)
+    }
+
     pub fn damage(&self) -> BTreeMap<EntityId, f64> {
         let mut damage: BTreeMap<EntityId, f64> = BTreeMap::new();
         for hit in &self.hits {

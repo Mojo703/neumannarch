@@ -12,7 +12,7 @@ pub const GRACE: Tick = Tick(30 * TICKS_PER_SECOND as u64);
 pub const STAGES_PER_SEAT: usize = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Stage {
+pub struct PlacementStage {
     pub seat: SeatId,
     pub row: RowId,
     pub placed: Option<AsteroidId>,
@@ -20,7 +20,7 @@ pub struct Stage {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Draft {
-    stages: Vec<Stage>,
+    stages: Vec<PlacementStage>,
     running: usize,
     began: Tick,
     ended: Option<Tick>,
@@ -55,7 +55,7 @@ impl Draft {
                     _ => order.len() - 1 - at,
                 }];
                 if let Some(row) = held(seat, round) {
-                    stages.push(Stage {
+                    stages.push(PlacementStage {
                         seat,
                         row,
                         placed: None,
@@ -71,11 +71,11 @@ impl Draft {
         }
     }
 
-    pub fn stages(&self) -> &[Stage] {
+    pub fn stages(&self) -> &[PlacementStage] {
         &self.stages
     }
 
-    pub fn running(&self) -> Option<Stage> {
+    pub fn running(&self) -> Option<PlacementStage> {
         self.stages.get(self.running).copied()
     }
 
@@ -144,7 +144,7 @@ mod tests {
         World::drafting(&teams, CLOCK)
     }
 
-    fn running(world: &World) -> Stage {
+    fn running(world: &World) -> PlacementStage {
         world.state.draft().running().expect("a stage is running")
     }
 

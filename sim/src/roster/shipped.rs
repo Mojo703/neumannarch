@@ -22,9 +22,7 @@ const HELD: Weights = Weights {
     wander: Real(0.3),
     returning: Real(1.0),
     separation: Real(20.0),
-    cohesion: Real(2.0),
-    caution: Real(8.0),
-    chase: Real(1.0),
+    station: Real(1.0),
 };
 
 pub(super) fn rows() -> Vec<Row> {
@@ -32,7 +30,7 @@ pub(super) fn rows() -> Vec<Row> {
         Row {
             manoeuvring: Real(1.0),
             steering: Weights {
-                caution: Real(12.0),
+                station: Real(0.0),
                 ..HELD
             },
             ..row(
@@ -73,9 +71,6 @@ pub(super) fn rows() -> Vec<Row> {
             manoeuvring: Real(2.0),
             steering: Weights {
                 wander: Real(0.5),
-                cohesion: Real(1.5),
-                caution: Real(5.0),
-                chase: Real(1.2),
                 ..HELD
             },
             ..row(
@@ -95,10 +90,7 @@ pub(super) fn rows() -> Vec<Row> {
         Row {
             plating: Real(1.0),
             manoeuvring: Real(1.25),
-            steering: Weights {
-                cohesion: Real(2.5),
-                ..HELD
-            },
+            steering: HELD,
             ..row(
                 "frigate",
                 Role::ShortFire,
@@ -115,12 +107,7 @@ pub(super) fn rows() -> Vec<Row> {
         },
         Row {
             manoeuvring: Real(0.75),
-            steering: Weights {
-                cohesion: Real(3.0),
-                caution: Real(12.0),
-                chase: Real(0.8),
-                ..HELD
-            },
+            steering: HELD,
             ..row(
                 "lancer",
                 Role::LongFire,
@@ -253,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn a_structure_holds_by_nothing_and_a_unit_by_every_term() {
+    fn a_structure_holds_by_nothing_and_a_unit_by_a_station_only_where_it_takes_one() {
         for (_, row) in Roster::shipped().iter() {
             match row.kind() {
                 Kind::Structure => assert_eq!(row.steering, Weights::STILL, "{}", row.name),
@@ -261,10 +248,32 @@ mod tests {
                     assert!(row.steering.returning.0 > 0.0, "{}", row.name);
                     assert!(row.steering.wander.0 > 0.0, "{}", row.name);
                     assert!(row.steering.separation.0 > 0.0, "{}", row.name);
-                    assert!(row.steering.cohesion.0 > 0.0, "{}", row.name);
-                    assert!(row.steering.caution.0 > 0.0, "{}", row.name);
+                    assert_eq!(
+                        row.steering.station.0 > 0.0,
+                        row.is_armed(),
+                        "{} weighs a station it never takes",
+                        row.name
+                    );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn every_shipped_row_that_is_armed_stands_off_the_stage_and_no_other_does() {
+        for (_, row) in Roster::shipped().iter() {
+            assert_eq!(
+                row.standoff().is_some(),
+                row.is_armed(),
+                "{} stands off the stage without a weapon to reach across it",
+                row.name
+            );
+            assert!(
+                row.standoff().is_none_or(|standoff| standoff > 0.0),
+                "{} stands off {:?}, on the far side of the stage's centre",
+                row.name,
+                row.standoff()
+            );
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::belt::Belt;
 use crate::materials::{Material, Materials};
 use crate::real::Real;
 use crate::roster::glyph::{Role, Tier};
@@ -27,9 +28,7 @@ pub struct Weights {
     pub wander: Real,
     pub returning: Real,
     pub separation: Real,
-    pub cohesion: Real,
-    pub caution: Real,
-    pub chase: Real,
+    pub station: Real,
 }
 
 impl Weights {
@@ -37,9 +36,7 @@ impl Weights {
         wander: Real(0.0),
         returning: Real(0.0),
         separation: Real(0.0),
-        cohesion: Real(0.0),
-        caution: Real(0.0),
-        chase: Real(0.0),
+        station: Real(0.0),
     };
 }
 
@@ -74,15 +71,31 @@ impl Row {
     }
 
     pub(crate) fn standoff(&self) -> Option<f64> {
-        let range = self.max_damage_range();
-        (range > 0.0).then_some(0.5 * range)
+        self.is_armed()
+            .then(|| 0.5 * (self.max_damage_range() - Belt::LINES_INSIDE_RANGE_METERS))
+    }
+
+    pub(crate) fn fires_past_its_lines(&self) -> bool {
+        self.damage_ranges()
+            .all(|range| range > Belt::LINES_INSIDE_RANGE_METERS)
+    }
+
+    pub(crate) fn runs_passes(&self) -> bool {
+        self.role == Role::ShortFire && self.is_armed()
     }
 
     pub fn max_damage_range(&self) -> f64 {
+        self.damage_ranges().fold(0.0, f64::max)
+    }
+
+    pub(crate) fn damage_ranges(&self) -> impl Iterator<Item = f64> + '_ {
+        self.weapons.iter().filter_map(Weapon::range)
+    }
+
+    pub(crate) fn damage_range(&self, weapon: u8) -> Option<f64> {
         self.weapons
-            .iter()
-            .filter_map(Weapon::range)
-            .fold(0.0, f64::max)
+            .get(usize::from(weapon))
+            .and_then(Weapon::range)
     }
 
     pub fn dps_through(&self, plating: f64) -> f64 {

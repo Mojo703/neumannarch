@@ -122,9 +122,10 @@ impl World {
     pub(crate) fn steers(&mut self, ticks: u64) {
         for _ in 0..ticks {
             let rolls = Rolls::called(&self.state);
-            let thrusts = Holding::of(&self.state, &rolls).run();
-            let moved = Propagation::of(&self.state, &thrusts).run();
+            let steering = Holding::of(&self.state, &rolls, &Shots::default()).run();
+            let moved = Propagation::of(&self.state, &steering.thrusts).run();
             drop(rolls);
+            steering.set_passes(&mut self.state);
             for step in moved.iter() {
                 self.state.steer(step.entity, step.body);
             }

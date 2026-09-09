@@ -6,7 +6,7 @@ use neumannarch_agents::{
 };
 use neumannarch_protocol::{Bot, Record};
 use neumannarch_sim::belt::Belt;
-use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
+use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row};
 use neumannarch_sim::state::standings::Standings;
 use neumannarch_sim::state::{Batch, Command, Issued, Seat, State};
 use neumannarch_sim::{
@@ -32,21 +32,19 @@ const MIRRORS: u64 = 8;
 
 const SETTLED: Time = Time(90 * TICKS_PER_SECOND as u64);
 
-const AXES: [(&str, Axis); 6] = [
-    ("wander", |held, by| held.wander = Real(held.wander.0 * by)),
-    ("return", |held, by| {
-        held.returning = Real(held.returning.0 * by)
+const AXES: [(&str, Axis); 4] = [
+    ("wander", |row, by| {
+        row.steering.wander = Real(row.steering.wander.0 * by)
     }),
-    ("separation", |held, by| {
-        held.separation = Real(held.separation.0 * by)
+    ("return", |row, by| {
+        row.steering.returning = Real(row.steering.returning.0 * by)
     }),
-    ("cohesion", |held, by| {
-        held.cohesion = Real(held.cohesion.0 * by)
+    ("separation", |row, by| {
+        row.steering.separation = Real(row.steering.separation.0 * by)
     }),
-    ("caution", |held, by| {
-        held.caution = Real(held.caution.0 * by)
+    ("station", |row, by| {
+        row.steering.station = Real(row.steering.station.0 * by)
     }),
-    ("chase", |held, by| held.chase = Real(held.chase.0 * by)),
 ];
 
 const FACTORS: [(&str, f64); 2] = [("x3", 3.0), ("/3", 1.0 / 3.0)];
@@ -57,7 +55,7 @@ const ENGAGEMENT: Time = Time(90 * TICKS_PER_SECOND as u64);
 
 const FIELD: AsteroidId = AsteroidId(0);
 
-type Axis = fn(&mut Weights, f64);
+type Axis = fn(&mut Row, f64);
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -184,7 +182,7 @@ fn verified(clock: Tick) -> bool {
     let guarantees = Guarantees::over(&[Bot::Expand, Bot::Expand], clock);
     let trading = guarantees.both_sides_arm_and_trade_shots();
     held(
-        "no frame a bot opens outlives a decision at an asteroid with no builder of its seat",
+        "no frame of a bot outlives a decision at an asteroid where no builder of its seat stands or arrives",
         guarantees.no_frame_outlives_a_decision_without_a_builder(),
     ) & held(
         "two bots field armed units early and trade shots by the middle of the clock",
@@ -202,7 +200,7 @@ fn grew() -> bool {
     );
     let guarantees = Guarantees::over(&[Bot::Expand, Bot::Turtle], GROWTH_CLOCK);
     held(
-        "an expand bot's income never falls for a minute while a free asteroid is within reach, and it holds half of those within reach where a turtle keeps its drafted two",
+        "an expand bot never idles while free asteroids are within reach: it never stands a minute below the most it ever pulled and still has a free asteroid within reach at the end of it, and it holds half the asteroids within reach where a turtle keeps its drafted two",
         guarantees.an_expand_bot_grows_where_a_turtle_sits(),
     )
 }
@@ -587,8 +585,8 @@ fn swept() {
         "roster", "closed", "decided", "left", "mirrors"
     );
     for (name, roster) in variants() {
-        let ours = engage(roster.clone(), FRIGATE, LANCER);
-        let theirs = engage(roster, LANCER, FRIGATE);
+        let ours = Engagement::between(roster.clone(), FRIGATE, LANCER);
+        let theirs = Engagement::between(roster, LANCER, FRIGATE);
         println!(
             "{name:<16}{:>9}{:>9}{:>9}{:>9}",
             seconds(ours.closed),
@@ -621,12 +619,9 @@ fn variants() -> Vec<(String, Roster)> {
             variants.push((
                 format!("{name} {how}"),
                 Roster::shipped().units_by(|row| {
-                    let mut held = row.steering;
-                    axis(&mut held, by);
-                    Row {
-                        steering: held,
-                        ..row
-                    }
+                    let mut varied = row;
+                    axis(&mut varied, by);
+                    varied
                 }),
             ));
         }
@@ -635,12 +630,72 @@ fn variants() -> Vec<(String, Roster)> {
 }
 
 struct Engagement {
-    closed: Option<Tick>,
-    decided: Option<Tick>,
+    closed: Option<Time>,
+    decided: Option<Time>,
     survivors: (usize, usize),
 }
 
 impl Engagement {
+    fn between(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
+        let rows = [ours, theirs];
+        let seats: Vec<Seat> = rows
+            .iter()
+            .enumerate()
+            .map(|(at, row)| {
+                Seat::new(
+                    TeamId(u8::try_from(at).expect("two seats")),
+                    Materials::ZERO,
+                    BTreeMap::from([(*row, FORCE)]),
+                )
+            })
+            .collect();
+        let mut state = State::new(
+            ENGAGEMENT,
+            SEED,
+            Belt::GRAVITY,
+            roster,
+            Belt::from_seed(SEED),
+            seats,
+        );
+        while state.drafting() {
+            state = state.step(&Batch::default()).0;
+        }
+        let mut batch = Batch::default();
+        for (at, row) in rows.into_iter().enumerate() {
+            let issued = Issued {
+                seat: SeatId(u8::try_from(at).expect("two seats")),
+                seq: 0,
+                command: Command::Want {
+                    asteroid: FIELD,
+                    row,
+                    count: FORCE,
+                },
+            };
+            batch.insert(issued).expect("one want a seat");
+        }
+        let mut engagement = Engagement {
+            closed: None,
+            decided: None,
+            survivors: (0, 0),
+        };
+        let mut both_stood = false;
+        while state.time() < ENGAGEMENT && engagement.decided.is_none() {
+            let (next, _) = state.step(&batch);
+            batch = Batch::default();
+            state = next;
+            let living = force(&state, SeatId(0));
+            engagement.survivors = (living.len(), force(&state, SeatId(1)).len());
+            both_stood |= engagement.survivors.0 > 0 && engagement.survivors.1 > 0;
+            if engagement.closed.is_none() && closed(&state, &living) {
+                engagement.closed = Some(state.time());
+            }
+            if both_stood && engagement.survivors.0.min(engagement.survivors.1) == 0 {
+                engagement.decided = Some(state.time());
+            }
+        }
+        engagement
+    }
+
     fn winner(&self) -> Option<SeatId> {
         match self.survivors {
             (ours, theirs) if ours > theirs => Some(SeatId(0)),
@@ -654,61 +709,8 @@ fn swapped(seat: SeatId) -> SeatId {
     SeatId(1 - seat.0)
 }
 
-fn seconds(at: Option<Tick>) -> String {
-    at.map_or_else(|| "-".to_string(), |tick| format!("{:.1}", tick.seconds()))
-}
-
-fn engage(roster: Roster, ours: RowId, theirs: RowId) -> Engagement {
-    let seats = vec![
-        Seat::new(TeamId(0), Materials::ZERO, BTreeMap::from([(ours, FORCE)])),
-        Seat::new(
-            TeamId(1),
-            Materials::ZERO,
-            BTreeMap::from([(theirs, FORCE)]),
-        ),
-    ];
-    let mut state = State::new(
-        ENGAGEMENT,
-        SEED,
-        Belt::GRAVITY,
-        roster,
-        Belt::from_seed(SEED),
-        seats,
-    );
-    let mut engagement = Engagement {
-        closed: None,
-        decided: None,
-        survivors: (0, 0),
-    };
-    let mut placing = Batch::default();
-    for (at, row) in [ours, theirs].into_iter().enumerate() {
-        let seat = SeatId(u8::try_from(at).expect("two seats"));
-        let issued = Issued {
-            seat,
-            seq: 0,
-            command: Command::Want {
-                asteroid: FIELD,
-                row,
-                count: FORCE,
-            },
-        };
-        placing.insert(issued).expect("one want a seat");
-    }
-    let mut batch = placing;
-    while state.time() < ENGAGEMENT && engagement.decided.is_none() {
-        let (next, _) = state.step(&batch);
-        batch = Batch::default();
-        state = next;
-        let living = force(&state, SeatId(0));
-        engagement.survivors = (living.len(), force(&state, SeatId(1)).len());
-        if engagement.closed.is_none() && closed(&state, &living) {
-            engagement.closed = Some(state.tick());
-        }
-        if engagement.survivors.0 == 0 || engagement.survivors.1 == 0 {
-            engagement.decided = Some(state.tick());
-        }
-    }
-    engagement
+fn seconds(at: Option<Time>) -> String {
+    at.map_or_else(|| "-".to_string(), |time| format!("{:.1}", time.seconds()))
 }
 
 fn force(state: &State, seat: SeatId) -> Vec<EntityId> {

@@ -15,13 +15,17 @@ pub struct Funding {
 
 impl Funding {
     pub fn over(survey: &Survey, proposals: &[Proposal]) -> BTreeMap<Posting, u32> {
+        let asked: Vec<&Proposal> = proposals
+            .iter()
+            .filter(|proposal| !survey.frame_no_builder_fills(proposal.posting))
+            .collect();
         let mut intended: BTreeMap<Posting, u32> = BTreeMap::new();
-        for proposal in proposals {
+        for proposal in &asked {
             intended.entry(proposal.posting).or_insert(proposal.count);
         }
         let mut funding = Funding::new(survey, &intended);
         let mut wants: BTreeMap<Posting, u32> = BTreeMap::new();
-        for proposal in proposals {
+        for proposal in asked {
             if !wants.contains_key(&proposal.posting) && funding.affords(survey, proposal) {
                 wants.insert(proposal.posting, proposal.count);
             }
@@ -64,7 +68,7 @@ impl Funding {
             true => 0,
             false => short.min(self.spare(row)),
         };
-        let framed = u32::from(survey.frame_open(asteroid, row));
+        let framed = u32::from(survey.frame_open(asteroid, row) && survey.builds_at(asteroid));
         let building = short.saturating_sub(sent + framed);
         if building > 0 && !survey.builds_at(asteroid) {
             return false;
@@ -90,7 +94,10 @@ impl Funding {
 }
 
 pub(super) fn justified(survey: &Survey, posting: Posting) -> u32 {
+    if survey.frame_no_builder_fills(posting) {
+        return 0;
+    }
     let (asteroid, row) = (posting.asteroid(), posting.row());
-    let building = survey.frame_open(asteroid, row) && survey.builds_at(asteroid);
-    (survey.count(asteroid, row) + u32::from(building)).min(MAX_WANT)
+    let building = u32::from(survey.frame_open(asteroid, row));
+    (survey.count(asteroid, row) + building).min(MAX_WANT)
 }

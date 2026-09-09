@@ -51,7 +51,26 @@ garrison meets the threshold, nothing forwarded between waves (owner:
 left for the balance pass). And the turtle personality is to be
 considered for removal (owner, 2026-09-08), since it is only a
 slower expander now and nothing in it says hold what you have; one
-personality is the deletion. Found by the agent, a sim item: `Composition::builder` is
+personality is the deletion. Two more from the owner's play
+(2026-09-09), both for the same balance pass and neither urgent: late
+in a match a bot stops spending and sits at capacity on every material,
+building almost nothing and never attacking, and the fight the owner
+expects never comes. Measured over expand against expand at the full
+clock: both seats peg all three materials from about ten minutes to the
+end, seat 0 spending 36 a second against builders that could spend 687,
+with 25 armed units among 549 entities. The harness already holds the
+guarantee that catches this, and it fires at the full clock, naming
+552s to 612s; `check.sh` runs `harness verify 6` for speed and the
+behaviour starts after that window closes, so the gate has never seen
+it. Turning the gate up to the full clock makes it red until the bot is
+fixed, so the two go together. And a bot opens frames for many
+rows at once where it should open them one at a time, since build
+effort splits evenly across the frames at an asteroid and an extractor
+yields nothing until it completes, so N frames in parallel finish an
+extractor in N times the span one alone would take and the income
+lost is real. Serial beats parallel for any row whose yield starts at
+completion, which is the whole economy; the same shape is present late
+game and matters less there. Found by the agent, a sim item: `Composition::builder` is
 a yes or no while the bot needs the count of builders standing, and
 the flag disagrees with the row counts for a builder whose send is
 forming; the count belongs on the composition beside the flag.
@@ -91,8 +110,19 @@ and exchange shots by half; no stock sits at capacity for a minute
 while an armed row is affordable. The harness takes four names. The
 agent stops at red for the demolition review.
 
-In flight (2026-09-08): the bot rebuild on Opus, to the managers-and-
-funding design below; its demolition is reviewed and it is building.
+Landed and committed 2026-09-08 (the bot commit the owner allowed in
+advance): the bot rebuild, four managers and one funding pass, the
+registry of shipped bots, the contracts test per bot, the tests from
+the real start, the decision cap from the sim, the reaping fix. Fight
+numbers measured against the old holding rule for the combat unit's
+constants: fights at 2 to 4 asteroids in fifteen minutes; armed units
+of one seat at one asteroid max 23, median 5; of one row max 11,
+median 2; always two seats; zone 30 m, ranges 3, 6, 14 m. Chosen from
+them: stage offset 15 m outward, station spacing 2 m, stage width 20
+m along the radial (a rank of ten). Balance left open: expand grows to
+fifty asteroids and arms about seventy units; the wave fires at an
+undefended target with whatever stands; the turtle is crushed. The
+plan's own cap on commands is left to its test, not INVARIANTS.md.
 Found by it at HEAD and fixed in the tree by the overseer: the store
 listed the dead in store order and the ready weapons searched that
 list as if in id order, so some dead units kept their weapons and
@@ -101,55 +131,46 @@ and panicked. The dead are listed in id order now, and a test pins
 that reaping takes every dead unit's weapons whatever order they
 stand in; it fails on the old code. Goes into the bot unit's commit.
 
-In flight (2026-09-08, on the owner's word that play is going well
-and the next stage may start): the combat unit, on the fleet-combat
-researcher resumed as its builder, in sim/ only, red state first. The
-owner re-ruled the geometry after reading the plan: no side anchored
-on the asteroid, since both sides may hold structures there; the fight
-sits on the asteroid's stage, a point outward along the radial so it
-is below the asteroid on screen with the star up, the axis the orbital
-tangent, the lateral the radial, sides by team order (retrograde,
-prograde, then the circle divided), a side alone holding its side;
-unarmed units wander about the asteroid with no station; short-range
-is the role; no aim gate; a station spacing of the belt's own, its
-value and the stage's offset and width from measurements of our own
-fights (armed units per seat and row at contested asteroids), being
-taken by the bot agent. The text is in DESIGN.md's Holding paragraph
-as the proposal, with those constants unvalued. Before that ruling,
-the combat-feel unit, the holding rule rewritten from research into
-Homeworld 1's source, Homeworld 2 and Sins ship files, Empire at War's
-XML and Stellaris's behaviour blocks. The owner found the boids fights
-boring (everything clumps and trades fire) and measured with it: a ship
-arriving at the rim of a garrisoned asteroid sits 29 m off for forty
-seconds, since return pulls only outside the zone, wander drifts, and
-cohesion's kernel reaches 15 m while the garrison is 28 m away. The
-DESIGN.md text, ruled: at an asteroid each side's force has a centre,
-the mean position of its standing units, and where two sides stand the
-axis between the centres is the fight's line; a side alone has its
-axis from the asteroid outward and its centre at the asteroid. Every
-unit holds a station on its side of the axis at its row's stand-off
-from the enemy's centre, half its longest weapon range, so long-range
-rows stand behind short-range rows and the forces face each other as
-lines; along the line a row's units stand side by side at one spacing
-in id order; a unit steers to its station with the arrival steering
-capped at its manoeuvring limit, separation keeps stations apart; a
-structure's station is the asteroid so a garrison's line forms before
-its structures; an arrival steers to its station from the rim.
-Cohesion, caution and the chase go; an unarmed unit holds behind the
-line and never leaves the zone; no row chases a faster row. Short-range
-rows engage in passes: run at the fire rule's target, fire while
-closing and while the aim is good, break at a stated fraction of range
-along a direction turned off the approach by an angle from id and
-tick, fly out to the line, run again; a pass never leaves the zone,
-the break a chord inside it; long-range rows hold station and fire. The
-fire rule keeps its target tick to tick while in range and alive, and
-passes over a target already assigned lethal damage. Costs: one enum
-per standing unit for the pass with the break direction inside the
-breaking variant; one last-target per unit cleared on death; two
-centres per side per asteroid replacing the pairwise field sums (18
-percent of the tick). Sticky targets and the overkill penalty are
-Stellaris's weights; the pass is Homeworld 1's five states.
+For the owner's morning ruling, from the combat unit's build: the
+fight's `Stage` shares its name with the draft's `Stage` (DESIGN.md
+uses the word for both); one wants renaming. The stage's offset became
+a rule after the build showed a fixed 15 m put every row's station out
+of range of the asteroid (a lancer's station 22 m from an asteroid it
+hits at 14), stalling sieges and failing the turtle's contract: it is
+half the roster's longest damage range outward, 7 m shipped. The look
+tool's fight scene is a hand-placed fixture, not a stepped state, so
+it cannot show a pass or a rank; driving it from a stepped state, or
+putting the stage on the view so the display draws stations and
+lines, is a display unit. Balance: the wave fires at an undefended
+target with whatever stands.
 
+Built overnight, uncommitted, for the owner's morning review: the
+combat unit. The sim is green end to end (208 tests, gate clean); the
+tree is 164 lines smaller than HEAD; the tick is level with HEAD.
+Rulings the overseer made on the owner's delegation: the stage's
+offset is half the roster's longest weapon range (7 m shipped), a
+rule not a number; a row runs outward from the stage along the
+lateral, away from the star, so no station crosses the asteroid;
+spacing 2 m and width 20 m from our fights' numbers. Two bot
+guarantees fail under the new fight (a want at staging outliving its
+builder for two decisions; expand's income falling because the fight
+now destroys extractors); routed to the bot agent to fix in agents/
+only, the growth guarantee restated as never idling rather than never
+falling. Both fixed by the bot agent: the builderless frame was the
+offence manager re-proposing a wave every second while its units died
+at the target, now a wave goes only once the last has landed, which
+makes "nothing forwarded between waves" true; the growth watcher
+counts extractors destroyed and breaches only on a minute's fall with
+none lost and a free asteroid in reach. The whole gate is green on
+the overseer's own run, all four guarantees; the diff against HEAD
+is 25 files, 568 in, 656 out. Traces on the new fight: expand takes
+21 asteroids against a turtle where it took 53 and the turtle fields
+a real army (6935 value); a four-seat match drives one turtle off
+every asteroid. Balance, not defect: offence still arms one unit at
+one staging asteroid while economy spends on twenty. The fight
+screenshot is a hand-placed fixture and cannot show a pass or a
+rank; a display unit drives it from a stepped state. Awaiting the
+owner's review and word to commit.
 Landed and committed 2026-09-08 (e4e8cf5): the transfer unit. The two-impulse coast is replaced by a rendezvous
 rule: a flier thrusts at the movement limit along the difference
 between its relative velocity and the velocity it wants, straight at
@@ -350,7 +371,169 @@ Open from the draft unit:
 - The owner's arrival scene, the probes flying into the system during
   the draft: display only, not yet designed.
 
+## The construction overhaul, ruled 2026-09-09, not yet begun
+
+Designed with the owner across one session and ruled item by item. It
+begins only once the combat work is committed, since its first unit is
+atomic across 41 files.
+
+Why: with more rows the build menu clutters; the player has too few
+real choices; and nothing makes scaling wide cost anything against
+scaling up. The third is measured, not suspected. Expand against expand
+at the full clock ends with 44 asteroids, 437 extractors and 25 armed
+units, so a bot that optimises the win rule never fights.
+
+The rules, as ruled:
+- An asteroid gates what may be built there. A want for a row the
+  asteroid does not allow is refused by name.
+- A row states what it requires, what it excludes, and one row it
+  replaces. Replacing implies requiring. Requires means every named
+  row, not any one of them: a conjunction makes a branch fragile, and
+  fragility is what makes a structure worth killing and worth
+  defending. Transitive existence through the replaces chain covers the
+  ordinary upgrade so a retrofit does not un-build the fleet.
+- Nothing distinguishes a structure from a ship. A requirement names a
+  row and any entity of that row standing there satisfies it, so a
+  tier two constructor ship unlocks better defences by being required,
+  and a capability can walk: send it away and the asteroid falls back.
+- An asteroid supports one shipyard, whoever built it first, so a cheap
+  shipyard is a denial play and taking a rock means killing it.
+- Labs are the horizontal axis and are not capped. Tiers are vertical.
+  All the pressure against building everything everywhere rests on
+  shipyard exclusivity and retrofit cost; if the late game drifts to
+  one super-rock, that is the dial.
+- A destroyed structure drops its asteroid back down the tree, and
+  every frame of the rows it granted cancels and refunds that tick.
+- A tier two replaces its tier one by retrofit, paying the new cost in
+  full with nothing returned, tuned expensive. It needs no new verb:
+  wanting the tier two where the tier one stands opens a retrofit
+  frame, and the tier one keeps standing and granting until it
+  completes.
+- A variant is an ordinary row carrying a mark as it carries a tier. A
+  lab may remove a row and add another. Built things never change.
+- The row becomes `EntityPattern`, one enum variant per kind of entity,
+  with every stat a const method whose body is a match. No wildcard arm
+  at the root of any of those matches: the wildcard turns adding a
+  variant from a compile error into a silent default, which is the
+  failure this codebase most needs the compiler to catch. Or-patterns
+  listing variants replace it.
+- `Weapon` becomes `Effect`, since build and extract are not weapons.
+- The wire encodes the enum as a `u8` through `serde(into, try_from)`,
+  following `protocol/src/record.rs`. Without it serde writes the
+  variant name and a want grows from three bytes to eighteen. The
+  `try_from` is what deletes `Rejected::NoSuchRow`: an unknown row
+  stops being a command the sim rejects and becomes a frame the wire
+  refuses.
+- Factions are left open (owner, 2026-09-09), to be decided when
+  factions are built.
+
+Measured blast radius, read from the tree at e3dc9a9: 41 files mention
+`RowId`, 107 sites in sim, 58 in agents, 32 in game, 4 in protocol,
+plus 110 reads through the roster or state index. `.weapons` is read in
+8 places, so the `Effect` rename is small. The roster sits inside the
+hashed `State` and `Draft::of` reads it during construction, so taking
+it out re-baselines every hash the repo pins.
+
+The units, in order, each ending green but the second:
+1. `Weapon` to `Effect`. Eight sites.
+2. The enum, atomic. Deletes `RowId`, `Roster`, the nine row
+   constants, `get`, `len`, `Index<RowId>`, `units_by`, `NoSuchRow`,
+   and the roster's place in `State` and its hash. Every one of the 41
+   files breaks the moment the row stops being indexable, so it cannot
+   be staged gradually.
+3. The three relations and `satisfies`, with every relation empty, plus
+   the gate in `apply` and the retrofit at frame completion. Ends green
+   with behaviour unchanged, because an empty tree refuses nothing.
+4. Fill the tree. Roster design, not code, and not started.
+5. The wheel becomes asteroid-dependent; the glyph gains the mark; the
+   asteroid-state glyph lands.
+6. The bot learns the tree.
+
+Open inside it: what the construction turret is, since builder and
+constructor are both taken; and which visual channel carries the mark,
+since the glyph already spends its silhouette on the role and its base
+on the tier.
+
+## Measured this session, each needing a unit or a ruling
+
+- Four teams still interleave. Worst pair of enemy stations over the
+  armed rows: 2.000 m at two teams, 1.732 at three after the line cap,
+  0.707 at four. Separation only pushes inside 0.5, so at four teams
+  two lines sit inside each other with nothing parting them. No cap of
+  that shape reaches further, because two adjacent lines meet at a
+  corner and the stations either side of it sit half a station spacing
+  apart whatever the line's length. Fixing it means changing how sides
+  divide the circle, which is the owner's.
+- A stationed frigate cannot reach the structures on its own asteroid.
+  Its station stands about 7.6 m off the body and it reaches 6, so it
+  connects only while running, and spends 4.8 s of a 10 s cycle out of
+  range. Short rows can besiege only in passing.
+- The gate cannot see two of its own guarantees. `harness verify 6`
+  ends at 360s; the hoard guarantee fires at 552s and the
+  builderless-frame one at 675s at the full clock. Both pass at six
+  minutes with the behaviour present. Turning the clock up makes the
+  gate red until the late-game stall is fixed, so the two go together.
+- The pass now bottoms out at the enemy's reload, 30 ticks for a raider
+  and 60 for a frigate. Chatter is gone, no two-tick pass anywhere
+  against 94 percent before, but the median carried distance in a duel
+  is 0.55 to 0.76 m, near the 0.5 m at which a station counts as
+  reached. So the approach reads as a charge and the sustained fight as
+  jitter about the station. The lever for a slower pass is a weapon's
+  reload, not a new constant.
+
+Four nits from the blind review of the pass rule, recorded rather than
+folded into the unit that found them, each for whichever unit next
+touches its file:
+- `the_rule_reads_only_the_tick_it_is_given` runs Holding twice with an
+  empty `Shots` both times, so the one input this change added is
+  absent from the test that pins the phase to its snapshot. Give it a
+  runner with a prey and a `Shots` carrying that prey's hit.
+- `a_short_range_unit_turns_for_its_station_no_sooner_than_its_prey_reloads`
+  stands one frigate against one. With two enemies of unequal rates the
+  runner can re-target between turns, since threat is damage over hit
+  points and a damaged enemy rises, so no single row's reload bounds
+  the gap. The name claims more than the world it runs in.
+- `HeldUnit::place` looks the station up, then `passing` looks it up
+  again through the roll. Hand the first one down and the `None` case
+  becomes unrepresentable in one place instead of two.
+- `passing` opens with `runs_passes().then_some(())?`, a value computed
+  and thrown away where a plain early return says the same thing in the
+  register the rest of the module uses.
+
 ## Open, each for a ruling or a unit
+
+Ruled and queued (owner, 2026-09-09), the unit after the combat fixes:
+unarmed rows circle the rock. Found by the owner in play and measured:
+an unarmed unit arrives at the rim and never moves in, because the
+return term is exactly zero anywhere between the asteroid's floor and
+the zone, and stations go to armed rows only, so a constructor keeps
+wander and velocity damping alone. It lands 30.01 m off and sits at
+29.60 m twenty-two seconds later. The fix is a station, not a new
+steering term: every unarmed unit takes a place on a circle about the
+asteroid's body, at the floor plus one station spacing, on a plane
+whose normal is drawn from the unit's own identifier, so two builders
+never share a plane and a builder keeps its lean wherever it goes. The
+circle turns at a quarter of the speed that row's manoeuvring limit can
+hold at that radius, and places are spaced by identifier at the station
+spacing. A builder still reaches the whole zone to build; what changes
+is that it comes in from the rim and can be killed.
+
+Ruled and queued as the unit after that (owner, 2026-09-09):
+the shield holds its ground. A passing unit runs and does not break
+while an enemy stands within that enemy's own weapon range of an
+unarmed structure of the passing unit's side. Without it a defender
+that breaks off empties the enemy's range of armed targets and hands
+over its own refinery for the seconds it is away, since an unarmed
+structure has no threat and is shot only when nothing armed is in
+range. Build it as one fact per asteroid per team per tick, computed in
+the pass the roll already makes over its standing entities and read as
+a flag by every passing unit, never as a check per unit; it costs
+nothing at an asteroid holding one seat. The owner asked to be told if
+it costs more than noise: the tick at the last commit runs 0.30 ms at
+p50 with 1289 entities against a budget of 8.33 ms, so there is room.
+Queued behind it, a roster item: turrets, an armed structure. A turret
+carries threat, so it is a normal target and it frees a garrison from
+having to stand still to shield what it guards.
 
 From the owner's play (2026-09-08), each for a ruling before a unit:
 - The mouse wheel over a wheel's line sets that row's want, as the

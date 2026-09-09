@@ -5,16 +5,17 @@ pub use asteroid::Asteroid;
 pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
-pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
+pub use draft::{Draft, GRACE, PlacementStage, STAGE_SPAN, STAGES_PER_SEAT};
 pub use entities::Berth;
-pub(crate) use entities::{Entities, Entity, Motion};
+pub(crate) use entities::{Entities, Entity, Motion, Pass};
 pub(crate) use frame::Frame;
 pub use preview::{Preview, ShortfallFilling};
 pub(crate) use ready::{Ready, ReadyWeapons};
 pub(crate) use roll::{Roll, Rolls};
 pub use seat::Seat;
+pub use stage::{FightStage, Line};
 pub use standings::Standings;
-pub(crate) use threat::{AssignedDamage, Shooter};
+pub(crate) use threat::{AssignedDamage, Reach, Shooter};
 pub(crate) use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
@@ -363,8 +364,14 @@ impl State {
         self.wants.remove(&post);
     }
 
-    pub(crate) fn set_ready(&mut self, entity: EntityId, weapon: u8, at: Moment) {
-        self.ready.arm(entity, weapon, at);
+    pub(crate) fn set_ready(
+        &mut self,
+        entity: EntityId,
+        weapon: u8,
+        at: Moment,
+        kept: Option<EntityId>,
+    ) {
+        self.ready.arm(entity, weapon, at, kept);
     }
 
     pub(crate) fn refresh_capacities(&mut self) {
@@ -427,6 +434,7 @@ mod preview;
 mod ready;
 mod roll;
 mod seat;
+pub mod stage;
 pub mod standings;
 mod threat;
 pub mod view;

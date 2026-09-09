@@ -4,7 +4,7 @@ use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::Income;
 use crate::step::fire::{Fire, Shots};
 use crate::step::fulfilment::{Assigned, Fulfilment};
-use crate::step::holding::Holding;
+use crate::step::holding::{Holding, Steering};
 use crate::step::propagation::{Moved, Propagation};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,19 +33,20 @@ impl State {
         }
         let snap = &applied;
         let rolls = Rolls::called(snap);
-        let thrusts = Holding::of(snap, &rolls).run();
-        let moved = Propagation::of(snap, &thrusts).run();
+        let shots = Fire::of(snap, &rolls).run();
+        let steering = Holding::of(snap, &rolls, &shots).run();
+        let moved = Propagation::of(snap, &steering.thrusts).run();
         let filled = Fulfilment::of(snap).run();
         let income = Income::extracted(snap, &rolls);
         let work = Construction::of(snap, &rolls).run();
-        let shots = Fire::of(snap, &rolls).run();
-        let next = State::next(snap, &moved, &filled, &income, &work, &shots);
+        let next = State::next(snap, &moved, &steering, &filled, &income, &work, &shots);
         (next, Outcome { rejected, shots })
     }
 
     fn next(
         snap: &State,
         moved: &Moved,
+        steering: &Steering,
         filled: &Assigned,
         income: &Income,
         work: &Progress,
@@ -54,6 +55,7 @@ impl State {
         let mut next = snap.clone();
         let mut closing = Vec::new();
         move_bodies(&mut next, moved);
+        steering.set_passes(&mut next);
         fulfil(&mut next, snap, filled, &mut closing);
         income.apply(&mut next);
         build(&mut next, snap, work, &mut closing);
@@ -119,7 +121,7 @@ fn resolve(next: &mut State, shots: &Shots) {
         next.entities.hurt(target, damage);
     }
     for ready in &shots.ready {
-        next.set_ready(ready.entity(), ready.weapon(), ready.at());
+        next.set_ready(ready.entity(), ready.weapon(), ready.at(), ready.kept());
     }
 }
 
@@ -168,14 +170,14 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::{AsteroidId, EntityId, RowId, TeamId};
     use crate::materials::Material;
-    use crate::orbit::body::Gravity;
+    use crate::orbit::body::{Body, Gravity};
     use crate::post::Post;
     use crate::posting::Posting;
     use crate::roster::Roster;
     use crate::roster::{
         CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
     };
-    use crate::state::{Entity, MAX_WANT, Seat};
+    use crate::state::{Entity, MAX_WANT, Ready, Seat};
     use crate::time::Time;
     use crate::transfer::Transfer;
     use crate::{Materials, TICKS_PER_SECOND};
@@ -475,13 +477,26 @@ mod tests {
             .expect("the frigate fired");
         assert_eq!(hit.damage, 6.0, "six damage through no plating");
 
-        let shots = (world.state.entity(prey).hp() / hit.damage).ceil();
-        world.run((shots / 2.0 * f64::from(TICKS_PER_SECOND)) as u64 - interval);
-        assert!(world.still_holds(prey), "it died too soon");
+        let shots = (world.state.entity(prey).hp() / hit.damage).ceil() as u64;
+        let firing = shots * interval;
+        world.run(firing - interval);
+        assert!(
+            world.still_holds(prey),
+            "it died faster than a frigate fires"
+        );
 
-        world.run(2 * interval);
+        for _ in 0..firing {
+            if !world.still_holds(prey) {
+                break;
+            }
+            world.tick(&[]);
+        }
 
-        assert!(!world.still_holds(prey), "it outlived its hit points");
+        assert!(
+            !world.still_holds(prey),
+            "it outlived its hit points: the kill took more than twice the {firing} ticks \
+             a frigate's rate alone needs for {shots} shots"
+        );
         assert!(
             !world.state.ready().any(|ready| ready.entity() == prey),
             "a dead entity kept its weapons"
@@ -504,6 +519,174 @@ mod tests {
         assert!(
             world.shot_at(far, u64::from(TICKS_PER_SECOND)).is_none(),
             "an enemy beyond the weapon's range was fired on"
+        );
+    }
+
+    fn kept_by(world: &World, shooter: EntityId) -> Option<EntityId> {
+        world
+            .state
+            .ready()
+            .find(|ready| ready.entity() == shooter)
+            .and_then(Ready::kept)
+    }
+
+    #[test]
+    fn a_weapon_keeps_its_target_from_one_tick_to_the_next_until_it_dies() {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
+        let first = world.hold(1, STORAGE, asteroid(0), 2.0);
+        let second = world.hold(1, STORAGE, asteroid(0), 3.0);
+
+        let held: Vec<EntityId> = (0..5)
+            .filter_map(|_| {
+                world.run(u64::from(TICKS_PER_SECOND));
+                kept_by(&world, shooter)
+            })
+            .collect();
+
+        let kept = held.first().copied().expect("the lancer fired");
+        assert_eq!(held.len(), 5, "the lancer let its target go: {held:?}");
+        assert!(
+            held.iter().all(|target| *target == kept),
+            "it wandered off its target: {held:?}"
+        );
+        let other = if kept == first { second } else { first };
+        assert!(world.still_holds(other), "it split its fire");
+
+        let mut ticks = 0;
+        while world.still_holds(kept) && ticks < 120 * u64::from(TICKS_PER_SECOND) {
+            world.tick(&[]);
+            ticks += 1;
+        }
+        assert!(!world.still_holds(kept), "its target outlived the test");
+        assert_eq!(
+            kept_by(&world, shooter),
+            None,
+            "the keep outlived the target the reap took"
+        );
+
+        world.run(2 * u64::from(TICKS_PER_SECOND));
+
+        assert_eq!(
+            kept_by(&world, shooter),
+            Some(other),
+            "it did not take the survivor once its target died"
+        );
+    }
+
+    #[test]
+    fn a_weapon_lets_a_target_go_the_tick_it_leaves_the_weapons_range() {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let range = world.state[LANCER].max_damage_range();
+        let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
+        let strays = world.hold(1, CONSTRUCTOR, asteroid(0), range - 1.0);
+        world.run(u64::from(TICKS_PER_SECOND) + 1);
+        assert_eq!(kept_by(&world, shooter), Some(strays));
+
+        let body = world.state.body_of(world.state.entity(strays));
+        let away = world.state.asteroid_body(asteroid(0));
+        let radial = away.pos.normalized().expect("a radius");
+        world.state.steer(
+            strays,
+            Body::new(away.pos + radial * (range + 5.0), body.vel),
+        );
+        world.tick(&[]);
+
+        assert_eq!(
+            kept_by(&world, shooter),
+            None,
+            "the weapon kept a target its range no longer covers"
+        );
+    }
+
+    fn two_lancers_over_one_dying_store() -> (World, [EntityId; 2], [EntityId; 2]) {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let sooner = world.hold(0, LANCER, asteroid(0), 0.0);
+        let later = world.hold(0, LANCER, asteroid(0), 0.5);
+        let doomed = world.hold(1, STORAGE, asteroid(0), 1.0);
+        let spared = world.hold(1, STORAGE, asteroid(0), 1.5);
+        let hp = world.state.entity(doomed).hp();
+        world.state.entities.hurt(doomed, hp - 1.0);
+        assert!(sooner < later, "the shooters were spawned out of id order");
+        (world, [sooner, later], [doomed, spared])
+    }
+
+    #[test]
+    fn shots_resolve_in_ready_time_order_then_by_shooter_id() {
+        let (world, [sooner, later], [doomed, spared]) = two_lancers_over_one_dying_store();
+
+        let tied = world.shots().hits;
+
+        assert_eq!(tied.len(), 2, "both lancers fired once: {tied:?}");
+        assert_eq!(
+            (tied[0].shooter, tied[0].target),
+            (sooner, doomed),
+            "the shooters tied on their ready instant and the higher id took the kill"
+        );
+        assert_eq!(
+            (tied[1].shooter, tied[1].target),
+            (later, spared),
+            "the shooter that fired second was not spread off the target already dead"
+        );
+
+        let (mut world, [sooner, later], [doomed, spared]) = two_lancers_over_one_dying_store();
+        let at = world
+            .state
+            .ready()
+            .find(|ready| ready.entity() == later)
+            .expect("an armed lancer carries its ready instant")
+            .at();
+        world.state.set_ready(later, 0, at.after(-1.0), None);
+
+        let staggered = world.shots().hits;
+
+        assert_eq!(staggered.len(), 2, "both lancers fired once: {staggered:?}");
+        assert_eq!(
+            (staggered[0].shooter, staggered[0].target),
+            (later, doomed),
+            "the lancer ready a second sooner did not fire first"
+        );
+        assert_eq!(
+            (staggered[1].shooter, staggered[1].target),
+            (sooner, spared),
+            "the lancer ready later was not spread off the target already dead"
+        );
+    }
+
+    #[test]
+    fn a_force_spreads_its_fire_past_a_target_this_ticks_damage_already_kills() {
+        let mut world = World::started(&[TeamId(0), TeamId(1)]);
+        let range = world.state[LANCER].max_damage_range();
+        for at in 0..6 {
+            world.hold(0, LANCER, asteroid(0), f64::from(at) * 0.1);
+        }
+        let near = world.hold(1, CONSTRUCTOR, asteroid(0), range - 2.0);
+        let far = world.hold(1, CONSTRUCTOR, asteroid(0), range - 1.0);
+        let hp = world.state.entity(near).hp();
+
+        let hits = world.shots().hits;
+
+        let dealt: Vec<f64> = hits
+            .iter()
+            .filter(|hit| hit.target == near)
+            .map(|hit| hit.damage)
+            .collect();
+        let last = dealt
+            .last()
+            .copied()
+            .expect("the force fired at its target");
+        let total: f64 = dealt.iter().sum();
+        assert!(
+            total >= hp,
+            "the force left {near:?} alive, dealing {total} of {hp}"
+        );
+        assert!(
+            total - last < hp,
+            "a shot landed on {near:?} after this tick's damage already killed it"
+        );
+        assert!(
+            hits.iter().any(|hit| hit.target == far),
+            "every shot piled on one target"
         );
     }
 

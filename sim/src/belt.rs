@@ -67,11 +67,30 @@ impl Belt {
 
     pub const ZONE_RADIUS_METERS: f64 = 30.0;
 
-    pub(crate) const FIELD_SCALE_METERS: f64 = 15.0;
-
     pub(crate) const ARRIVAL_METERS: f64 = 7.5;
 
     pub const SPACING_METERS: f64 = 0.5;
+
+    pub(crate) const STATION_SPACING_METERS: f64 = 2.0;
+
+    pub(crate) const STATIONS_EACH_WAY: usize = 5;
+
+    pub(crate) const RANKS_BEHIND: usize = 5;
+
+    pub(crate) const LINES_INSIDE_RANGE_METERS: f64 = 1.0;
+
+    pub(crate) const REACHED_METERS: f64 = 0.5;
+
+    pub(crate) fn furthest_station_meters(
+        longest_damage_range_meters: f64,
+        standoff_meters: f64,
+    ) -> f64 {
+        let outward = 0.5 * longest_damage_range_meters;
+        let rear = standoff_meters + Self::RANKS_BEHIND as f64 * Self::STATION_SPACING_METERS;
+        let aside = Self::STATIONS_EACH_WAY as f64 * Self::STATION_SPACING_METERS;
+        let lift = ASTEROID_RADIUS_METERS + Self::SPACING_METERS;
+        libm::hypot(lift, outward + libm::hypot(rear, aside))
+    }
 
     pub fn inner_radius_meters() -> f64 {
         let gained = 1.0 + SHEAR_TURNS * REFERENCE_PERIOD_SECONDS / REFERENCE_MATCH_SECONDS;

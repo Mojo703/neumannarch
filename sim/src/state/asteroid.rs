@@ -39,10 +39,15 @@ impl Asteroid {
         self.pull.completed()
     }
 
-    pub fn strayed(&self, body: Body, pos: Vec3) -> f64 {
-        let distance = body.pos.distance(pos);
+    pub(crate) fn toward_shell(&self, body: Body, pos: Vec3) -> Vec3 {
+        let out = pos - body.pos;
+        let distance = out.length();
         let floor = self.radius() + Belt::SPACING_METERS;
-        (distance - Belt::ZONE_RADIUS_METERS).max(0.0) - (floor - distance).max(0.0)
+        let meters = match distance < floor {
+            true => floor - distance,
+            false => -(distance - Belt::ZONE_RADIUS_METERS).max(0.0),
+        };
+        out.normalized().map_or(Vec3::ZERO, |away| away * meters)
     }
 
     pub fn extract(&mut self, taken: Materials) {

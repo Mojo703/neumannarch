@@ -111,6 +111,10 @@ impl<'a> Survey<'a> {
         self.holding(asteroid, row).map_or(0, |held| held.present)
     }
 
+    pub fn arriving(&self, asteroid: AsteroidId, row: RowId) -> u32 {
+        self.holding(asteroid, row).map_or(0, |held| held.arriving)
+    }
+
     pub fn between(&self, from: AsteroidId, to: AsteroidId) -> f64 {
         match (self.view.asteroid_body(from), self.view.asteroid_body(to)) {
             (Some(from), Some(to)) => from.pos.distance(to.pos),
@@ -229,6 +233,10 @@ impl<'a> Survey<'a> {
         self.view
             .plan_of(self.posting(asteroid, row))
             .is_some_and(|plan| plan.building.is_some())
+    }
+
+    pub fn frame_no_builder_fills(&self, posting: Posting) -> bool {
+        self.frame_open(posting.asteroid(), posting.row()) && !self.builds_at(posting.asteroid())
     }
 
     pub fn spare_cap_at(&self, asteroid: AsteroidId, material: Material) -> f64 {

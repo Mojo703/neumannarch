@@ -106,6 +106,13 @@ for the one that talks to the owner. Project state lives in TODO.md.
   the finished unit before the next demolition begins; if the order is
   already broken, the unverified unit verifies in a copy of the tree
   with the other crates at HEAD, which is what its commit will hold.
+- An agent stops at a compiling tree (overseer's lesson, 2026-09-09).
+  Stopping on an ambiguity is right and stopping mid-deletion is not:
+  an agent asked its question with the variant already gone from the
+  enum and its call sites still naming it, and the owner's tree stayed
+  red while it waited. Every brief says to leave the tree compiling
+  before asking, and an idle notification is checked against
+  `cargo check` rather than believed.
 - Questions go on the question tool, always, even mid-conversation;
   "let's talk in chat" is for one exchange, not a standing rule.
 - Never edit with sed or a script, not even one line; it is the rule
