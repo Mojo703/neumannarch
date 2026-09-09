@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{Posting, RowId, SeatId, Tick, Time};
+use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId, Tick, Time};
 
-use crate::personality::Personality;
-use crate::played_match::PlayedMatch;
-use crate::roles::Roles;
+use neumannarch_protocol::Bot;
+
+use super::played_match::PlayedMatch;
+use crate::bots::scripted::roles::Roles;
 
 const BRIMMING: f64 = 0.99;
 
@@ -14,33 +15,43 @@ const HOARDING_SECONDS: f64 = 60.0;
 
 const BUILDERS_BUSY_SHARE: f64 = 0.9;
 
+const WITHIN_REACH_METERS: f64 = 6_000.0;
+
+const FALLING_SECONDS: f64 = 60.0;
+
+const DRAFTED_ASTEROIDS: u32 = 2;
+
 pub struct Guarantees {
     clock: Time,
-    seats: Vec<SeatId>,
+    seated: Vec<Bot>,
     unbuilt_frame: Option<String>,
     unbuilt: BTreeMap<SeatId, BTreeSet<Posting>>,
     hoard: Option<String>,
     fielded: BTreeMap<SeatId, Time>,
     traded: Option<Time>,
     full_since: BTreeMap<SeatId, Time>,
+    highest_income: BTreeMap<SeatId, (f64, Time)>,
+    income_fell: Option<String>,
+    growth: Option<String>,
 }
 
 impl Guarantees {
-    pub fn over(personalities: &[Personality], clock: Tick) -> Guarantees {
+    pub fn over(seated: &[Bot], clock: Tick) -> Guarantees {
         let roster = Roster::shipped();
         let army = Roles::of(&roster).army;
-        let mut played = PlayedMatch::of(personalities, clock);
+        let mut played = PlayedMatch::of(seated, clock);
         let mut watched = Guarantees {
             clock: Time(clock.0),
-            seats: (0..personalities.len())
-                .map(|at| SeatId(u8::try_from(at).expect("a seat a personality")))
-                .collect(),
+            seated: seated.to_vec(),
             unbuilt_frame: None,
             unbuilt: BTreeMap::new(),
             hoard: None,
             fielded: BTreeMap::new(),
             traded: None,
             full_since: BTreeMap::new(),
+            highest_income: BTreeMap::new(),
+            income_fell: None,
+            growth: None,
         };
         while !played.over() {
             played.advance();
@@ -48,9 +59,10 @@ impl Guarantees {
             for seat in played.decided().to_vec() {
                 watched.read_frames(&played.view(seat), &roster);
             }
-            for seat in watched.seats.clone() {
+            for seat in watched.seats() {
                 let view = played.view(seat);
                 watched.read_stockpile(&view, &roster, &army);
+                watched.read_income(&view);
                 if view
                     .present
                     .iter()
@@ -63,7 +75,12 @@ impl Guarantees {
                 watched.traded = Some(now);
             }
         }
+        watched.read_growth(&played);
         watched
+    }
+
+    pub fn an_expand_bot_grows_where_a_turtle_sits(&self) -> Option<&str> {
+        self.income_fell.as_deref().or(self.growth.as_deref())
     }
 
     pub fn no_frame_outlives_a_decision_without_a_builder(&self) -> Option<&str> {
@@ -73,7 +90,7 @@ impl Guarantees {
     pub fn both_sides_arm_and_trade_shots(&self) -> Option<String> {
         let arming = Time(self.clock.0 / 3);
         let trading = Time(self.clock.0 / 2);
-        for seat in &self.seats {
+        for seat in &self.seats() {
             let at = self.fielded.get(seat).copied();
             if at.is_none_or(|at| at > arming) {
                 return Some(format!(
@@ -92,6 +109,63 @@ impl Guarantees {
 
     pub fn no_stockpile_sits_full_with_builders_idle(&self) -> Option<&str> {
         self.hoard.as_deref()
+    }
+
+    fn seats(&self) -> Vec<SeatId> {
+        (0..self.seated.len())
+            .map(|at| SeatId(u8::try_from(at).expect("a seat a bot")))
+            .collect()
+    }
+
+    fn plays(&self, seat: SeatId, bot: Bot) -> bool {
+        self.seated.get(usize::from(seat.0)) == Some(&bot)
+    }
+
+    fn read_income(&mut self, view: &View) {
+        if self.income_fell.is_some() || !self.plays(view.seat, Bot::Expand) {
+            return;
+        }
+        let income = view.income.total();
+        let (highest, at) = self
+            .highest_income
+            .get(&view.seat)
+            .copied()
+            .unwrap_or((income, view.time));
+        let fallen = view.time.since(at).seconds() >= FALLING_SECONDS;
+        if income >= highest || (fallen && !free_within_reach(view)) {
+            self.highest_income.insert(view.seat, (income, view.time));
+        } else if fallen {
+            self.income_fell = Some(format!(
+                "seat {} pulled {income:.1} a second at {:.0}s, under the {highest:.1} it pulled at {:.0}s, with a free asteroid still within reach",
+                view.seat.0,
+                view.time.seconds(),
+                at.seconds()
+            ));
+        }
+    }
+
+    fn read_growth(&mut self, played: &PlayedMatch) {
+        let standings = played.state().standings();
+        for seat in self.seats() {
+            let view = played.view(seat);
+            let held = standings
+                .teams()
+                .get(usize::from(seat.0))
+                .map_or(0, |team| team.asteroids);
+            let reach = u32::try_from(within_reach(&view).len()).unwrap_or(u32::MAX);
+            if self.plays(seat, Bot::Expand) && 2 * held < reach {
+                self.growth = Some(format!(
+                    "the expand bot at seat {} held {held} asteroids of the {reach} within reach of the two it drafted",
+                    seat.0
+                ));
+            }
+            if self.plays(seat, Bot::Turtle) && held > DRAFTED_ASTEROIDS {
+                self.growth = Some(format!(
+                    "the turtle at seat {} held {held} asteroids, over the {DRAFTED_ASTEROIDS} it drafted",
+                    seat.0
+                ));
+            }
+        }
     }
 
     fn read_frames(&mut self, view: &View, roster: &Roster) {
@@ -170,6 +244,50 @@ impl Guarantees {
                 view.spend.total()
             ));
         }
+    }
+}
+
+fn within_reach(view: &View) -> Vec<AsteroidId> {
+    let drafted: Vec<AsteroidId> = view
+        .draft
+        .stages()
+        .iter()
+        .filter(|stage| stage.seat == view.seat)
+        .filter_map(|stage| stage.placed)
+        .collect();
+    view.terrain
+        .iter()
+        .map(|terrain| terrain.asteroid)
+        .filter(|asteroid| {
+            drafted
+                .iter()
+                .any(|from| apart(view, *from, *asteroid) <= WITHIN_REACH_METERS)
+        })
+        .collect()
+}
+
+fn free_within_reach(view: &View) -> bool {
+    within_reach(view)
+        .into_iter()
+        .any(|asteroid| !is_taken(view, asteroid))
+}
+
+fn is_taken(view: &View, asteroid: AsteroidId) -> bool {
+    view.compositions
+        .iter()
+        .filter(|(post, _)| post.asteroid == asteroid)
+        .any(|(_, composition)| {
+            composition
+                .rows
+                .values()
+                .any(|held| held.present + held.arriving > 0)
+        })
+}
+
+fn apart(view: &View, from: AsteroidId, to: AsteroidId) -> f64 {
+    match (view.asteroid_body(from), view.asteroid_body(to)) {
+        (Some(from), Some(to)) => from.pos.distance(to.pos),
+        _ => f64::INFINITY,
     }
 }
 

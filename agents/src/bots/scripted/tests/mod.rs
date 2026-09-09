@@ -1,0 +1,12 @@
+mod commitments;
+mod defence;
+mod dice;
+mod economy;
+mod expansion;
+mod funding;
+mod offence;
+mod personality;
+mod plan;
+mod ranking;
+mod roles;
+mod scripted;

@@ -4,9 +4,10 @@ use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{Retention, SeatId, Session, Setup, Stamped, TICKS_PER_SECOND, TeamId, Tick};
 
+use neumannarch_protocol::Bot;
+
 use crate::Seated;
-use crate::personality::Personality;
-use crate::scripted::Scripted;
+use crate::bots::Shipped;
 
 pub const BELT_SEED: u64 = 1;
 
@@ -39,20 +40,21 @@ impl PlayedMatch {
         }
     }
 
-    pub fn of(personalities: &[Personality], clock: Tick) -> PlayedMatch {
-        let teams = free_for_all(personalities.len());
+    pub fn of(seated: &[Bot], clock: Tick) -> PlayedMatch {
+        let teams = free_for_all(seated.len());
         let setup = Setup::new(teams, BELT_SEED, clock).expect("a match of these teams");
-        let seated = personalities
+        let roster = Roster::shipped();
+        let playing = seated
             .iter()
             .enumerate()
-            .map(|(at, personality)| {
+            .map(|(at, bot)| {
                 Seated::new(
-                    SeatId(u8::try_from(at).expect("a seat a personality")),
-                    Box::new(Scripted::new(personality.clone(), Roster::shipped())),
+                    SeatId(u8::try_from(at).expect("a seat a bot")),
+                    Shipped::of(*bot).seated(&roster),
                 )
             })
             .collect();
-        PlayedMatch::new(setup, seated)
+        PlayedMatch::new(setup, playing)
     }
 
     pub fn advance(&mut self) -> Vec<Stamped> {

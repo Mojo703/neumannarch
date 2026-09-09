@@ -279,18 +279,37 @@ sets one count.
   so the zone is a soft shell around the asteroid and no ship moves inside
   the asteroid. Separation: a weak push from any ship of any seat nearer
   than the spacing, the distance a pair settles at; weak, since
-  space is large. Cohesion: a pull up the gradient of its own side's
-  field, toward where its allies' strength is. Caution: a push down the
-  gradient of the enemy's field, weighted by how outnumbered the unit is
-  where it stands, so a unit in a strong group ignores it and a lone
-  unit falls back toward its allies. Chase: a pull toward the enemy
-  inside the zone its fire rule would choose (Weapons, Target
-  selection), to half the unit's longest weapon range from it, holding
-  there; the unit it chases is the unit it fires at, and a unit with
-  no damage weapon has no chase and only its other terms. Cohesion is
-  weighted so a force closes on its target as one body, which is what
-  makes a battle predictable; there is no facing. The rule is one module
-  and is replaceable whole.
+  space is large. Station: every armed unit holds a place on the
+  asteroid's stage. The stage is a point a stated distance outward from
+  the asteroid's body along its radial, inside the zone, so a fight sits
+  below the asteroid on the player's screen, where the star is always
+  up, and never under the structures, whichever sides own them. The
+  stage's axis is the asteroid's orbital tangent, so forces face each
+  other left and right across it, and its lateral is the radial, so a
+  row spreads up and down the screen. Sides take their places by team
+  order: the lowest team on the retrograde side, the next on the
+  prograde side, and more teams divide the circle about the stage evenly
+  in team order. A unit's station is on its side, at its row's stand-off
+  from the stage's centre along the axis, half its longest weapon range,
+  so long-range rows stand behind short-range rows; along the lateral
+  the units of a row stand side by side at the station spacing, one
+  constant of the belt, in id order, and a row wider than the stage
+  wraps into a further rank behind. A side alone at an asteroid holds
+  its side of the stage, so a garrison stands before an attacker
+  arrives, and an arrival walks from the rim to its station. A unit with
+  no damage weapon takes no station and keeps its motion about the
+  asteroid, wander and return. No row chases a faster row, and heading
+  never gates fire. Pass: a unit of a short-range row runs at the target
+  the fire rule gives it, fires whenever the target is in range, breaks
+  at a stated fraction of its range along a direction turned off its
+  approach by an angle drawn from its id and the tick within a stated
+  band, returns to its station and runs again; a long-range row holds
+  its station and fires from it; return stays in the sum throughout, so
+  a pass never leaves the zone. The fire rule keeps its target from one
+  tick to the next while the target is in range and alive, and passes
+  over a target whose assigned damage this tick already kills it, so a
+  force spreads its fire along the enemy line. There is no facing. The
+  rule is one module and is replaceable whole.
 - A flying unit is neither a shooter nor a target: battles happen at
   asteroids.
 

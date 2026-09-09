@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
-use neumannarch_agents::{Personality, Scripted, Seated};
+use neumannarch_agents::{Seated, Shipped};
 use neumannarch_game::net::connection::Connection;
 use neumannarch_game::net::listener::Listener;
 use neumannarch_game::net::machine::Machine;
@@ -204,10 +204,7 @@ fn decide(machine: &mut Machine, agent: &mut Seated) {
 fn seated(seat: SeatId, bot: Bot) -> Seated {
     Seated::new(
         seat,
-        Box::new(Scripted::new(
-            Personality::of(bot),
-            neumannarch_sim::roster::Roster::shipped(),
-        )),
+        Shipped::of(bot).seated(&neumannarch_sim::roster::Roster::shipped()),
     )
 }
 

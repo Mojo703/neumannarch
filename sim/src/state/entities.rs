@@ -192,7 +192,7 @@ impl Entities {
 
     pub(crate) fn reap(&mut self) -> Vec<EntityId> {
         let dead: Vec<EntityId> = self
-            .iter()
+            .in_id_order()
             .filter(|entity| entity.hp() <= 0.0)
             .map(Entity::id)
             .collect();

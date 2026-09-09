@@ -2,22 +2,22 @@ use std::collections::BTreeMap;
 
 use neumannarch_sim::{AsteroidId, Time};
 
-use crate::survey::Survey;
+use super::survey::Survey;
 
 const CLAIM_PATIENCE: f64 = 90.0;
 
 const CLAIM_BAR: f64 = 120.0;
 
-const SAVING_BEGINS: f64 = 1.5;
+pub(super) const AHEAD_BEGINS: f64 = 1.5;
 
-const SAVING_ENDS: f64 = 1.1;
+pub(super) const AHEAD_ENDS: f64 = 1.1;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Commitments {
     claims: BTreeMap<AsteroidId, Time>,
     barred: BTreeMap<AsteroidId, Time>,
     pub committed: Option<AsteroidId>,
-    pub holding_back_army: bool,
+    pub army_ahead: bool,
 }
 
 impl Commitments {
@@ -67,16 +67,15 @@ impl Commitments {
         {
             self.committed = None;
         }
-        self.holding_back_army = self.saving(survey);
+        self.army_ahead = self.ahead(survey);
     }
 
-    fn saving(&self, survey: &Survey) -> bool {
+    fn ahead(&self, survey: &Survey) -> bool {
         let own = survey.army();
         let enemy = survey.enemy();
-        let rising = survey.view.income.total() > survey.view.spend.total();
-        match self.holding_back_army {
-            false => own > 0.0 && own > SAVING_BEGINS * enemy && rising,
-            true => own >= SAVING_ENDS * enemy,
+        match self.army_ahead {
+            false => own > 0.0 && own > AHEAD_BEGINS * enemy,
+            true => own >= AHEAD_ENDS * enemy,
         }
     }
 }

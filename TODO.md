@@ -91,8 +91,66 @@ and exchange shots by half; no stock sits at capacity for a minute
 while an armed row is affordable. The harness takes four names. The
 agent stops at red for the demolition review.
 
-Built and verified 2026-09-08, awaiting the owner's word to commit:
-the transfer unit. The two-impulse coast is replaced by a rendezvous
+In flight (2026-09-08): the bot rebuild on Opus, to the managers-and-
+funding design below; its demolition is reviewed and it is building.
+Found by it at HEAD and fixed in the tree by the overseer: the store
+listed the dead in store order and the ready weapons searched that
+list as if in id order, so some dead units kept their weapons and
+fire looked one up seven minutes into an expand-against-turtle match
+and panicked. The dead are listed in id order now, and a test pins
+that reaping takes every dead unit's weapons whatever order they
+stand in; it fails on the old code. Goes into the bot unit's commit.
+
+In flight (2026-09-08, on the owner's word that play is going well
+and the next stage may start): the combat unit, on the fleet-combat
+researcher resumed as its builder, in sim/ only, red state first. The
+owner re-ruled the geometry after reading the plan: no side anchored
+on the asteroid, since both sides may hold structures there; the fight
+sits on the asteroid's stage, a point outward along the radial so it
+is below the asteroid on screen with the star up, the axis the orbital
+tangent, the lateral the radial, sides by team order (retrograde,
+prograde, then the circle divided), a side alone holding its side;
+unarmed units wander about the asteroid with no station; short-range
+is the role; no aim gate; a station spacing of the belt's own, its
+value and the stage's offset and width from measurements of our own
+fights (armed units per seat and row at contested asteroids), being
+taken by the bot agent. The text is in DESIGN.md's Holding paragraph
+as the proposal, with those constants unvalued. Before that ruling,
+the combat-feel unit, the holding rule rewritten from research into
+Homeworld 1's source, Homeworld 2 and Sins ship files, Empire at War's
+XML and Stellaris's behaviour blocks. The owner found the boids fights
+boring (everything clumps and trades fire) and measured with it: a ship
+arriving at the rim of a garrisoned asteroid sits 29 m off for forty
+seconds, since return pulls only outside the zone, wander drifts, and
+cohesion's kernel reaches 15 m while the garrison is 28 m away. The
+DESIGN.md text, ruled: at an asteroid each side's force has a centre,
+the mean position of its standing units, and where two sides stand the
+axis between the centres is the fight's line; a side alone has its
+axis from the asteroid outward and its centre at the asteroid. Every
+unit holds a station on its side of the axis at its row's stand-off
+from the enemy's centre, half its longest weapon range, so long-range
+rows stand behind short-range rows and the forces face each other as
+lines; along the line a row's units stand side by side at one spacing
+in id order; a unit steers to its station with the arrival steering
+capped at its manoeuvring limit, separation keeps stations apart; a
+structure's station is the asteroid so a garrison's line forms before
+its structures; an arrival steers to its station from the rim.
+Cohesion, caution and the chase go; an unarmed unit holds behind the
+line and never leaves the zone; no row chases a faster row. Short-range
+rows engage in passes: run at the fire rule's target, fire while
+closing and while the aim is good, break at a stated fraction of range
+along a direction turned off the approach by an angle from id and
+tick, fly out to the line, run again; a pass never leaves the zone,
+the break a chord inside it; long-range rows hold station and fire. The
+fire rule keeps its target tick to tick while in range and alive, and
+passes over a target already assigned lethal damage. Costs: one enum
+per standing unit for the pass with the break direction inside the
+breaking variant; one last-target per unit cleared on death; two
+centres per side per asteroid replacing the pairwise field sums (18
+percent of the tick). Sticky targets and the overkill penalty are
+Stellaris's weights; the pass is Homeworld 1's five states.
+
+Landed and committed 2026-09-08 (e4e8cf5): the transfer unit. The two-impulse coast is replaced by a rendezvous
 rule: a flier thrusts at the movement limit along the difference
 between its relative velocity and the velocity it wants, straight at
 the destination at the speed the limit can stop from over the
@@ -382,6 +440,23 @@ From the owner's play (2026-09-08), each for a ruling before a unit:
 - Standings in a match: a page over the match toggled by a key with
   per-team standings, shaped as Beyond All Reason's stats page. A design
   conversation on its content before DISPLAY.md gains it.
+- Test worlds start from the real game start (owner, 2026-09-08): the
+  owner does not want tests building states the game never has. The
+  agents' fixture is being moved to `Setup::new` and `State::start` in
+  the bot unit; the sim's `World::ring`, `World::seated` and the
+  hand-set stocks and caps its 200 tests build on are the same defect
+  at a larger scale, a unit of its own after the fight rules land.
+- The gate's verify now plays a fifteen-minute match for the growth
+  guarantee and takes 34 seconds, up from seven; if it grows again,
+  the growth guarantee moves out of the gate to a pre-commit command.
+- Bot refinement by rating (owner, 2026-09-08): after the bot's shape,
+  the fight rules and the harness's balance questions have landed, not
+  before, since a rating measures bots on one set of rules and folds
+  the rules' balance into bot strength. First a round robin against a
+  frozen reference over many seeds with the personality's numbers as
+  the variables and a confidence interval; Elo once there is a
+  population of personalities and variants. A fifteen-minute match is
+  about ten seconds in release, so a few hundred matches is an hour.
 - Fable's wheel proposals, not built, for the owner: asteroid names in
   phrases; total HP on the fight bar's hover; a live send line from
   wheel to pointer; the hint phrase advancing.
@@ -428,6 +503,10 @@ against the code at every session start.
   Plan 6.
 - DESIGN World, Entity and Sends: one movement limit; the sim solves one
   schedule per row from a per-row acceleration. Plan 1e or the belt.
+- DESIGN Start: a seat whose draft stages lapse may place its reserve
+  from the free asteroids at any later tick; the code never places it
+  afterwards (found by the bot unit's tests, 2026-09-08; unreachable
+  while a bot holds its own seat). A draft unit or the columns unit.
 - DESIGN Movement and combat, Chase: a unit chases an enemy inside the
   zone; the code's chase targets any enemy homed at the asteroid
   wherever it stands, and both the chase and the return term saturate

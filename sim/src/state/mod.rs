@@ -448,6 +448,25 @@ mod tests {
         World::ring(GRAVITY, 1, &[TeamId(0), TeamId(0)])
     }
 
+    #[test]
+    fn reaping_the_dead_takes_every_dead_units_weapons_whatever_order_they_stand_in() {
+        let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)]);
+        let armed = crate::roster::RAIDER;
+        let later_asteroid_first = world.hold(0, armed, AsteroidId(1), 0.0);
+        let earlier_asteroid_second = world.hold(0, armed, AsteroidId(0), 0.0);
+        for unit in [later_asteroid_first, earlier_asteroid_second] {
+            world.state.entities.hurt(unit, f64::MAX);
+        }
+
+        world.state.reap();
+
+        assert!(
+            world.state.ready().next().is_none(),
+            "a dead unit kept a weapon: {:?}",
+            world.state.ready().map(Ready::entity).collect::<Vec<_>>()
+        );
+    }
+
     fn row_of(state: &State, kind: Kind) -> RowId {
         state
             .roster()

@@ -1,7 +1,7 @@
 use mirage_engine::egui::{Align2, Color32, Pos2, Rect, Vec2};
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::FrameCtx;
-use neumannarch_agents::Personality;
+use neumannarch_agents::Shipped;
 use neumannarch_protocol::{
     Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, Occupant, PlayerId, Refused, Seating,
 };
@@ -532,7 +532,7 @@ pub(crate) fn player_name(player: PlayerId) -> String {
 
 pub fn occupant_name(occupant: Occupant, me: PlayerId) -> String {
     match occupant {
-        Occupant::Bot(bot) => titled(Personality::of(bot).name),
+        Occupant::Bot(bot) => titled(Shipped::of(bot).name),
         Occupant::Player(player) if player == me => "You".to_string(),
         Occupant::Player(player) => player_name(player),
     }

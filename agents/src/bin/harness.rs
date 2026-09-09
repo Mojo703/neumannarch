@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use neumannarch_agents::{
-    Guarantees, Mix, Personality, PlayedMatch, Scripted, Seated, free_for_all, minutes,
+    Guarantees, Mix, Personality, PlayedMatch, Scripted, Seated, Shipped, free_for_all, minutes,
 };
-use neumannarch_protocol::Record;
+use neumannarch_protocol::{Bot, Record};
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster, Row, Weights};
 use neumannarch_sim::state::standings::Standings;
@@ -15,6 +15,8 @@ use neumannarch_sim::{
 };
 
 const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+
+const GROWTH_CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
 
 const MATRIX_CLOCK: Tick = Tick(5 * 60 * TICKS_PER_SECOND as u64);
 
@@ -179,7 +181,7 @@ fn verified(clock: Tick) -> bool {
         "guarantees over {} minutes, expand against expand",
         clock.seconds() / 60.0
     );
-    let guarantees = Guarantees::over(&[Personality::expand(), Personality::expand()], clock);
+    let guarantees = Guarantees::over(&[Bot::Expand, Bot::Expand], clock);
     let trading = guarantees.both_sides_arm_and_trade_shots();
     held(
         "no frame a bot opens outlives a decision at an asteroid with no builder of its seat",
@@ -190,6 +192,18 @@ fn verified(clock: Tick) -> bool {
     ) & held(
         "no bot sits at its capacity for a minute with builders idle while an armed row is affordable",
         guarantees.no_stockpile_sits_full_with_builders_idle(),
+    ) & grew()
+}
+
+fn grew() -> bool {
+    println!(
+        "growth over {} minutes, expand against turtle",
+        GROWTH_CLOCK.seconds() / 60.0
+    );
+    let guarantees = Guarantees::over(&[Bot::Expand, Bot::Turtle], GROWTH_CLOCK);
+    held(
+        "an expand bot's income never falls for a minute while a free asteroid is within reach, and it holds half of those within reach where a turtle keeps its drafted two",
+        guarantees.an_expand_bot_grows_where_a_turtle_sits(),
     )
 }
 
@@ -491,11 +505,8 @@ fn seats(named: &[&str]) -> Option<Vec<Seated>> {
         if *name == "none" {
             continue;
         }
-        let personality = Personality::named(name)?;
-        seated.push(Seated::new(
-            seat,
-            Box::new(Scripted::new(personality, roster())),
-        ));
+        let shipped = Shipped::named(name)?;
+        seated.push(Seated::new(seat, shipped.seated(&roster())));
     }
     Some(seated)
 }

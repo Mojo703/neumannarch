@@ -92,6 +92,20 @@ for the one that talks to the owner. Project state lives in TODO.md.
   drawing code itself; bulk logic and research go to Opus, register
   reviews to Sonnet. Keep the overseer's own output small; its tokens
   are the expensive ones.
+- A research agent is resumed for the unit its research shaped
+  (owner, 2026-09-08): it holds the context a fresh agent would have
+  to rebuild, so the brief goes to it by message rather than to a new
+  agent, with the reading rule and the rules of the work restated. So
+  research is dispatched close to the unit it serves, not far ahead:
+  an agent cools after it reports, and a survey done weeks before its
+  unit is a report to re-read rather than a context to resume.
+- Two units share the working tree even when they share no interface
+  (overseer's lesson, 2026-09-08): a red sim blocks every crate's gate
+  and every harness run, so a unit that is finished but unverified
+  cannot land once another has started its demolition. Land and commit
+  the finished unit before the next demolition begins; if the order is
+  already broken, the unverified unit verifies in a copy of the tree
+  with the other crates at HEAD, which is what its commit will hold.
 - Questions go on the question tool, always, even mid-conversation;
   "let's talk in chat" is for one exchange, not a standing rule.
 - Never edit with sed or a script, not even one line; it is the rule

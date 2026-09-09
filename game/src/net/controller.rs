@@ -1,4 +1,4 @@
-use neumannarch_agents::{Personality, Scripted, Seated};
+use neumannarch_agents::{Seated, Shipped};
 use neumannarch_protocol::{Crew, Occupant, Seating};
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::{Command, MAX_COMMANDS_PER_TICK};
@@ -24,10 +24,7 @@ impl Controller {
                     Controller::Human(Human::new(seat))
                 }
                 Occupant::Bot(bot) if crew.seats().contains(&seat) => {
-                    Controller::Bot(Box::new(Seated::new(
-                        seat,
-                        Box::new(Scripted::new(Personality::of(bot), roster.clone())),
-                    )))
+                    Controller::Bot(Box::new(Seated::new(seat, Shipped::of(bot).seated(roster))))
                 }
                 Occupant::Bot(_) | Occupant::Player(_) => Controller::Remote(seat),
             })

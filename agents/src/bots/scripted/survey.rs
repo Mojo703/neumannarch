@@ -3,10 +3,12 @@ use std::collections::BTreeMap;
 use neumannarch_sim::roster::{Kind, Roster};
 use neumannarch_sim::state::Held;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, RowId};
+use neumannarch_sim::{AsteroidId, Material, Materials, Posting, RowId};
 
-use crate::ranking::Ranking;
-use crate::roles::Roles;
+use super::ranking::Ranking;
+use super::roles::Roles;
+
+pub const REACH_METERS: f64 = 2_000.0;
 
 pub struct Survey<'a> {
     pub view: &'a View,
@@ -80,20 +82,33 @@ impl<'a> Survey<'a> {
         }
     }
 
+    pub fn posting(&self, asteroid: AsteroidId, row: RowId) -> Posting {
+        Posting::of(asteroid, self.view.seat, row)
+    }
+
     pub fn count(&self, asteroid: AsteroidId, row: RowId) -> u32 {
         self.holding(asteroid, row)
             .map_or(0, |held| held.present + held.arriving)
     }
 
-    pub fn standing(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row).map_or(0, |held| held.present)
+    pub fn postings(&self) -> Vec<Posting> {
+        let mut postings: Vec<Posting> = self
+            .mine
+            .iter()
+            .flat_map(|(asteroid, rows)| rows.keys().map(|row| self.posting(*asteroid, *row)))
+            .chain(self.view.plans.keys().copied())
+            .collect();
+        postings.sort_unstable();
+        postings.dedup();
+        postings
     }
 
-    pub fn owned(&self, row: RowId) -> u32 {
-        self.mine
-            .keys()
-            .map(|asteroid| self.count(*asteroid, row))
-            .sum()
+    pub fn want(&self, asteroid: AsteroidId, row: RowId) -> u32 {
+        self.view.want_of(self.posting(asteroid, row))
+    }
+
+    pub fn standing(&self, asteroid: AsteroidId, row: RowId) -> u32 {
+        self.holding(asteroid, row).map_or(0, |held| held.present)
     }
 
     pub fn between(&self, from: AsteroidId, to: AsteroidId) -> f64 {
@@ -113,10 +128,6 @@ impl<'a> Survey<'a> {
         self.roster
             .get(row)
             .is_some_and(|row| row.builds().next().is_some())
-    }
-
-    pub fn is_armed(&self, row: RowId) -> bool {
-        self.roster.get(row).is_some_and(|row| row.is_armed())
     }
 
     pub fn held(&self) -> Vec<AsteroidId> {
@@ -206,13 +217,6 @@ impl<'a> Survey<'a> {
             .sum()
     }
 
-    pub fn armed_count(&self, asteroid: AsteroidId) -> u32 {
-        self.rows(asteroid)
-            .filter(|(row, _)| self.is_armed(**row))
-            .map(|(_, held)| held.present + held.arriving)
-            .sum()
-    }
-
     pub fn enemy(&self) -> f64 {
         self.threats.values().sum()
     }
@@ -221,11 +225,80 @@ impl<'a> Survey<'a> {
         self.threats.get(&asteroid).copied().unwrap_or_default()
     }
 
-    pub fn frame_open_at(&self, asteroid: AsteroidId) -> bool {
+    pub fn frame_open(&self, asteroid: AsteroidId, row: RowId) -> bool {
         self.view
-            .plans
-            .iter()
-            .any(|(posting, plan)| posting.asteroid() == asteroid && plan.building.is_some())
+            .plan_of(self.posting(asteroid, row))
+            .is_some_and(|plan| plan.building.is_some())
+    }
+
+    pub fn spare_cap_at(&self, asteroid: AsteroidId, material: Material) -> f64 {
+        self.view
+            .terrain_of(asteroid)
+            .map_or(0.0, |terrain| {
+                terrain.caps[material] - terrain.pull[material]
+            })
+            .max(0.0)
+    }
+
+    pub fn spare_cap(&self, material: Material) -> f64 {
+        self.developed()
+            .into_iter()
+            .map(|asteroid| self.spare_cap_at(asteroid, material))
+            .sum()
+    }
+
+    pub fn threatened(&self) -> bool {
+        self.developed()
+            .into_iter()
+            .any(|asteroid| self.threat_at(asteroid) > 0.0)
+    }
+
+    pub fn short_of_room(&self, demand: Materials) -> bool {
+        Material::EVERY
+            .into_iter()
+            .any(|material| demand[material] > 0.0 && self.spare_cap(material) < demand[material])
+    }
+
+    pub fn standing_cost(&self) -> Materials {
+        self.mine
+            .values()
+            .flatten()
+            .filter_map(|(row, held)| {
+                self.roster
+                    .get(*row)
+                    .map(|stats| stats.cost * f64::from(held.present + held.arriving))
+            })
+            .fold(Materials::ZERO, |standing, cost| standing + cost)
+    }
+
+    pub fn fittest(&self, wanted: Materials) -> Option<AsteroidId> {
+        let held = self.held();
+        let nearest = |from: AsteroidId, among: &[AsteroidId]| -> Option<f64> {
+            among
+                .iter()
+                .map(|to| self.between(from, *to))
+                .min_by(f64::total_cmp)
+        };
+        Ranking::by(
+            self.view
+                .terrain
+                .iter()
+                .map(|terrain| terrain.asteroid)
+                .filter(|asteroid| !self.taken.contains(asteroid)),
+            |asteroid| {
+                let terrain = self.view.terrain_of(asteroid)?;
+                let fit: f64 = terrain
+                    .caps
+                    .amounts()
+                    .map(|(material, cap)| cap * wanted[material])
+                    .sum();
+                let away = nearest(asteroid, &self.enemy_asteroids)
+                    .map_or(1.0, |gap| gap / (gap + REACH_METERS));
+                let near = nearest(asteroid, &held).unwrap_or_default();
+                Some(fit * away / (1.0 + near / REACH_METERS))
+            },
+        )
+        .best()
     }
 
     pub fn wanting_more_at(&self, asteroid: AsteroidId) -> bool {
