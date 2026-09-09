@@ -185,7 +185,7 @@ mod tests {
     }
 
     fn floor(world: &World) -> f64 {
-        world.state[HOME].radius() + Belt::SPACING_METERS
+        world.state[HOME].floor_meters()
     }
 
     fn off_asteroid(world: &World, station: Vec3) -> f64 {
@@ -648,20 +648,29 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_with_no_damage_weapon_and_a_structure_however_armed_take_no_station() {
+    fn a_unit_with_no_damage_weapon_and_a_structure_however_armed_take_no_place_on_the_stage() {
         let mut world = world();
-        let builder = world.hold(0, CONSTRUCTOR, HOME, 0.0);
-        let fixed = world.fix(0, METALS_EXTRACTOR, HOME);
-        let armed_fixed = world.fix(0, FRIGATE, HOME);
+        world.hold(0, CONSTRUCTOR, HOME, 0.0);
+        world.fix(0, METALS_EXTRACTOR, HOME);
+        world.fix(0, FRIGATE, HOME);
         assert!(world.state[FRIGATE].is_armed());
 
-        let stations = stationed(&world, &[builder, fixed, armed_fixed]);
+        let stage = staged(&world);
 
-        assert_eq!(stations[0], None, "an unarmed unit took a station");
-        assert_eq!(stations[1], None, "an unarmed structure took a station");
         assert_eq!(
-            stations[2], None,
-            "a structure of an armed row took a station it can never move to"
+            stage.stations_of(TeamId(0), CONSTRUCTOR),
+            &[],
+            "an unarmed unit took a place on the stage"
+        );
+        assert_eq!(
+            stage.stations_of(TeamId(0), METALS_EXTRACTOR),
+            &[],
+            "an unarmed structure took a place on the stage"
+        );
+        assert_eq!(
+            stage.stations_of(TeamId(0), FRIGATE),
+            &[],
+            "a structure of an armed row took a place it can never move to"
         );
     }
 

@@ -1,10 +1,12 @@
+use core::f64::consts::TAU;
+
 use super::*;
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
 use crate::fixture::World;
 use crate::ids::{AsteroidId, RowId, TeamId};
 use crate::orbit::body::Gravity;
-use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, Weapon};
+use crate::roster::{CONSTRUCTOR, FRIGATE, Kind, LANCER, METALS_EXTRACTOR, RAIDER, Weapon};
 use crate::state::Rolls;
 use crate::time::{Tick, Time};
 
@@ -22,8 +24,55 @@ const PASSING_METERS: f64 = 1.0;
 
 const LONGEST_CROSSING: u64 = 600 * TICKS_PER_SECOND as u64;
 
+const CIRCLING_METERS: f64 = 1.0;
+
+const WALKING_METERS: f64 = 1.5;
+
+const SETTLING_SECONDS: u64 = 40;
+
 fn seconds(count: u64) -> u64 {
     count * u64::from(TICKS_PER_SECOND)
+}
+
+fn circle_radius(world: &World, asteroid: AsteroidId) -> f64 {
+    world.state[asteroid].radius() + Belt::SPACING_METERS + Belt::STATION_SPACING_METERS
+}
+
+fn unit_rows() -> Vec<(RowId, &'static str)> {
+    World::ring(FAST, 1, &[TeamId(0)])
+        .state
+        .roster()
+        .iter()
+        .filter(|(_, row)| row.kind() == Kind::Unit)
+        .map(|(id, row)| (id, row.name))
+        .collect()
+}
+
+fn walked(world: &mut World, unit: EntityId, asteroid: AsteroidId, samples: u32) -> Vec<Vec3> {
+    (0..samples)
+        .map(|_| {
+            world.steers(seconds(1) / 2);
+            world.body(unit).pos - world.state.asteroid_body(asteroid).pos
+        })
+        .collect()
+}
+
+fn turned(offsets: &[Vec3]) -> f64 {
+    offsets
+        .windows(2)
+        .filter_map(|pair| {
+            let from = pair[0].normalized()?;
+            let to = pair[1].normalized()?;
+            Some(libm::acos(from.dot(to).clamp(-1.0, 1.0)))
+        })
+        .sum()
+}
+
+fn plane(world: &mut World, unit: EntityId) -> Vec3 {
+    let first = world.body(unit).pos - world.state.asteroid_body(HOME).pos;
+    world.steers(seconds(5));
+    let then = world.body(unit).pos - world.state.asteroid_body(HOME).pos;
+    first.cross(then).normalized().expect("a plane it turns in")
 }
 
 fn reload_ticks(world: &World, row: RowId) -> u64 {
@@ -253,20 +302,140 @@ fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_p
 }
 
 #[test]
-fn an_unarmed_unit_never_closes_on_an_enemy_in_its_zone() {
+fn an_unarmed_unit_is_steered_by_no_enemy_in_its_zone() {
     let mut world = world();
     let builder = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
-    let prey = world.fix(1, METALS_EXTRACTOR, HOME);
-    let before = world.body(builder).pos.distance(world.body(prey).pos);
-    assert!(before > 20.0, "the builder starts on top of its enemy");
+    let mut alone = World {
+        state: world.state.clone(),
+    };
+    world.fix(1, METALS_EXTRACTOR, HOME);
 
-    world.steers(seconds(60));
+    for _ in 0..60 {
+        world.steers(seconds(1));
+        alone.steers(seconds(1));
+        assert_eq!(
+            world.body(builder).pos,
+            alone.body(builder).pos,
+            "an enemy in the zone steered an unarmed unit"
+        );
+    }
+}
 
-    let after = world.body(builder).pos.distance(world.body(prey).pos);
+#[test]
+fn an_unarmed_arrival_comes_in_from_the_rim_to_its_own_circle() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = neighbours(&world.state)
+        .first()
+        .copied()
+        .expect("the belt holds two kilometer hops");
+    let unit = flying(&mut world, CONSTRUCTOR, from, to);
+
+    arrival(&mut world, unit);
+    let landed = world.off_asteroid(unit, to);
     assert!(
-        after >= before,
-        "an unarmed unit closed from {before} to {after}"
+        landed > Belt::ZONE_RADIUS_METERS - PASSING_METERS,
+        "it arrived {landed} meters off, inside the rim"
     );
+
+    world.steers(seconds(SETTLING_SECONDS));
+
+    let radius = circle_radius(&world, to);
+    let off = world.off_asteroid(unit, to);
+    assert!(
+        (off - radius).abs() < CIRCLING_METERS,
+        "it holds {off} meters off the body, not on a circle of {radius}"
+    );
+    let rolls = Rolls::called(&world.state);
+    let station = rolls[to]
+        .station(unit)
+        .expect("an unarmed unit is stationed");
+    let behind = world.body(unit).pos.distance(station);
+    assert!(
+        behind < WALKING_METERS,
+        "it walks {behind} meters behind its station"
+    );
+}
+
+#[test]
+fn no_unit_of_the_shipped_roster_ever_enters_the_asteroid() {
+    for (row, name) in unit_rows() {
+        let mut world = world();
+        let units: Vec<EntityId> = (0..3)
+            .map(|at| world.hold(0, row, HOME, Belt::ZONE_RADIUS_METERS - f64::from(at)))
+            .collect();
+        let radius = world.state[HOME].radius();
+
+        for _ in 0..120 {
+            world.steers(seconds(1) / 2);
+            for one in &units {
+                let off = world.off_asteroid(*one, HOME);
+                assert!(off > radius, "a {name} holds {off} off a rock of {radius}");
+            }
+        }
+    }
+}
+
+#[test]
+fn an_unarmed_unit_circles_its_asteroid_within_a_minute_on_its_own_radius() {
+    let mut world = world();
+    let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    world.steers(seconds(SETTLING_SECONDS));
+    let radius = circle_radius(&world, HOME);
+
+    let offsets = walked(&mut world, unit, HOME, 120);
+
+    for offset in &offsets {
+        let off = offset.length();
+        assert!(
+            (off - radius).abs() < CIRCLING_METERS,
+            "it left a circle of {radius} for {off}"
+        );
+    }
+    let turned = turned(&offsets);
+    assert!(
+        turned > TAU,
+        "it turned {turned} radians about its asteroid in a minute"
+    );
+}
+
+#[test]
+fn two_unarmed_units_of_one_row_circle_on_two_planes_and_never_share_a_point() {
+    let mut world = world();
+    let one = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    let other = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
+    world.steers(seconds(SETTLING_SECONDS));
+
+    let mut closest = f64::MAX;
+    for _ in 0..120 {
+        world.steers(seconds(1) / 2);
+        closest = closest.min(world.body(one).pos.distance(world.body(other).pos));
+    }
+
+    assert!(
+        closest > 0.9 * Belt::SPACING_METERS,
+        "the pair closed to {closest} meters"
+    );
+    let aligned = plane(&mut world, one).dot(plane(&mut world, other));
+    assert!(
+        aligned.abs() < 0.99,
+        "the pair circles in one plane, its normals {aligned} aligned"
+    );
+}
+
+#[test]
+fn an_unarmed_units_circling_is_reproduced_by_a_rewind_to_the_same_tick() {
+    let mut world = world();
+    let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    let start = world.state.clone();
+    world.steers(seconds(30));
+    let once = world.body(unit).pos;
+
+    let mut again = World { state: start };
+    again.steers(seconds(30));
+
+    assert_eq!(again.body(unit).pos, once);
+    assert_eq!(again.state.hash(), world.state.hash());
+    assert_ne!(again.state.tick(), Tick::ZERO);
 }
 
 #[test]

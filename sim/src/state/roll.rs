@@ -2,6 +2,7 @@ use core::ops::{Index, Range};
 use std::collections::BTreeMap;
 
 use super::State;
+use super::circle::Circle;
 use super::entities::{Entities, Entity};
 use super::stage::{FightStage, Line};
 use super::threat::{Aim, AssignedDamage, Reach, Shooter, Threats};
@@ -52,7 +53,7 @@ impl<'a> Roll<'a> {
             state.roster(),
             &Line::standing_at(state, asteroid),
         );
-        let stations = manned
+        let mut stations: BTreeMap<EntityId, Vec3> = manned
             .iter()
             .flat_map(|((team, row), ids)| {
                 ids.iter()
@@ -60,6 +61,15 @@ impl<'a> Roll<'a> {
                     .zip(stage.stations_of(*team, *row).iter().copied())
             })
             .collect();
+        for ((_, row), ids) in &manned {
+            if state[*row].standoff().is_some() {
+                continue;
+            }
+            for id in ids {
+                let circle = Circle::of(*id, &state[*row], &state[asteroid], body);
+                stations.insert(*id, circle.station(state.time()));
+            }
+        }
         Roll {
             entities: &state.entities,
             asteroid,

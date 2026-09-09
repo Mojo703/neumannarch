@@ -425,6 +425,7 @@ impl IndexMut<SeatId> for State {
 }
 
 mod asteroid;
+mod circle;
 mod command;
 mod draft;
 mod entities;

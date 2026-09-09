@@ -112,6 +112,13 @@ adds it here in the same change; a unit that deletes one removes it.
   orbit has, rather than from the ship's offset, which a ship at the
   centre has not, would delete it, at the price of a push that leans one
   way at every other point inside the floor.
+- Two unarmed units can circle one plane from one starting phase. A
+  circle's plane and phase are drawn from the unit's identifier through
+  the digest, and nothing holds two draws apart, so a pair whose digests
+  collide holds one station; separation parts them there as it parts any
+  pair that meets. A plane taken from a fixed sequence per asteroid, the
+  nth unit standing at the nth plane, would delete it, at the price of a
+  unit that changed its circle whenever another arrived or died.
 - `Threats::best` answers with no target where the shooter's team and
   plating name no ranking of the roll. A ranking is built for every armed
   row standing at the asteroid, and only a unit standing there and armed

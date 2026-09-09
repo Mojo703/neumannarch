@@ -139,7 +139,7 @@ HP, and its home asteroid.
 |---|---|
 | role | what the row is for; it decides the glyph, and short-range fire runs passes where every other role holds its station; nothing else reads it |
 | manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and asteroids |
-| holding weights | one weight per term of the holding rule; the station weight is zero for a row that takes no station |
+| holding weights | one weight per term of the holding rule; every weight is zero for a structure, which never moves, and above zero for every unit |
 | HP | |
 | plating | flat damage reduction per hit |
 | weapons | see Weapons |
@@ -323,8 +323,24 @@ sets one count.
   the front, so two units share a station and separation parts them. A
   side alone at an asteroid holds its side of the stage, so a garrison
   stands before an attacker arrives, and an arrival walks from the rim
-  to its station. A unit with no damage weapon takes no station and
-  keeps its motion about the asteroid, wander, return and separation.
+  to its station.
+  A unit with no damage weapon takes no place on the fight stage and
+  holds a station on its own circle about the asteroid's body. The
+  circle's radius is the floor the return term keeps, the asteroid's
+  radius and one spacing, and one station spacing further out, so it
+  clears the rock and stands well inside the stage. Its plane is drawn
+  from the unit's own identifier, so no two units share one and a line
+  of them needs no spacing along an arc; separation parts the pair
+  wherever two circles cross, and a unit keeps its plane wherever it
+  goes. The circle turns at a quarter of the speed the row's
+  manoeuvring limit holds on a circle of that radius, from a starting
+  phase drawn from the identifier too, so two units of one row do not
+  begin together. The station is the point on the circle at the current
+  phase: it moves every tick and the unit circles by steering to it, by
+  the same station term at the same weight as an armed unit's. So an
+  unarmed unit comes in from the rim like every other, reaches the
+  whole zone to build from anywhere on its circle, and stands where an
+  enemy can reach and kill it.
   Heading never gates fire.
   Pass: a unit of a row whose role runs passes runs at the enemy of the
   highest threat standing inside the zone, at any distance, taking that

@@ -514,9 +514,11 @@ asteroid's body, at the floor plus one station spacing, on a plane
 whose normal is drawn from the unit's own identifier, so two builders
 never share a plane and a builder keeps its lean wherever it goes. The
 circle turns at a quarter of the speed that row's manoeuvring limit can
-hold at that radius, and places are spaced by identifier at the station
-spacing. A builder still reaches the whole zone to build; what changes
-is that it comes in from the rim and can be killed.
+hold at that radius. One ring per unit, not one per rock: two builders
+never share a plane, so nothing has to space them along an arc and
+separation covers the crossings. A builder still reaches the whole zone
+to build; what changes is that it comes in from the rim and can be
+killed.
 
 Ruled and queued as the unit after that (owner, 2026-09-09):
 the shield holds its ground. A passing unit runs and does not break

@@ -29,10 +29,7 @@ pub(super) fn rows() -> Vec<Row> {
     vec![
         Row {
             manoeuvring: Real(1.0),
-            steering: Weights {
-                station: Real(0.0),
-                ..HELD
-            },
+            steering: HELD,
             ..row(
                 "constructor",
                 Role::Build,
@@ -240,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn a_structure_holds_by_nothing_and_a_unit_by_a_station_only_where_it_takes_one() {
+    fn a_structure_holds_by_nothing_and_every_unit_by_every_term() {
         for (_, row) in Roster::shipped().iter() {
             match row.kind() {
                 Kind::Structure => assert_eq!(row.steering, Weights::STILL, "{}", row.name),
@@ -248,10 +245,9 @@ mod tests {
                     assert!(row.steering.returning.0 > 0.0, "{}", row.name);
                     assert!(row.steering.wander.0 > 0.0, "{}", row.name);
                     assert!(row.steering.separation.0 > 0.0, "{}", row.name);
-                    assert_eq!(
+                    assert!(
                         row.steering.station.0 > 0.0,
-                        row.is_armed(),
-                        "{} weighs a station it never takes",
+                        "{} weighs no station, and takes one armed or not",
                         row.name
                     );
                 }
