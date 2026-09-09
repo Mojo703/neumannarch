@@ -107,10 +107,6 @@ mod tests {
         let entries = [
             Entry::Present(2),
             Entry::Surplus(1),
-            Entry::Leaving {
-                count: 1,
-                to: AsteroidId(4),
-            },
             Entry::Building(Building {
                 progress: 0.5,
                 starved_of: None,

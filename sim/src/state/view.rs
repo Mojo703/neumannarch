@@ -169,7 +169,7 @@ fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
     state
         .entities
         .standing_at(asteroid)
-        .filter(|entity| entity.seat() == seat && entity.flight().is_none())
+        .filter(|entity| entity.seat() == seat)
         .any(|entity| state[entity.row()].builds().next().is_some())
 }
 
@@ -240,7 +240,7 @@ mod tests {
     use crate::roster::{
         CONSTRUCTOR, FRIGATE, METALS_EXTRACTOR, SHIPYARD, STORAGE, VOLATILES_EXTRACTOR,
     };
-    use crate::state::{Issued, Send};
+    use crate::state::Issued;
 
     const ASTEROID: AsteroidId = AsteroidId(0);
 
@@ -383,26 +383,10 @@ mod tests {
     }
 
     #[test]
-    fn a_forming_send_is_leaving_its_source_and_arriving_at_its_destination() {
+    fn a_send_leaves_its_source_holding_nothing_from_the_tick_it_is_re_homed() {
         let mut world = world();
         world.hold(0, FRIGATE, ASTEROID, 0.0);
         world.tick(&sent(0, ASTEROID, AWAY, FRIGATE));
-
-        let view = world.view(0);
-
-        let source = holding(&view, ASTEROID, 0, FRIGATE);
-        assert_eq!(source.leaving, 1, "it stands at the asteroid it is leaving");
-        assert_eq!(source.present, 0, "and is no longer counted as held there");
-        assert_eq!(holding(&view, AWAY, 0, FRIGATE).arriving, 1);
-        assert_eq!(view.present[0].at, Berth::Standing(ASTEROID));
-    }
-
-    #[test]
-    fn a_flying_send_leaves_its_source_holding_nothing() {
-        let mut world = world();
-        world.hold(0, FRIGATE, ASTEROID, 0.0);
-        world.tick(&sent(0, ASTEROID, AWAY, FRIGATE));
-        world.run(Send::FORMING_TICKS + 1);
 
         let view = world.view(0);
 
@@ -462,7 +446,6 @@ mod tests {
             Issued::numbered(1, 0, ASTEROID, FRIGATE, 0),
             Issued::numbered(1, 1, AWAY, FRIGATE, 1),
         ]);
-        world.run(Send::FORMING_TICKS + 1);
 
         for unit in [mine, theirs] {
             let flier = world.present(0, unit).expect("both fliers are in the view");

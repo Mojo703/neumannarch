@@ -167,7 +167,6 @@ struct Line {
 enum Mark {
     Here,
     Surplus,
-    Leaving,
     Arriving,
     Wanted,
 }
@@ -466,16 +465,12 @@ impl Wheel {
             Mark::Surplus => {
                 painter.circle_stroke(at, half * 0.7, stroke);
             }
-            Mark::Leaving | Mark::Arriving => {
-                let out = match line.mark {
-                    Mark::Arriving => -half,
-                    _ => half,
-                };
+            Mark::Arriving => {
                 painter.add(Shape::convex_polygon(
                     vec![
-                        egui::pos2(at.x + out, at.y),
-                        egui::pos2(at.x - out, at.y - half),
-                        egui::pos2(at.x - out, at.y + half),
+                        egui::pos2(at.x - half, at.y),
+                        egui::pos2(at.x + half, at.y - half),
+                        egui::pos2(at.x + half, at.y + half),
                     ],
                     colour,
                     Stroke::NONE,
@@ -652,7 +647,7 @@ fn says(shown: &Shown) -> u8 {
             ..
         }) => 3,
         Entry::Wanted { dashed: true, .. } => 2,
-        Entry::Leaving { .. } | Entry::Arriving { .. } => 1,
+        Entry::Arriving { .. } => 1,
         _ => 0,
     }
 }
@@ -907,15 +902,10 @@ fn lines(entries: &[Shown]) -> [(Mark, Vec<Shown>); 4] {
             .copied()
             .collect()
     };
-    let moving = of(&[Mark::Leaving, Mark::Arriving]);
-    let mark = match moving.first().map(|shown| marked(shown.entry)) {
-        Some(mark) => mark,
-        None => Mark::Arriving,
-    };
     [
         (Mark::Here, of(&[Mark::Here])),
         (Mark::Surplus, of(&[Mark::Surplus])),
-        (mark, moving),
+        (Mark::Arriving, of(&[Mark::Arriving])),
         (Mark::Wanted, of(&[Mark::Wanted])),
     ]
 }
@@ -924,7 +914,6 @@ fn marked(entry: Entry) -> Mark {
     match entry {
         Entry::Present(_) => Mark::Here,
         Entry::Surplus(_) => Mark::Surplus,
-        Entry::Leaving { .. } => Mark::Leaving,
         Entry::Arriving { .. } => Mark::Arriving,
         Entry::Building(_) | Entry::Wanted { .. } => Mark::Wanted,
     }

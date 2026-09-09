@@ -2,27 +2,25 @@ use super::*;
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
 use crate::fixture::World;
-use crate::ids::{AsteroidId, SeatId, TeamId};
+use crate::ids::{AsteroidId, TeamId};
 use crate::orbit::body::Gravity;
 use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER};
-use crate::state::{Flight, Rolls, Route, Send};
-use crate::time::Tick;
+use crate::state::Rolls;
+use crate::time::{Tick, Time};
 
 const FAST: Gravity = Gravity::new(4.4e17);
 
-const SLOW: Gravity = Gravity::new(4.0e13);
-
 const HOME: AsteroidId = AsteroidId(0);
 
-const AWAY: AsteroidId = AsteroidId(1);
+const NEIGHBOUR_METERS: core::ops::Range<f64> = 1_800.0..2_200.0;
 
-fn home_to_away() -> Route {
-    Route {
-        source: HOME,
-        destination: AWAY,
-        seat: SeatId(0),
-    }
-}
+const HOP_MARGIN_SECONDS: f64 = 0.5;
+
+const CROSSING_MARGIN_SECONDS: f64 = 6.0;
+
+const PASSING_METERS: f64 = 1.0;
+
+const LONGEST_CROSSING: u64 = 600 * TICKS_PER_SECOND as u64;
 
 fn seconds(count: u64) -> u64 {
     count * u64::from(TICKS_PER_SECOND)
@@ -30,6 +28,62 @@ fn seconds(count: u64) -> u64 {
 
 fn world() -> World {
     World::ring(FAST, 2, &[TeamId(0), TeamId(1)])
+}
+
+fn apart(state: &State, from: AsteroidId, to: AsteroidId) -> f64 {
+    state
+        .asteroid_body(from)
+        .pos
+        .distance(state.asteroid_body(to).pos)
+}
+
+fn least_seconds(state: &State, from: AsteroidId, to: AsteroidId) -> f64 {
+    2.0 * (apart(state, from, to) / state.roster().movement_limit().0).sqrt()
+}
+
+fn pairs(state: &State) -> Vec<(AsteroidId, AsteroidId)> {
+    let belt: Vec<AsteroidId> = state.asteroids().map(|(id, _)| id).collect();
+    belt.iter()
+        .flat_map(|from| belt.iter().map(move |to| (*from, *to)))
+        .filter(|(from, to)| from != to)
+        .collect()
+}
+
+fn neighbours(state: &State) -> Vec<(AsteroidId, AsteroidId)> {
+    pairs(state)
+        .into_iter()
+        .filter(|(from, to)| NEIGHBOUR_METERS.contains(&apart(state, *from, *to)))
+        .collect()
+}
+
+fn farthest(state: &State) -> (AsteroidId, AsteroidId) {
+    pairs(state)
+        .into_iter()
+        .max_by(|one, other| apart(state, one.0, one.1).total_cmp(&apart(state, other.0, other.1)))
+        .expect("the belt holds two asteroids")
+}
+
+fn flying(world: &mut World, from: AsteroidId, to: AsteroidId) -> EntityId {
+    let unit = world.hold(0, FRIGATE, from, 0.0);
+    world.state.re_home(unit, to);
+    unit
+}
+
+fn arrival(world: &mut World, unit: EntityId) -> Time {
+    for _ in 0..LONGEST_CROSSING {
+        if !world.state.entity(unit).is_flying() {
+            return world.state.time();
+        }
+        world.steers(1);
+    }
+    panic!("the flier never arrived");
+}
+
+fn crossing_seconds(world: &mut World, from: AsteroidId, to: AsteroidId) -> f64 {
+    let started = world.state.time();
+    let unit = flying(world, from, to);
+    let arrived = arrival(world, unit);
+    Time(arrived.0 - started.0).seconds()
 }
 
 fn spread(world: &World, force: &[EntityId]) -> f64 {
@@ -222,95 +276,6 @@ fn a_group_closes_on_its_fire_target_as_one_body() {
 }
 
 #[test]
-fn a_flight_ends_at_the_tick_its_schedule_arrives() {
-    let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
-    let flier = world.hold(0, FRIGATE, AWAY, 0.0);
-    let send =
-        Send::joining(&world.state, home_to_away(), &[flier]).expect("a send across the ring");
-    world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
-    let arrive = send.schedule.arrive();
-
-    world.steers(arrive.0 - world.state.tick().0 - 1);
-    assert!(
-        world.state.entity(flier).flight().is_some(),
-        "it arrived early"
-    );
-
-    world.steers(1);
-    assert!(
-        world.state.entity(flier).flight().is_none(),
-        "it is still flying"
-    );
-    assert_eq!(world.state.time(), arrive);
-}
-
-#[test]
-fn an_arrived_send_holds_inside_its_destinations_zone() {
-    let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
-    let force: Vec<EntityId> = [FRIGATE, CONSTRUCTOR, LANCER]
-        .into_iter()
-        .map(|row| world.hold(0, row, AWAY, 0.0))
-        .collect();
-    let send = Send::joining(&world.state, home_to_away(), &force).expect("a send across the ring");
-    for (at, one) in force.iter().enumerate() {
-        world.launch(
-            *one,
-            HOME,
-            at as f64 * 3.0,
-            Flight::new(HOME, send.schedule),
-        );
-    }
-
-    world.steers(send.schedule.arrive().0 - world.state.tick().0);
-    world.steers(seconds(60));
-
-    for one in &force {
-        let off = world.off_asteroid(*one, AWAY);
-        assert!(off < Belt::ZONE_RADIUS_METERS, "{one:?} holds {off} off");
-    }
-}
-
-#[test]
-fn a_flying_unit_is_given_no_thrust_and_holds_by_its_schedule_alone() {
-    let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
-    let flier = world.hold(0, FRIGATE, AWAY, 0.0);
-    let send =
-        Send::joining(&world.state, home_to_away(), &[flier]).expect("a send across the ring");
-    world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
-    let body = world.body(flier);
-    world.free(
-        0,
-        FRIGATE,
-        HOME,
-        Body::new(
-            body.pos + Vec3::new(0.1 * Belt::SPACING_METERS, 0.0, 0.0),
-            body.vel,
-        ),
-    );
-    let forming = Holding::of(&world.state, &Rolls::called(&world.state))
-        .run()
-        .of(flier);
-    assert_ne!(
-        forming,
-        Vec3::ZERO,
-        "a unit whose send is forming still holds at its asteroid"
-    );
-
-    while !world.state.entity(flier).is_flying() {
-        world.state.advance();
-    }
-
-    let flying = Holding::of(&world.state, &Rolls::called(&world.state))
-        .run()
-        .of(flier);
-    assert_eq!(
-        flying,
-        Vec3::ZERO,
-        "a flier is steered by nothing but its schedule"
-    );
-}
-
-#[test]
 fn a_thrust_never_exceeds_the_rows_manoeuvring_limit() {
     let mut world = world();
     for at in 0..12 {
@@ -372,4 +337,118 @@ fn the_drift_is_reproduced_by_a_rewind_to_the_same_tick() {
 
     assert_eq!(again.body(unit).pos, once);
     assert_ne!(again.state.tick(), Tick::ZERO);
+}
+
+#[test]
+fn a_hop_to_a_neighbour_takes_about_two_root_distance_over_the_limit() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = neighbours(&world.state)
+        .first()
+        .copied()
+        .expect("the belt holds two kilometer hops");
+    let least = least_seconds(&world.state, from, to);
+
+    let flown = crossing_seconds(&mut world, from, to);
+
+    assert!(
+        (least..least + HOP_MARGIN_SECONDS).contains(&flown),
+        "a {least:.1} second hop took {flown:.1} seconds"
+    );
+}
+
+#[test]
+fn the_widest_crossing_of_the_belt_takes_about_two_root_distance_over_the_limit() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = farthest(&world.state);
+    let least = least_seconds(&world.state, from, to);
+
+    let flown = crossing_seconds(&mut world, from, to);
+
+    assert!(
+        (least..least + CROSSING_MARGIN_SECONDS).contains(&flown),
+        "a {least:.1} second crossing took {flown:.1} seconds"
+    );
+}
+
+#[test]
+fn a_flier_arrives_at_rest_and_never_passes_its_destination() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = neighbours(&world.state)
+        .first()
+        .copied()
+        .expect("the belt holds two kilometer hops");
+    let unit = flying(&mut world, from, to);
+
+    let mut near = false;
+    for _ in 0..LONGEST_CROSSING {
+        if !world.state.entity(unit).is_flying() {
+            break;
+        }
+        world.steers(1);
+        let off = world.off_asteroid(unit, to);
+        near |= off <= PASSING_METERS;
+        assert!(
+            !near || off <= PASSING_METERS,
+            "it passed its destination and came back, {off} meters off"
+        );
+    }
+
+    let landed = Transfer::of(
+        world.body(unit),
+        world.state.asteroid_body(to),
+        world.state.roster().movement_limit().0,
+    );
+    assert!(landed.arrived(), "it stopped flying before it arrived");
+    assert_eq!(world.state.entity(unit).standing(), Some(to));
+}
+
+#[test]
+fn no_thrust_of_a_flier_exceeds_the_movement_limit() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = neighbours(&world.state)
+        .first()
+        .copied()
+        .expect("the belt holds two kilometer hops");
+    let unit = flying(&mut world, from, to);
+    let limit = world.state.roster().movement_limit().0;
+
+    for _ in 0..LONGEST_CROSSING {
+        if !world.state.entity(unit).is_flying() {
+            break;
+        }
+        let asked = Holding::of(&world.state, &Rolls::called(&world.state))
+            .run()
+            .of(unit)
+            .length();
+        assert!(asked <= limit + 1e-12, "{asked} against {limit}");
+        world.steers(1);
+    }
+}
+
+#[test]
+fn an_arrived_force_holds_inside_its_destinations_zone() {
+    let mut world = World::started(&[TeamId(0)]);
+    let (from, to) = neighbours(&world.state)
+        .first()
+        .copied()
+        .expect("the belt holds two kilometer hops");
+    let force: Vec<EntityId> = [FRIGATE, CONSTRUCTOR, LANCER]
+        .into_iter()
+        .enumerate()
+        .map(|(at, row)| {
+            let unit = world.hold(0, row, from, at as f64 * 3.0);
+            world.state.re_home(unit, to);
+            unit
+        })
+        .collect();
+
+    for one in &force {
+        arrival(&mut world, *one);
+    }
+    world.steers(seconds(60));
+
+    for one in &force {
+        let off = world.off_asteroid(*one, to);
+        assert!(off < Belt::ZONE_RADIUS_METERS, "{one:?} holds {off} off");
+    }
 }

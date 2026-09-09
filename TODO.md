@@ -91,8 +91,82 @@ and exchange shots by half; no stock sits at capacity for a minute
 while an armed row is affordable. The harness takes four names. The
 agent stops at red for the demolition review.
 
-Next, ruled 2026-09-08 after the owner saw slow motion late in a
-release match: the store unit. Measured on a fifteen-minute two-bot
+Built and verified 2026-09-08, awaiting the owner's word to commit:
+the transfer unit. The two-impulse coast is replaced by a rendezvous
+rule: a flier thrusts at the movement limit along the difference
+between its relative velocity and the velocity it wants, straight at
+the destination at the speed the limit can stop from over the
+distance left less a 1 m/s margin, exactly the difference where a
+tick would overshoot; it arrives within tolerance and never orbits
+(the switching rule first ruled chattered on its own switching
+surface and sent fliers past their target; the owner ruled the
+correction into DESIGN.md). Measured: 2 km in 9.97 s against a least
+of 9.88, the belt's widest 47 km in 53.9 s against 48.6, the extra
+being the destination's own travel; no tick above 1.9 ms over fifteen
+minutes, the 50 ms send spikes gone, the late tick 0.68 ms. The sim
+lost 288 non-test lines and 360 of tests, INVARIANTS.md three entries.
+Friction to carry: `World::steers` in the fixture copies the step's
+movement half and drifted silently this unit (a movement pass both
+call would delete it); `Berth` reaches the surface by two paths,
+`state::Berth` and `state::view::Berth`. After the owner's play
+(2026-09-08): the flight line runs to the destination where it stands
+now, not where it will be, so the line and the asteroid move together;
+the arrival estimate, which nothing then read, is deleted from the
+sim, the view and both documents; and a flier aims at the rim of its
+destination's zone on its own side, one zone radius from the body
+toward the flier, so an arriving force meets its destination at the
+edge facing where it came from and is not surrounded on arrival
+(DESIGN.md Sends carries the sentence). Gate green after each. Deletes the
+schedule, the send search, the Lambert solver, fulfilment's
+three-stage split, the forming window and the leaving state, three
+INVARIANTS entries and the unbuilt flight-line sentence, about a
+thousand lines (the owner hoped for two; the preview and the send drag
+stay). Why: the far solve cost 41 ms on the tick a send began, 81
+candidates flown through four correction passes that could not
+converge for spans where the burns' finite length put the ship
+hundreds of metres off the impulsive arc; gravity at the belt is
+0.17 m/s² against a limit of 80, so a transfer is straight-line
+kinematics and the coast only doubles its time. The owner chose the
+rule over an aim fix (C) and an analytic schedule (B). DESIGN.md Sends
+is rewritten in the brief's words; the display estimates arrival by
+the same formula.
+
+Next after the transfer unit lands, ruled 2026-09-08: the bot
+rebuilt as managers that propose and one funding pass that decides,
+on the owner's word that the bots sit doing almost nothing and that a
+ratio knob would hide the defect. The defect: the plan runs its rules
+in a fixed order with priority implicit in the order, extractors
+sized to the builders' demand and yards to a personality count, so
+income meets spend and the bot stops; the band and the overflow spend
+were bolted on to force spending past that fixed point. The shape
+(Petra's two phases, OpenRA's unbounded appetite, CircuitAI's growth
+loop): four managers read the survey and propose, never issue, each
+proposal a posting, a count above what stands, a priority and a
+reason. Defence proposes a garrison at every held asteroid an enemy
+force stands at or approaches, sized by it. Economy proposes an
+extractor at every held asteroid with spare cap in a material the mix
+uses, gated by payback, and one more yard wherever builders are short
+against income, both uncapped. Expansion proposes a claim, a
+constructor want at the best free asteroid, whenever spare cap at
+held asteroids falls under the mix's demand, up to the claims in
+flight. Offence proposes one more armed unit at staging by the fill
+rule, always. One funding pass sorts by priority and funds each
+proposal whole or not at all against stock plus income over a short
+horizon less what open frames still need; a funded proposal is the
+want, an unfunded one falls to what stands. The stock is always spent
+to the bottom, so the band, the overflow spend, the yard count, the
+want/keep/promised/affordable bookkeeping and the builderless sweep
+are deleted. The personality is the priority order and three numbers:
+expand funds economy, expansion, defence, offence with a small
+garrison floor; turtle funds defence, economy, offence, never
+expansion, with a large garrison. Priority moves with state: defence
+above economy under threat; offence below economy when own armed
+value exceeds the enemy's by the band's ratio, the two numbers kept.
+Attack stays CircuitAI's, in one wave. A fourth guarantee: a lone
+expand bot's income rises until the free asteroids within reach are
+taken, and a turtle's holds; the three existing guarantees stay.
+
+Landed and committed 2026-09-08 (a76429a): the store unit. Measured on a fifteen-minute two-bot
 match in release: the tick grows about quadratically with entities,
 0.13 ms at 134, 1.7 at 480, 4.2 at 781 against 8.3 available, and
 the engine catches up at most eight ticks a frame, so with a frame of

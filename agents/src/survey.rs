@@ -85,13 +85,8 @@ impl<'a> Survey<'a> {
             .map_or(0, |held| held.present + held.arriving)
     }
 
-    pub fn at_home(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row).map_or(0, |held| held.present)
-    }
-
     pub fn standing(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row)
-            .map_or(0, |held| held.present + held.leaving)
+        self.holding(asteroid, row).map_or(0, |held| held.present)
     }
 
     pub fn owned(&self, row: RowId) -> u32 {

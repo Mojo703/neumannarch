@@ -1,11 +1,9 @@
 use core::ops::Range;
 use std::collections::BTreeMap;
 
-use super::schedule::Flight;
 use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::orbit::body::Body;
 use crate::real::Real;
-use crate::time::Time;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Berth {
@@ -28,7 +26,6 @@ pub(crate) struct Entities {
     berths: Vec<Berth>,
     hp: Vec<Real>,
     motions: Vec<Motion>,
-    flights: BTreeMap<EntityId, Flight>,
     in_transit: BTreeMap<AsteroidId, Vec<EntityId>>,
     ids_ascending: Vec<EntityId>,
     places_ascending: Vec<u32>,
@@ -42,16 +39,6 @@ pub struct Entity<'a> {
 }
 
 impl Berth {
-    fn of(home: AsteroidId, flight: Option<Flight>, now: Time) -> Berth {
-        match flight {
-            None => Berth::Standing(home),
-            Some(flight) if flight.has_departed(now) => Berth::Flying {
-                from: flight.source(),
-            },
-            Some(flight) => Berth::Standing(flight.source()),
-        }
-    }
-
     pub fn standing(self) -> Option<AsteroidId> {
         match self {
             Berth::Standing(asteroid) => Some(asteroid),
@@ -77,7 +64,6 @@ impl Entities {
             berths: Vec::new(),
             hp: Vec::new(),
             motions: Vec::new(),
-            flights: BTreeMap::new(),
             in_transit: BTreeMap::new(),
             ids_ascending: Vec::new(),
             places_ascending: Vec::new(),
@@ -150,6 +136,13 @@ impl Entities {
             .map(|id| self.entity(*id))
     }
 
+    pub(crate) fn flying(&self) -> impl Iterator<Item = Entity<'_>> {
+        self.in_transit
+            .values()
+            .flatten()
+            .map(|id| self.entity(*id))
+    }
+
     pub(super) fn slice(&self, asteroid: AsteroidId) -> Range<usize> {
         let standing = Berth::Standing(asteroid);
         let start = self.berths.partition_point(|berth| *berth < standing);
@@ -161,23 +154,30 @@ impl Entities {
         Entity { entities: self, at }
     }
 
-    pub(crate) fn steer(&mut self, id: EntityId, body: Body, flight: Option<Flight>, now: Time) {
+    pub(crate) fn steer(&mut self, id: EntityId, body: Body) {
         let at = self.place_of(id);
         self.motions[at] = Motion::Steered { body };
-        self.set_flight(id, at, flight, now);
     }
 
-    pub(crate) fn join(
-        &mut self,
-        id: EntityId,
-        destination: AsteroidId,
-        flight: Flight,
-        now: Time,
-    ) {
+    pub(crate) fn re_home(&mut self, id: EntityId, destination: AsteroidId) {
         let at = self.place_of(id);
-        self.forget_transit(id, self.homes[at]);
+        let from = self.homes[at];
+        self.forget_transit(id, from);
         self.homes[at] = destination;
-        self.set_flight(id, at, Some(flight), now);
+        self.berths[at] = Berth::Flying { from };
+        let flying = self.in_transit.entry(destination).or_default();
+        if let Err(place) = flying.binary_search(&id) {
+            flying.insert(place, id);
+        }
+        self.settle();
+    }
+
+    pub(crate) fn arrive(&mut self, id: EntityId) {
+        let at = self.place_of(id);
+        let home = self.homes[at];
+        self.forget_transit(id, home);
+        self.berths[at] = Berth::Standing(home);
+        self.settle();
     }
 
     pub(crate) fn hurt(&mut self, id: EntityId, damage: f64) {
@@ -202,7 +202,6 @@ impl Entities {
         for id in &dead {
             let at = self.place_of(*id);
             self.forget_transit(*id, self.homes[at]);
-            self.flights.remove(id);
         }
         let surviving: Vec<u32> = (0..self.ids.len() as u32)
             .filter(|at| self.hp[*at as usize].0 > 0.0)
@@ -211,13 +210,7 @@ impl Entities {
         dead
     }
 
-    pub(crate) fn settle(&mut self, now: Time) {
-        let flights = core::mem::take(&mut self.flights);
-        for (id, flight) in &flights {
-            let at = self.place_of(*id);
-            self.berths[at] = Berth::of(self.homes[at], Some(*flight), now);
-        }
-        self.flights = flights;
+    fn settle(&mut self) {
         if (1..self.ids.len()).all(|at| !self.precedes(at, at - 1)) {
             return;
         }
@@ -240,23 +233,6 @@ impl Entities {
         self.hp = gather(&self.hp, order);
         self.motions = gather(&self.motions, order);
         self.reindex();
-    }
-
-    fn set_flight(&mut self, id: EntityId, at: usize, flight: Option<Flight>, now: Time) {
-        match flight {
-            Some(flight) => {
-                self.flights.insert(id, flight);
-                let homed = self.in_transit.entry(self.homes[at]).or_default();
-                if let Err(place) = homed.binary_search(&id) {
-                    homed.insert(place, id);
-                }
-            }
-            None => {
-                self.flights.remove(&id);
-                self.forget_transit(id, self.homes[at]);
-            }
-        }
-        self.berths[at] = Berth::of(self.homes[at], flight, now);
     }
 
     fn forget_transit(&mut self, id: EntityId, home: AsteroidId) {
@@ -351,10 +327,6 @@ impl<'a> Entity<'a> {
             Motion::Steered { body } => Some(body),
         }
     }
-
-    pub(crate) fn flight(self) -> Option<Flight> {
-        self.entities.flights.get(&self.id()).copied()
-    }
 }
 
 fn gather<T: Copy>(column: &[T], order: &[u32]) -> Vec<T> {
@@ -368,7 +340,6 @@ mod tests {
     use crate::ids::TeamId;
     use crate::orbit::body::Gravity;
     use crate::roster::{FRIGATE, SHIPYARD};
-    use crate::state::{Flight, Route, Send};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -380,26 +351,8 @@ mod tests {
         World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)])
     }
 
-    fn standing(world: &World) -> Vec<Berth> {
-        world.state.entities().map(Entity::berth).collect()
-    }
-
     fn ids(world: &World) -> Vec<EntityId> {
         world.state.entities().map(Entity::id).collect()
-    }
-
-    fn sent(world: &mut World, unit: EntityId) -> Flight {
-        let send = Send::joining(
-            &world.state,
-            Route {
-                source: HOME,
-                destination: AWAY,
-                seat: SeatId(0),
-            },
-            &[unit],
-        )
-        .expect("a send across the ring");
-        Flight::new(HOME, send.schedule)
     }
 
     #[test]
@@ -424,33 +377,24 @@ mod tests {
     }
 
     #[test]
-    fn an_id_answers_the_same_entity_after_the_order_changes() {
+    fn a_flier_sorts_last_and_still_answers_to_its_id() {
         let mut world = world();
         let flier = world.hold(0, FRIGATE, HOME, 0.0);
         let stayer = world.hold(0, FRIGATE, HOME, 2.0);
-        let flight = sent(&mut world, flier);
-        world.launch(flier, HOME, 0.0, flight);
-        while !world.state.entity(flier).is_flying() {
-            world.state.advance();
-        }
+
+        world.state.re_home(flier, AWAY);
 
         assert_eq!(ids(&world), vec![stayer, flier], "the flier sorts last");
         assert_eq!(world.state.entity(flier).id(), flier);
         assert_eq!(world.state.entity(stayer).id(), stayer);
         assert_eq!(
-            standing(&world),
+            world
+                .state
+                .entities()
+                .map(Entity::berth)
+                .collect::<Vec<Berth>>(),
             vec![Berth::Standing(HOME), Berth::Flying { from: HOME }]
         );
-    }
-
-    #[test]
-    fn a_unit_whose_send_is_forming_is_homed_at_its_destination_and_stands_at_its_source() {
-        let mut world = world();
-        let leaving = world.hold(0, FRIGATE, HOME, 0.0);
-        let flight = sent(&mut world, leaving);
-        world.state.join(leaving, AWAY, flight);
-
-        assert_eq!(world.state.entity(leaving).standing(), Some(HOME));
         assert_eq!(
             world
                 .state
@@ -458,12 +402,14 @@ mod tests {
                 .homed_at(AWAY)
                 .map(Entity::id)
                 .collect::<Vec<EntityId>>(),
-            vec![leaving]
+            vec![flier],
+            "it is homed where it flies to"
         );
-        assert_eq!(
-            world.state.entities.homed_at(HOME).next().map(Entity::id),
-            None
-        );
+
+        world.state.arrive(flier);
+
+        assert_eq!(ids(&world), vec![stayer, flier]);
+        assert_eq!(world.state.entity(flier).standing(), Some(AWAY));
     }
 
     #[test]

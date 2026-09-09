@@ -101,17 +101,8 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
     }
 
     for flight in &scene.flights {
-        let Some(destination) = scene
-            .asteroids
-            .iter()
-            .find(|asteroid| asteroid.id == flight.to)
+        let (Some(from), Some(to)) = (viewport.point_of(flight.from), viewport.point_of(flight.to))
         else {
-            continue;
-        };
-        let (Some(from), Some(to)) = (
-            viewport.point_of(flight.from),
-            viewport.point_of(destination.pos),
-        ) else {
             continue;
         };
         paint_flight_line(painter, from, to, flight.previewed);

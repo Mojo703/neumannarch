@@ -1,5 +1,5 @@
 use crate::ids::SeatId;
-use crate::state::{Batch, Flight, Frame, Issued, Rejected, Rolls, State};
+use crate::state::{Batch, Frame, Issued, Rejected, Rolls, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::Income;
 use crate::step::fire::{Fire, Shots};
@@ -69,7 +69,10 @@ impl State {
 
 fn move_bodies(next: &mut State, moved: &Moved) {
     for step in moved.iter() {
-        next.steer(step.entity, step.body, step.flight);
+        next.steer(step.entity, step.body);
+    }
+    for arrival in moved.arrived() {
+        next.arrive(*arrival);
     }
 }
 
@@ -77,12 +80,8 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
     for placement in &filled.placements {
         next.place_from_reserve(placement.post(), placement.row());
     }
-    for send in &filled.sends {
-        let route = send.route();
-        let flight = Flight::new(route.source, send.schedule);
-        for member in &send.members {
-            next.join(*member, route.destination, flight);
-        }
+    for (entity, destination) in &filled.sent_to {
+        next.re_home(*entity, *destination);
     }
     for opening in &filled.openings {
         next.add_frame(Frame::new(opening.post(), opening.row(), 0.0, snap.time()));
@@ -172,13 +171,13 @@ mod tests {
     use crate::orbit::body::Gravity;
     use crate::post::Post;
     use crate::posting::Posting;
-    use crate::real::Real;
     use crate::roster::Roster;
     use crate::roster::{
         CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
     };
-    use crate::state::{Entity, MAX_WANT, Schedule, Seat, Send};
+    use crate::state::{Entity, MAX_WANT, Seat};
     use crate::time::Time;
+    use crate::transfer::Transfer;
     use crate::{Materials, TICKS_PER_SECOND};
 
     fn asteroid(at: u32) -> AsteroidId {
@@ -309,16 +308,14 @@ mod tests {
         assert_eq!(world.count(0, asteroid(1), RAIDER), 1, "it counts home");
         assert_eq!(world.count(0, asteroid(0), CONSTRUCTOR), 0);
         assert_eq!(world.state.frames().len(), 0, "a send fills the shortfall");
-        let flights: Vec<Flight> = world
-            .state
-            .entities()
-            .map(|entity| entity.flight().expect("a flight"))
-            .collect();
-        assert_eq!(flights[0], flights[1], "the two rows fly different sends");
+        assert!(
+            world.state.entities().all(Entity::is_flying),
+            "a re-homed unit waits before it flies"
+        );
     }
 
     #[test]
-    fn a_send_lands_on_its_destination_asteroids_orbit() {
+    fn a_re_homed_unit_flies_from_that_tick_and_lands_in_its_destinations_zone() {
         let mut world = stocked(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
         world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
         let unit = world.state.entities().next().expect("the constructor").id();
@@ -328,162 +325,33 @@ mod tests {
             Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
         ]);
 
-        let flight = world.state.entity(unit).flight().expect("a flight");
-        world.run(flight.departs().0 - world.state.time().0);
-        let left = world.off_asteroid(unit, asteroid(0));
-        world.run(flight.arrive().0 - world.state.time().0);
-        assert!(
-            !world.state.entity(unit).is_flying(),
-            "it is still flying at its arrival tick"
+        assert!(world.state.entity(unit).is_flying(), "it is still home");
+        assert_eq!(world.state.entity(unit).home(), asteroid(1));
+        assert_eq!(
+            world.count(0, asteroid(1), CONSTRUCTOR),
+            1,
+            "it counts toward its destination from the tick it is re-homed"
         );
+
+        for _ in 0..600 * u64::from(TICKS_PER_SECOND) {
+            if !world.state.entity(unit).is_flying() {
+                break;
+            }
+            world.tick(&[]);
+        }
+
+        assert_eq!(world.state.entity(unit).standing(), Some(asteroid(1)));
+        let rim = Belt::ZONE_RADIUS_METERS + Transfer::ARRIVAL_POSITION_METERS;
         let landed = world.off_asteroid(unit, asteroid(1));
         assert!(
-            landed < Belt::ZONE_RADIUS_METERS,
-            "it left {left} meters off and arrived {landed} off"
+            landed <= rim,
+            "it arrived {landed} off, past the zone's rim"
         );
 
         world.run(60 * u64::from(TICKS_PER_SECOND));
 
         let held = world.off_asteroid(unit, asteroid(1));
-        assert!(
-            held < Belt::ZONE_RADIUS_METERS,
-            "it holds {held} meters off its asteroid"
-        );
-    }
-
-    #[test]
-    fn units_re_homed_within_the_window_fly_one_send() {
-        let mut world = stocked(Roster::shipped(), BTreeMap::from([(STORAGE, 1)]));
-        world.hold(0, CONSTRUCTOR, asteroid(0), 5.0);
-        world.hold(0, RAIDER, asteroid(0), 6.0);
-        let flight_of = |state: &State, row| {
-            state
-                .entities()
-                .find(|entity| entity.row() == row)
-                .and_then(Entity::flight)
-        };
-
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
-        ]);
-        let first = flight_of(&world.state, CONSTRUCTOR).expect("the first send formed");
-        world.run(Send::FORMING_TICKS - 1);
-        world.tick(&[
-            Issued::numbered(0, 2, asteroid(0), RAIDER, 0),
-            Issued::numbered(0, 3, asteroid(1), RAIDER, 1),
-        ]);
-
-        assert_eq!(
-            flight_of(&world.state, RAIDER),
-            Some(first),
-            "a unit re-homed inside the window opened a send of its own"
-        );
-        assert_eq!(world.state.time(), first.departs());
-        assert!(
-            world.state.entities().all(|entity| entity.is_flying()),
-            "the window closed and the send did not depart"
-        );
-    }
-
-    #[test]
-    fn a_unit_re_homed_after_the_window_flies_its_own_send() {
-        let mut world = stocked(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 2)]));
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 2)]);
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 1),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
-        ]);
-        let first = world
-            .state
-            .entities()
-            .find_map(Entity::flight)
-            .expect("the first send formed");
-
-        world.run(Send::FORMING_TICKS + 1);
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 2),
-        ]);
-
-        let second = world
-            .state
-            .entities()
-            .filter_map(Entity::flight)
-            .find(|flight| *flight != first)
-            .expect("the second unit flies a send of its own");
-        assert!(
-            second.departs() > first.departs(),
-            "it joined a send that had already departed"
-        );
-    }
-
-    #[test]
-    fn a_unit_whose_send_is_forming_stands_at_the_asteroid_it_leaves() {
-        let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), SHIPYARD, 1),
-            Issued::numbered(0, 1, asteroid(0), FRIGATE, 1),
-        ]);
-        let prey = world.fix(1, STORAGE, asteroid(0));
-        let building = world.state[FRIGATE].cost.total() / 15.0;
-        world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        let shooter = world
-            .state
-            .entities()
-            .find(|entity| entity.row() == FRIGATE)
-            .expect("the frigate")
-            .id();
-
-        world.tick(&[
-            Issued::numbered(0, 2, asteroid(0), FRIGATE, 0),
-            Issued::numbered(0, 3, asteroid(1), FRIGATE, 1),
-        ]);
-
-        assert!(
-            world.state.entity(shooter).flight().is_some(),
-            "its send is forming"
-        );
-        assert!(!world.state.entity(shooter).is_flying());
-        assert_eq!(world.state.entity(shooter).standing(), Some(asteroid(0)));
-        assert_eq!(
-            world.count(0, asteroid(1), FRIGATE),
-            1,
-            "it counts toward it"
-        );
-        assert!(
-            world
-                .shot_at(prey, u64::from(TICKS_PER_SECOND) / 2 + 1)
-                .is_some(),
-            "a forming unit stopped shooting"
-        );
-    }
-
-    #[test]
-    fn a_send_the_movement_limit_cannot_fly_leaves_its_units_home_and_opens_frames() {
-        let mut world = stocked(
-            Roster::shipped().moving_at(Real(1e-6)),
-            BTreeMap::from([(CONSTRUCTOR, 1)]),
-        );
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
-        let unit = world.state.entities().next().expect("the constructor").id();
-
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
-        ]);
-
-        assert!(
-            world.state.entity(unit).flight().is_none(),
-            "a unit that cannot fly was sent"
-        );
-        assert_eq!(world.state.entity(unit).home(), asteroid(0), "it left home");
-        assert_eq!(world.count(0, asteroid(1), CONSTRUCTOR), 0);
-        assert_eq!(
-            world.state.frames().len(),
-            1,
-            "the shortfall opened no frame"
-        );
+        assert!(held <= rim, "it holds {held} meters off its asteroid");
     }
 
     #[test]
@@ -588,38 +456,6 @@ mod tests {
     }
 
     #[test]
-    fn a_send_arrives_at_the_earliest_tick_a_schedule_exists() {
-        let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
-        let depart = world.state.time().ahead(Send::FORMING_TICKS).next();
-
-        world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
-        ]);
-
-        let state = &world.state;
-        let unit = state.entities().next().expect("the constructor").id();
-        let flight = state.entity(unit).flight().expect("a flight");
-        let arrive = flight.arrive();
-        assert_eq!(flight.departs(), depart);
-        let gravity = state.gravity();
-        let source = state[asteroid(0)].orbit().at(depart, gravity);
-        let limit = state.roster().movement_limit().0;
-        let second = u64::from(TICKS_PER_SECOND);
-        assert!(arrive.0 - depart.0 > second, "the first candidate answered");
-        for step in (second..arrive.0 - depart.0).step_by(second as usize) {
-            let earlier = depart.ahead(step);
-            let target = state[asteroid(1)].orbit().at(earlier, gravity);
-            assert_eq!(
-                Schedule::between(source, target, depart, earlier, limit, gravity),
-                None,
-                "arriving at {earlier:?} would have fitted"
-            );
-        }
-    }
-
-    #[test]
     fn an_armed_unit_kills_an_unarmed_enemy_at_its_asteroid() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
 
@@ -692,7 +528,6 @@ mod tests {
             Issued::numbered(1, 1, asteroid(0), CONSTRUCTOR, 0),
             Issued::numbered(1, 2, asteroid(1), CONSTRUCTOR, 1),
         ]);
-        world.run(Send::FORMING_TICKS + 1);
 
         assert!(world.state.entity(prey).is_flying());
         assert_eq!(

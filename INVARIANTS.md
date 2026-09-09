@@ -34,20 +34,6 @@ adds it here in the same change; a unit that deletes one removes it.
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.
-- `Send::joining` takes the first flight it finds between a source, a
-  destination and a seat that has not departed, trusting that at most one
-  exists, which holds because a send is solved only where none is found,
-  and the one that is found always departs before the window could open a
-  second. A store keyed by those three would make it unrepresentable, at
-  the price of a second place for a send to live and be reaped; the
-  flight the units already carry is the cheaper truth.
-- `Schedule::between` gives up after `CORRECTIONS` passes. The margin is
-  the predicate and the cap is only its guard: at the shipped
-  `BURN_SHARE_OF_SPAN` of one half, a neighbour hop over the shipped belt
-  takes three passes or four and never a fifth, and a candidate the cap
-  rejected would be one the sim could not have flown within the
-  tolerance. A proof that the aim correction converges for every schedule
-  inside the margin would delete the cap.
 - Two asteroids' zones can pass within one zone's radius of each other
   over a match. The belt lays each asteroid off three smooth fields and a
   drawn point, with nothing holding a pair apart, and the zones are small
@@ -105,11 +91,6 @@ adds it here in the same change; a unit that deletes one removes it.
   units at. A `Preview` of a want and a refusal of it in one type, so the
   display could not hold the first without answering the second, would
   delete the arm.
-- A `Preview` settles as though every send it names departs, so it can
-  skip the schedule solve. Where no schedule exists this tick the sim
-  will instead leave those units home and open frames, and the hover will
-  have said otherwise for one tick. Solving inside the preview would
-  delete it, at the price of the solve on every pointer move.
 - A bot's frame may stand for one decision at an asteroid where no
   builder of its seat stands or arrives: a unit lost in the step a want
   lands in leaves a shortfall the plan answers at its next decision. A

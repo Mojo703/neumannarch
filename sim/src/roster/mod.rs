@@ -24,14 +24,6 @@ impl Roster {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn moving_at(self, movement_limit: Real) -> Roster {
-        Roster {
-            movement_limit,
-            ..self
-        }
-    }
-
     pub fn units_by(self, adjust: impl Fn(Row) -> Row) -> Roster {
         Roster {
             rows: self

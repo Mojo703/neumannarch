@@ -135,10 +135,10 @@ impl Fraction {
 mod tests {
     use super::*;
     use crate::fixture::World;
-    use crate::ids::{AsteroidId, SeatId, TeamId};
+    use crate::ids::{AsteroidId, TeamId};
     use crate::orbit::body::Gravity;
     use crate::roster::{CONSTRUCTOR, FRIGATE};
-    use crate::state::{Flight, Rolls, Route, Send};
+    use crate::state::Rolls;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -275,27 +275,8 @@ mod tests {
         let reader = world.hold(0, FRIGATE, HOME, 0.0);
         let flier = world.hold(0, FRIGATE, HOME, 2.0);
         let together = fields(&world.state).at(reader).own;
-        let send = Send::joining(
-            &world.state,
-            Route {
-                source: HOME,
-                destination: AsteroidId(1),
-                seat: SeatId(0),
-            },
-            &[flier],
-        )
-        .expect("a send across the ring");
-        world.launch(flier, HOME, 2.0, Flight::new(HOME, send.schedule));
 
-        assert_eq!(
-            fields(&world.state).at(reader).own,
-            together,
-            "a unit whose send is forming stands where it is"
-        );
-
-        while !world.state.entity(flier).is_flying() {
-            world.state.advance();
-        }
+        world.state.re_home(flier, AsteroidId(1));
 
         assert!(fields(&world.state).at(reader).own < together);
         assert_eq!(fields(&world.state).at(flier), Sample::default());

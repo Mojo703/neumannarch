@@ -418,7 +418,7 @@ fn region_scene(watched: &Watched) -> Scene {
         fights: BTreeMap::new(),
         flights: vec![FlightLine {
             from: Vec3::new(-90.0, 0.0, 80.0),
-            to: AsteroidId(2),
+            to: Vec3::new(-280.0, 0.0, 220.0),
             previewed: false,
         }],
         stockpile_bar: None,
@@ -468,9 +468,9 @@ fn fight_scene() -> Scene {
                         RAIDER,
                         vec![
                             Entry::Present(1),
-                            Entry::Leaving {
+                            Entry::Arriving {
                                 count: 2,
-                                to: AsteroidId(1),
+                                from: AsteroidId(1),
                             },
                         ],
                     ),
@@ -605,6 +605,7 @@ fn on_the_ring(mut scene: Scene) -> Scene {
     }
     for flight in &mut scene.flights {
         flight.from += HOME;
+        flight.to += HOME;
     }
     scene
 }

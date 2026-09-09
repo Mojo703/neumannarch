@@ -96,7 +96,6 @@ impl<'a> Fire<'a> {
             .state
             .ready()
             .filter(|ready| ready.at() < now)
-            .filter(|ready| !self.state.entity(ready.entity()).is_flying())
             .cloned()
             .collect();
         ready.sort_by(|a, b| {

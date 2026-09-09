@@ -10,9 +10,7 @@ use crate::post::Post;
 use crate::roster::Roster;
 use crate::setup::Setup;
 use crate::state::view::View;
-use crate::state::{
-    Asteroid, Batch, Command, Flight, Issued, Motion, Rejected, Rolls, Seat, State, view,
-};
+use crate::state::{Asteroid, Batch, Command, Issued, Motion, Rejected, Rolls, Seat, State, view};
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
@@ -128,7 +126,10 @@ impl World {
             let moved = Propagation::of(&self.state, &thrusts).run();
             drop(rolls);
             for step in moved.iter() {
-                self.state.steer(step.entity, step.body, step.flight);
+                self.state.steer(step.entity, step.body);
+            }
+            for arrival in moved.arrived() {
+                self.state.arrive(*arrival);
             }
             self.state.advance();
         }
@@ -163,16 +164,6 @@ impl World {
     pub fn free(&mut self, seat: u8, row: RowId, asteroid: AsteroidId, body: Body) -> EntityId {
         self.state
             .spawn(SeatId(seat), row, asteroid, Motion::Steered { body })
-    }
-
-    pub fn launch(&mut self, entity: EntityId, from: AsteroidId, out_meters: f64, flight: Flight) {
-        let body = self.state.asteroid_body(from);
-        let radial = body.pos.normalized().expect("a radius");
-        self.state.steer(
-            entity,
-            Body::new(body.pos + radial * out_meters, body.vel),
-            Some(flight),
-        );
     }
 
     pub fn count(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> u32 {

@@ -6,6 +6,7 @@ use crate::ids::EntityId;
 use crate::orbit::body::Body;
 use crate::roster::Row;
 use crate::state::{AssignedDamage, Entity, Roll, Rolls, Shooter, State};
+use crate::transfer::Transfer;
 use crate::vec3::Vec3;
 
 pub(crate) struct Holding<'a> {
@@ -26,15 +27,27 @@ impl<'a> Holding<'a> {
         let mut thrusts = BTreeMap::new();
         for roll in self.rolls.iter() {
             for entity in roll.standing() {
-                if let Some(thrust) = self.thrust(entity, roll, &fields) {
+                if let Some(thrust) = self.holding_thrust(entity, roll, &fields) {
                     thrusts.insert(entity.id(), thrust);
                 }
+            }
+        }
+        for entity in self.state.entities.flying() {
+            if let Some(thrust) = self.transfer_thrust(entity) {
+                thrusts.insert(entity.id(), thrust);
             }
         }
         Thrusts(thrusts)
     }
 
-    fn thrust(&self, entity: Entity, roll: &Roll, fields: &Fields) -> Option<Vec3> {
+    fn transfer_thrust(&self, entity: Entity) -> Option<Vec3> {
+        let body = entity.steered()?;
+        let destination = self.rolls[entity.home()].body();
+        let limit = self.state.roster().movement_limit().0;
+        Some(Transfer::of(body, destination, limit).thrust())
+    }
+
+    fn holding_thrust(&self, entity: Entity, roll: &Roll, fields: &Fields) -> Option<Vec3> {
         let body = entity.steered()?;
         let row = &self.state[entity.row()];
         let sample = fields.at(entity.id());

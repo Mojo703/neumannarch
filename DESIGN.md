@@ -112,8 +112,8 @@ probe; the win is holding the system when the clock runs out.
   home. Every send crosses the same distance in the same time whatever
   is in it; rows differ in how they hold, chase and give way. Movement
   and combat states how each is used.
-- No collisions. Entity size is visual. Arrival is the end of a schedule
-  (Movement and combat), never a distance.
+- No collisions. Entity size is visual. Arrival is the rule's tolerance
+  being met (Movement and combat), never a distance a player can read.
 
 ## Materials
 
@@ -234,25 +234,26 @@ sets one count.
   display draws it. Zones are small against the spacing of asteroids, so
   two rarely meet, and where two do the rules read no distance: a unit is
   at its home and nowhere else.
-- **Sends.** Units re-homed in one tick from one place to another make
-  one send; units re-homed within a stated window of ticks join the send
-  that is forming. A send is one schedule of thrust, solved when the
-  send begins: a sequence of thrusts, one per tick, each within the
-  movement limit, whose integration by the sim's own propagation carries
-  a ship from the source asteroid's orbit to the destination asteroid's
-  orbit at the arrival tick, to within a stated tolerance in position
-  and in speed. A schedule exists at an arrival tick when its burns
-  together take at most a stated share of the span and its integration
-  meets the tolerance. The arrival tick is the earliest at which a
-  schedule exists. A schedule departs on the tick after the send's
-  window closes, the first tick its ships thrust on. Every ship of the
-  send departs at once and flies the one schedule, so their offsets from
-  each other and from the asteroid at departure are carried to arrival:
-  a force that leaves spread through its zone arrives spread through the
-  destination's. While its send forms a unit stands at its asteroid, a
-  shooter and a target there, and is counted toward its destination. A
-  unit is flying from the tick its schedule departs until it ends. The
-  tolerance is the schedule's.
+- **Sends.** Units re-homed from one asteroid to another fly at once. A
+  flying unit thrusts each tick at the movement limit by one rule: it
+  reads its position and velocity relative to the rim of its
+  destination's zone on its own side, the point one zone radius from the
+  destination's body toward the flier, the body being known exactly at
+  every tick from the orbit; it thrusts along the difference between its
+  own relative velocity and the velocity it wants: straight at that point,
+  at the speed the limit can stop from over the distance left, root twice
+  the limit times that distance, less a stated margin; where one tick at
+  the limit would carry it past the velocity it wants it thrusts exactly
+  the difference, so it can never orbit its destination. It arrives on the
+  tick its relative distance and relative speed are both within a stated
+  tolerance, and stands at its destination from then, so a force meets
+  its destination at the edge of the zone facing where it came from and
+  the holding rule takes it from there. So every transfer takes close to
+  the least time the limit allows, two root distance over the limit, plus
+  the time to match the destination's speed; a unit is flying from the
+  tick it is re-homed until it arrives; and while it flies it counts
+  toward its destination and is neither a shooter nor a target. In flight
+  a unit thrusts by this rule alone.
 - **Power.** Every unit has a power: its damage per second, through no
   plating, times its remaining HP. It is the one number the fields below
   sum and it falls as a unit is hurt.
@@ -289,8 +290,7 @@ sets one count.
   no damage weapon has no chase and only its other terms. Cohesion is
   weighted so a force closes on its target as one body, which is what
   makes a battle predictable; there is no facing. The rule is one module
-  and is replaceable whole. In flight a unit thrusts by its schedule
-  alone.
+  and is replaceable whole.
 - A flying unit is neither a shooter nor a target: battles happen at
   asteroids.
 

@@ -12,9 +12,7 @@ pub(crate) use frame::Frame;
 pub use preview::{Preview, ShortfallFilling};
 pub(crate) use ready::{Ready, ReadyWeapons};
 pub(crate) use roll::{Roll, Rolls};
-pub(crate) use schedule::{Flight, Schedule};
 pub use seat::Seat;
-pub use send::{Route, Send};
 pub use standings::Standings;
 pub(crate) use threat::{AssignedDamage, Shooter};
 pub(crate) use wants::Wants;
@@ -34,7 +32,6 @@ use crate::vec3::Vec3;
 pub struct Held {
     pub present: u32,
     pub surplus: u32,
-    pub leaving: u32,
     pub arriving: u32,
 }
 
@@ -213,7 +210,7 @@ impl State {
         let mut held: Vec<EntityId> = Vec::new();
         for entity in self.posted(post, row) {
             posted += 1;
-            if entity.flight().is_none() {
+            if entity.standing().is_some() {
                 held.push(entity.id());
             }
         }
@@ -232,14 +229,9 @@ impl State {
         let mut holdings: BTreeMap<Posting, Held> = BTreeMap::new();
         for entity in self.entities.iter() {
             let at = |asteroid: AsteroidId| Posting::of(asteroid, entity.seat(), entity.row());
-            let flying = entity.flight().is_some();
-            match (entity.standing(), flying) {
-                (Some(asteroid), false) => holdings.entry(at(asteroid)).or_default().present += 1,
-                (Some(asteroid), true) => holdings.entry(at(asteroid)).or_default().leaving += 1,
-                (None, _) => {}
-            }
-            if flying {
-                holdings.entry(at(entity.home())).or_default().arriving += 1;
+            match entity.standing() {
+                Some(asteroid) => holdings.entry(at(asteroid)).or_default().present += 1,
+                None => holdings.entry(at(entity.home())).or_default().arriving += 1,
             }
         }
         holdings
@@ -308,12 +300,16 @@ impl State {
         )
     }
 
-    pub(crate) fn steer(&mut self, id: EntityId, body: Body, flight: Option<Flight>) {
-        self.entities.steer(id, body, flight, self.time());
+    pub(crate) fn steer(&mut self, id: EntityId, body: Body) {
+        self.entities.steer(id, body);
     }
 
-    pub(crate) fn join(&mut self, id: EntityId, destination: AsteroidId, flight: Flight) {
-        self.entities.join(id, destination, flight, self.time());
+    pub(crate) fn re_home(&mut self, id: EntityId, destination: AsteroidId) {
+        self.entities.re_home(id, destination);
+    }
+
+    pub(crate) fn arrive(&mut self, id: EntityId) {
+        self.entities.arrive(id);
     }
 
     pub(crate) fn heal(&mut self, id: EntityId, hp: f64) {
@@ -334,7 +330,6 @@ impl State {
             self.seats.iter_mut().for_each(Seat::close_second);
             self.asteroids.iter_mut().for_each(Asteroid::close_second);
         }
-        self.entities.settle(self.time());
     }
 
     pub(crate) fn seat_mut(&mut self, id: SeatId) -> Option<&mut Seat> {
@@ -431,9 +426,7 @@ pub(crate) mod hash;
 mod preview;
 mod ready;
 mod roll;
-mod schedule;
 mod seat;
-mod send;
 pub mod standings;
 mod threat;
 pub mod view;

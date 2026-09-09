@@ -5,7 +5,7 @@ use crate::materials::Materials;
 use crate::posting::Posting;
 use crate::roster::Roster;
 use crate::state::{Command, Issued, Rejected, State};
-use crate::step::fulfilment::{Fulfilment, SendSchedules};
+use crate::step::fulfilment::Fulfilment;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Preview {
@@ -44,30 +44,26 @@ impl Preview {
     }
 
     fn of(state: &State, seat: SeatId) -> Preview {
-        let mut fulfilment = Fulfilment::of(state);
-        let assignment = fulfilment.assign();
-        let assigned = fulfilment.settle(&assignment, SendSchedules::nothing_held_back());
+        let assigned = Fulfilment::of(state).run();
         let mut shortfalls: BTreeMap<Posting, ShortfallFilling> = BTreeMap::new();
-        for posting in assignment
-            .from_reserve
+        for posting in assigned
+            .placements
             .iter()
             .filter(|posting| posting.seat() == seat)
         {
             shortfalls.entry(*posting).or_default().from_reserve += 1;
         }
-        for (route, members) in assignment
-            .sent_units
-            .iter()
-            .filter(|(route, _)| route.seat == seat)
-        {
-            for entity in members.iter().map(|id| state.entity(*id)) {
-                let arriving = shortfalls
-                    .entry(Posting::of(route.destination, seat, entity.row()))
-                    .or_default();
-                *arriving.sent_from.entry(route.source).or_default() += 1;
+        for (id, destination) in &assigned.sent_to {
+            let entity = state.entity(*id);
+            if entity.seat() != seat {
+                continue;
             }
+            let arriving = shortfalls
+                .entry(Posting::of(*destination, seat, entity.row()))
+                .or_default();
+            *arriving.sent_from.entry(entity.home()).or_default() += 1;
         }
-        for (posting, short) in assignment
+        for (posting, short) in assigned
             .still_short
             .iter()
             .filter(|(posting, _)| posting.seat() == seat)

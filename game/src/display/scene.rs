@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::orbit::Gravity;
 use neumannarch_sim::roster::{Glyph, Kind, Roster};
-use neumannarch_sim::state::view::{Berth, Building, View};
-use neumannarch_sim::state::{Asteroid, Command, Held, Preview, Route};
+use neumannarch_sim::state::view::{Building, View};
+use neumannarch_sim::state::{Asteroid, Command, Held, Preview};
 use neumannarch_sim::{
     AsteroidId, EntityId, Materials, Post, Posting, RowId, SeatId, Stockpile, Time, Vec3,
 };
@@ -59,7 +59,7 @@ pub struct EntityView {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlightLine {
     pub from: Vec3,
-    pub to: AsteroidId,
+    pub to: Vec3,
     pub previewed: bool,
 }
 
@@ -98,7 +98,6 @@ pub struct Shown {
 pub enum Entry {
     Present(u32),
     Surplus(u32),
-    Leaving { count: u32, to: AsteroidId },
     Building(Building),
     Arriving { count: u32, from: AsteroidId },
     Wanted { count: u32, dashed: bool },
@@ -282,7 +281,7 @@ impl Scene {
 impl Entry {
     pub fn fill(self) -> Fill {
         match self {
-            Entry::Present(_) | Entry::Leaving { .. } => Fill::Solid,
+            Entry::Present(_) => Fill::Solid,
             Entry::Building(building) => Fill::Filling(building.progress as f32),
             Entry::Surplus(_) | Entry::Arriving { .. } => Fill::Hollow,
             Entry::Wanted { dashed: false, .. } => Fill::Hollow,
@@ -292,14 +291,13 @@ impl Entry {
 
     #[cfg(test)]
     pub(crate) fn dim(self) -> bool {
-        matches!(self, Entry::Leaving { .. } | Entry::Arriving { .. })
+        matches!(self, Entry::Arriving { .. })
     }
 
     pub fn count(self) -> Option<u32> {
         match self {
             Entry::Present(count)
             | Entry::Surplus(count)
-            | Entry::Leaving { count, .. }
             | Entry::Arriving { count, .. }
             | Entry::Wanted { count, .. } => Some(count),
             Entry::Building(_) => None,
@@ -310,7 +308,6 @@ impl Entry {
         match self {
             Entry::Present(_) => format!("{name} here"),
             Entry::Surplus(_) => format!("{name} surplus"),
-            Entry::Leaving { to, .. } => format!("{name} leaving for {}", asteroid_name(to)),
             Entry::Building(Building {
                 starved_of: Some(material),
                 ..
@@ -516,10 +513,9 @@ fn order(shown: &Shown) -> u8 {
     match shown.entry {
         Entry::Present(_) => 0,
         Entry::Surplus(_) => 1,
-        Entry::Leaving { .. } => 2,
-        Entry::Building(_) => 3,
-        Entry::Arriving { .. } => 4,
-        Entry::Wanted { .. } => 5,
+        Entry::Building(_) => 2,
+        Entry::Arriving { .. } => 3,
+        Entry::Wanted { .. } => 4,
     }
 }
 
@@ -542,14 +538,6 @@ fn entries_of(view: &View, posting: Posting, held: Held) -> Vec<Shown> {
     if held.surplus > 0 {
         entries.push(shown(Entry::Surplus(held.surplus)));
     }
-    if let Some(to) = leaving_for(view, posting)
-        && held.leaving > 0
-    {
-        entries.push(shown(Entry::Leaving {
-            count: held.leaving,
-            to,
-        }));
-    }
     if let Some(from) = arriving_from(view, posting)
         && held.arriving > 0
     {
@@ -561,15 +549,6 @@ fn entries_of(view: &View, posting: Posting, held: Held) -> Vec<Shown> {
     entries
 }
 
-fn leaving_for(view: &View, posting: Posting) -> Option<AsteroidId> {
-    let asteroid = posting.asteroid();
-    view.present
-        .iter()
-        .filter(|unit| unit.seat == posting.seat() && unit.row == posting.row())
-        .find(|unit| unit.at.standing() == Some(asteroid) && unit.home != asteroid)
-        .map(|unit| unit.home)
-}
-
 fn arriving_from(view: &View, posting: Posting) -> Option<AsteroidId> {
     let asteroid = posting.asteroid();
     view.present
@@ -577,11 +556,7 @@ fn arriving_from(view: &View, posting: Posting) -> Option<AsteroidId> {
         .filter(|unit| {
             unit.seat == posting.seat() && unit.row == posting.row() && unit.home == asteroid
         })
-        .find_map(|unit| match unit.at {
-            Berth::Standing(from) if from != asteroid => Some(from),
-            Berth::Flying { from } => Some(from),
-            Berth::Standing(_) => None,
-        })
+        .find_map(|unit| unit.at.flying_from())
 }
 
 fn covered(view: &View, posting: Posting) -> u32 {
@@ -602,10 +577,12 @@ fn flight_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> 
         .present
         .iter()
         .filter(|present| present.at.flying_from().is_some())
-        .map(|present| FlightLine {
-            from: present.body.pos,
-            to: present.home,
-            previewed: false,
+        .filter_map(|present| {
+            Some(FlightLine {
+                from: present.body.pos,
+                to: view.asteroid_body(present.home)?.pos,
+                previewed: false,
+            })
         });
     flying.chain(previewed_lines(view, gesture)).collect()
 }
@@ -614,23 +591,22 @@ fn previewed_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLin
     let Some(WheelGesture::Send(_, sent)) = gesture else {
         return Vec::new();
     };
-    let routes: BTreeSet<Route> = sent
+    let apart: BTreeSet<(AsteroidId, AsteroidId)> = sent
         .shortfalls
         .iter()
         .flat_map(|(posting, filling)| {
-            filling.sent_from.keys().map(move |source| Route {
-                source: *source,
-                destination: posting.asteroid(),
-                seat: posting.seat(),
-            })
+            filling
+                .sent_from
+                .keys()
+                .map(move |source| (*source, posting.asteroid()))
         })
         .collect();
-    routes
+    apart
         .into_iter()
-        .filter_map(|route| {
+        .filter_map(|(source, destination)| {
             Some(FlightLine {
-                from: view.asteroid_body(route.source)?.pos,
-                to: route.destination,
+                from: view.asteroid_body(source)?.pos,
+                to: view.asteroid_body(destination)?.pos,
                 previewed: true,
             })
         })
@@ -650,7 +626,6 @@ fn marked_on_bar(roster: &Roster, gesture: Option<&WheelGesture>) -> Option<BarM
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
-    use neumannarch_sim::state::Send;
 
     use super::*;
     use crate::display::local::{Local, PLAYER, RIVAL};
@@ -845,26 +820,16 @@ mod tests {
     }
 
     #[test]
-    fn a_forming_send_is_leaving_its_asteroid_and_arriving_at_the_other() {
+    fn a_re_homed_unit_leaves_its_asteroids_wheel_at_once_and_flies_on_the_belt() {
         let mut local = Local::start(2);
         local.want(&[(at(0), CONSTRUCTOR, 1)]);
         local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
         let scene = scene(&local);
 
-        let leaving = entries(&scene, at(0), PLAYER, CONSTRUCTOR);
-        assert_eq!(
-            leaving[0].entry,
-            Entry::Leaving {
-                count: 1,
-                to: at(1)
-            }
+        assert!(
+            entries(&scene, at(0), PLAYER, CONSTRUCTOR).is_empty(),
+            "the wheel keeps a ship that is already flying"
         );
-        assert!(leaving[0].entry.dim(), "a unit on its way out is dimmed");
-        assert_eq!(
-            leaving[0].entry.phrase("Constructor"),
-            "Constructor leaving for Asteroid 2"
-        );
-
         let arriving = entries(&scene, at(1), PLAYER, CONSTRUCTOR);
         assert_eq!(
             arriving[0].entry,
@@ -873,32 +838,18 @@ mod tests {
                 from: at(0)
             }
         );
+        assert!(arriving[0].entry.dim(), "a unit on its way is dimmed");
         assert_eq!(
             arriving[0].entry.phrase("Constructor"),
             "Constructor arriving from Asteroid 1"
         );
-    }
-
-    #[test]
-    fn a_flying_unit_leaves_its_asteroids_wheel_and_flies_on_the_belt() {
-        let mut local = Local::start(2);
-        local.want(&[(at(0), CONSTRUCTOR, 1)]);
-        local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
-        local.run(Send::FORMING_TICKS + 1);
-        let scene = scene(&local);
 
         assert_eq!(scene.flights.len(), 1);
-        assert_eq!(scene.flights[0].to, at(1));
-        assert!(
-            entries(&scene, at(0), PLAYER, CONSTRUCTOR).is_empty(),
-            "the wheel forgets a ship in flight"
-        );
+        let ahead = scene.flights[0].to;
+        let destination = local.view().asteroid_body(at(1)).expect("the destination");
         assert_eq!(
-            entries(&scene, at(1), PLAYER, CONSTRUCTOR)[0].entry,
-            Entry::Arriving {
-                count: 1,
-                from: at(0)
-            }
+            ahead, destination.pos,
+            "the line runs to where the asteroid stands now, so the two move together"
         );
     }
 
@@ -1099,7 +1050,14 @@ mod tests {
             .iter()
             .find(|flight| flight.previewed)
             .expect("the drag draws its own flight line");
-        assert_eq!(line.to, at(1));
+        assert_eq!(
+            line.to,
+            local
+                .view()
+                .asteroid_body(at(1))
+                .expect("the destination")
+                .pos
+        );
     }
 
     #[test]

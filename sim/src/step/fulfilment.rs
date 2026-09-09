@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::posting::Posting;
 use crate::roster::Kind;
-use crate::state::{Route, Send, State};
+use crate::state::State;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Cancellation {
@@ -27,27 +27,21 @@ impl Cancellation {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Assigned {
     pub(crate) placements: Vec<Posting>,
-    pub(crate) sends: Vec<Send>,
+    pub(crate) sent_to: BTreeMap<EntityId, AsteroidId>,
+    pub(crate) still_short: BTreeMap<Posting, u32>,
     pub(crate) openings: Vec<Posting>,
     pub(crate) cancellations: Vec<Cancellation>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct ShortfallAssignment {
-    pub(crate) from_reserve: Vec<Posting>,
-    pub(crate) sent_units: BTreeMap<Route, Vec<EntityId>>,
-    pub(crate) still_short: BTreeMap<Posting, u32>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct SendSchedules {
-    departing: Vec<Send>,
-    staying: BTreeSet<Route>,
-}
-
-impl SendSchedules {
-    pub(crate) fn nothing_held_back() -> SendSchedules {
-        SendSchedules::default()
+impl Assigned {
+    fn sent_away(&self, state: &State) -> BTreeMap<Posting, u32> {
+        let mut gone: BTreeMap<Posting, u32> = BTreeMap::new();
+        for entity in self.sent_to.keys().map(|id| state.entity(*id)) {
+            *gone
+                .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+                .or_default() += 1;
+        }
+        gone
     }
 }
 
@@ -90,80 +84,35 @@ impl<'a> Fulfilment<'a> {
         }
     }
 
-    fn count(&self, posting: Posting) -> u32 {
-        self.posted.get(&posting).copied().unwrap_or_default()
-    }
-
     pub(crate) fn run(mut self) -> Assigned {
-        let assignment = self.assign();
-        let schedules = self.schedule(&assignment);
-        self.settle(&assignment, schedules)
-    }
-
-    pub(crate) fn assign(&mut self) -> ShortfallAssignment {
-        let mut assignment = ShortfallAssignment::default();
+        let mut assigned = Assigned::default();
+        let mut still_short: BTreeMap<Posting, u32> = BTreeMap::new();
         let mut reserved: BTreeMap<SeatId, BTreeMap<RowId, u32>> = BTreeMap::new();
         for (posting, shortfall) in shortfalls(self.state, &self.posted) {
             let from_reserve = self.take_reserved(posting, shortfall, &mut reserved);
             for _ in 0..from_reserve {
-                assignment.from_reserve.push(posting);
+                assigned.placements.push(posting);
             }
-            let mut taking = 0;
-            for surplus in self.nearest_surplus(posting, shortfall - from_reserve) {
-                assignment
-                    .sent_units
-                    .entry(Route {
-                        source: surplus.asteroid,
-                        destination: posting.asteroid(),
-                        seat: posting.seat(),
-                    })
-                    .or_default()
-                    .push(surplus.entity);
-                taking += 1;
+            let sent = self.nearest_surplus(posting, shortfall - from_reserve);
+            for surplus in &sent {
+                assigned.sent_to.insert(surplus.entity, posting.asteroid());
             }
-            assignment
-                .still_short
-                .insert(posting, shortfall - from_reserve - taking);
+            still_short.insert(posting, shortfall - from_reserve - sent.len() as u32);
         }
-        assignment
-    }
-
-    pub(crate) fn schedule(&self, assignment: &ShortfallAssignment) -> SendSchedules {
-        let mut schedules = SendSchedules::default();
-        for (route, members) in &assignment.sent_units {
-            let mut members = members.clone();
-            members.sort_unstable();
-            match Send::joining(self.state, *route, &members) {
-                Some(send) => schedules.departing.push(send),
-                None => {
-                    schedules.staying.insert(*route);
-                }
-            }
+        for (posting, short) in &still_short {
+            self.reconcile(&mut assigned, *posting, *short);
         }
-        schedules
-    }
-
-    pub(crate) fn settle(
-        &self,
-        assignment: &ShortfallAssignment,
-        schedules: SendSchedules,
-    ) -> Assigned {
-        let held_back = self.held_back(assignment, &schedules.staying);
-        let leaving = self.leaving(assignment, &schedules.staying);
-        let mut assigned = Assigned {
-            placements: assignment.from_reserve.clone(),
-            sends: schedules.departing,
-            openings: Vec::new(),
-            cancellations: Vec::new(),
-        };
-        for (posting, still) in &assignment.still_short {
-            let back = held_back.get(posting).copied().unwrap_or_default();
-            self.reconcile(&mut assigned, *posting, still + back);
-        }
-        for (posting, over) in self.unwanted_frames(&leaving) {
+        for (posting, over) in self.unwanted_frames(&assigned.sent_away(self.state)) {
             self.cancel(&mut assigned, posting, over);
         }
-        assigned
+        Assigned {
+            still_short,
+            ..assigned
+        }
+    }
+
+    fn count(&self, posting: Posting) -> u32 {
+        self.posted.get(&posting).copied().unwrap_or_default()
     }
 
     fn take_reserved(
@@ -267,48 +216,6 @@ impl<'a> Fulfilment<'a> {
         });
         open
     }
-
-    fn held_back(
-        &self,
-        assignment: &ShortfallAssignment,
-        staying: &BTreeSet<Route>,
-    ) -> BTreeMap<Posting, u32> {
-        let mut back: BTreeMap<Posting, u32> = BTreeMap::new();
-        for (route, members) in &assignment.sent_units {
-            if staying.contains(route) {
-                self.tally(route.destination, route.seat, members, &mut back);
-            }
-        }
-        back
-    }
-
-    fn leaving(
-        &self,
-        assignment: &ShortfallAssignment,
-        staying: &BTreeSet<Route>,
-    ) -> BTreeMap<Posting, u32> {
-        let mut gone: BTreeMap<Posting, u32> = BTreeMap::new();
-        for (route, members) in &assignment.sent_units {
-            if !staying.contains(route) {
-                self.tally(route.source, route.seat, members, &mut gone);
-            }
-        }
-        gone
-    }
-
-    fn tally(
-        &self,
-        asteroid: AsteroidId,
-        seat: SeatId,
-        members: &[EntityId],
-        into: &mut BTreeMap<Posting, u32>,
-    ) {
-        for entity in members.iter().map(|id| self.state.entity(*id)) {
-            *into
-                .entry(Posting::of(asteroid, seat, entity.row()))
-                .or_default() += 1;
-        }
-    }
 }
 
 fn shortfalls(state: &State, posted: &BTreeMap<Posting, u32>) -> BTreeMap<Posting, u32> {
@@ -352,7 +259,10 @@ fn surpluses(
     frames: &BTreeMap<Posting, Vec<usize>>,
 ) -> BTreeMap<Posting, Vec<EntityId>> {
     let mut standing: BTreeMap<Posting, Vec<EntityId>> = BTreeMap::new();
-    for entity in state.entities().filter(|entity| entity.flight().is_none()) {
+    for entity in state
+        .entities()
+        .filter(|entity| entity.standing().is_some())
+    {
         standing
             .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
             .or_default()

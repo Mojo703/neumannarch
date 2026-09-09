@@ -283,7 +283,7 @@ impl Plan {
             .into_iter()
             .flatten()
             .filter(|(row, _)| survey.is_structure(**row))
-            .map(|(row, held)| (*row, held.present + held.leaving))
+            .map(|(row, held)| (*row, held.present))
             .collect();
         for (row, count) in standing {
             self.keep(Priority::Economy, asteroid, row, count);
@@ -453,7 +453,7 @@ impl Plan {
                     survey
                         .count(at, *row)
                         .saturating_sub(self.planned(at, *row))
-                        .min(survey.at_home(at, *row))
+                        .min(survey.standing(at, *row))
                 })
                 .sum();
             let short: u32 = survey

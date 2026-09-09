@@ -78,9 +78,8 @@ lines, left to right:
   arriving above the want. Nothing complete is ever scrapped, so
   lowering a want moves units from the dot to the hollow dot and they
   stay until a shortfall elsewhere wants them.
-- **In transit:** an arrow mark and one count of units leaving (in a
-  send forming here) or arriving (in a send toward here); the arrow
-  points away from the asteroid for leaving and toward it for arriving.
+- **In transit:** an arrow mark and one count of units arriving (in a
+  send toward here); the arrow points toward the asteroid.
 - **Wanted:** a hollow mark and the count still to come: the want not
   covered by present or arriving, the frame building counted among
   them, so the numeral holds while a frame opens and fills. Where a
@@ -136,8 +135,8 @@ numerals on the HUD. Ownership is colour, and colour is the team's; a
 team's seats share it. Hovering any line shows one short phrase beside
 it naming the row and saying what the line is and why: "Frigate here",
 "Frigate building", "Frigate short of metals", "No builder for Frigate",
-"Frigate wanted", "Frigate arriving from Asteroid 3", "Frigate leaving for
-Asteroid 5". Hovering a glyph shows the row's name alone.
+"Frigate wanted", "Frigate arriving from Asteroid 3". Hovering a glyph
+shows the row's name alone.
 
 ## The glyph
 
@@ -273,9 +272,9 @@ hull, and the combatant the player reads is the force.
 ## Flights
 
 A ship between asteroids carries its glyph as a billboard, with a line
-ahead along the path its schedule will fly, the sim's own prediction
-integrated from the ship's body to its arrival, never a straight
-line. The line is faint at the ship and full at the destination, and
+ahead running to its destination where it is now, so the line and the
+asteroid it points at move together and never come apart. The line is
+faint at the ship and full at the destination, and
 its dashes roll toward the destination, so its direction reads from a
 still frame and from motion alike. Arrival moves the glyph
 from the ship into the wheel's present count.
