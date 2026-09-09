@@ -1,5 +1,5 @@
 use crate::materials::Material;
-use crate::roster::row::{Kind, Row, Weapon};
+use crate::roster::row::{Effect, Kind, Row};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Glyph {
@@ -54,14 +54,14 @@ impl Tier {
 impl Row {
     pub fn glyph(&self) -> Glyph {
         Glyph {
-            frame: match (self.kind(), self.is_armed()) {
+            frame: match (self.kind(), self.does_damage()) {
                 (Kind::Unit, _) => Frame::Unit,
                 (Kind::Structure, false) => Frame::Structure,
                 (Kind::Structure, true) => Frame::Defence,
             },
             role: self.role,
-            material: self.weapons.iter().find_map(|weapon| match weapon {
-                Weapon::Extract { material, .. } => Some(*material),
+            material: self.effects.iter().find_map(|effect| match effect {
+                Effect::Extract { material, .. } => Some(*material),
                 _ => None,
             }),
             tier: self.tier,

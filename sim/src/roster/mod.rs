@@ -1,7 +1,8 @@
 use core::ops::Index;
 
 pub use glyph::{Frame, Glyph, Role, Tier};
-pub use row::{Kind, Row, Weapon, Weights};
+pub(crate) use row::DamagePlace;
+pub use row::{Effect, Hitscan, Kind, Row, Weights};
 pub use shipped::{
     CONSTRUCTOR, ENERGY_EXTRACTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
     VOLATILES_EXTRACTOR,
@@ -163,12 +164,12 @@ mod tests {
     fn reaching(roster: &Roster, meters: f64) -> Row {
         Row {
             name: "variant",
-            weapons: vec![Weapon::Damage {
+            effects: vec![Effect::Damage(Hitscan {
                 range: Real(meters),
                 rate: Real(1.0),
                 damage: Real(1.0),
                 falloff: Real(0.0),
-            }],
+            })],
             ..roster[RAIDER].clone()
         }
     }

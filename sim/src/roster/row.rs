@@ -20,7 +20,7 @@ pub struct Row {
     pub hp: Real,
     pub plating: Real,
     pub capacity: Materials,
-    pub weapons: Vec<Weapon>,
+    pub effects: Vec<Effect>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -41,20 +41,24 @@ impl Weights {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Weapon {
-    Damage {
-        range: Real,
-        rate: Real,
-        damage: Real,
-        falloff: Real,
-    },
-    Build {
-        rate: Real,
-    },
-    Extract {
-        material: Material,
-        rate: Real,
-    },
+pub struct Hitscan {
+    pub range: Real,
+    pub rate: Real,
+    pub damage: Real,
+    pub falloff: Real,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    Damage(Hitscan),
+    Build { rate: Real },
+    Extract { material: Material, rate: Real },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct DamagePlace {
+    pub(crate) in_row: u8,
+    pub(crate) hitscan: Hitscan,
 }
 
 impl Row {
@@ -66,12 +70,12 @@ impl Row {
         }
     }
 
-    pub fn is_armed(&self) -> bool {
-        self.weapons.iter().any(|weapon| weapon.range().is_some())
+    pub fn does_damage(&self) -> bool {
+        self.hitscans().next().is_some()
     }
 
     pub(crate) fn standoff(&self) -> Option<f64> {
-        self.is_armed()
+        self.does_damage()
             .then(|| 0.5 * (self.max_damage_range() - Belt::LINES_INSIDE_RANGE_METERS))
     }
 
@@ -81,7 +85,7 @@ impl Row {
     }
 
     pub(crate) fn runs_passes(&self) -> bool {
-        self.role == Role::ShortFire && self.is_armed()
+        self.role == Role::ShortFire && self.does_damage()
     }
 
     pub fn max_damage_range(&self) -> f64 {
@@ -89,36 +93,30 @@ impl Row {
     }
 
     pub(crate) fn damage_ranges(&self) -> impl Iterator<Item = f64> + '_ {
-        self.weapons.iter().filter_map(Weapon::range)
-    }
-
-    pub(crate) fn damage_range(&self, weapon: u8) -> Option<f64> {
-        self.weapons
-            .get(usize::from(weapon))
-            .and_then(Weapon::range)
+        self.hitscans().map(|hitscan| hitscan.range.0)
     }
 
     pub fn dps_through(&self, plating: f64) -> f64 {
-        self.weapons
-            .iter()
-            .map(|weapon| weapon.dps_through(plating))
+        self.hitscans()
+            .map(|hitscan| hitscan.dps_through(plating))
             .sum()
     }
 
-    pub(crate) fn damage_weapons(&self) -> impl Iterator<Item = u8> + '_ {
-        self.weapons
-            .iter()
-            .enumerate()
-            .filter(|(_, weapon)| weapon.range().is_some())
-            .filter_map(|(at, _)| u8::try_from(at).ok())
+    pub(crate) fn damage_places(&self) -> impl Iterator<Item = DamagePlace> + '_ {
+        self.effects.iter().enumerate().filter_map(|(at, effect)| {
+            Some(DamagePlace {
+                in_row: u8::try_from(at).ok()?,
+                hitscan: effect.hitscan()?,
+            })
+        })
     }
 
     pub fn builds(&self) -> impl Iterator<Item = f64> + '_ {
-        self.weapons.iter().filter_map(Weapon::build_rate)
+        self.effects.iter().filter_map(Effect::build_rate)
     }
 
     pub fn extracts(&self) -> impl Iterator<Item = (Material, f64)> + '_ {
-        self.weapons.iter().filter_map(Weapon::extraction)
+        self.effects.iter().filter_map(Effect::extraction)
     }
 
     pub fn extracts_of(&self, material: Material) -> f64 {
@@ -127,34 +125,37 @@ impl Row {
             .map(|(_, rate)| rate)
             .sum()
     }
+
+    fn hitscans(&self) -> impl Iterator<Item = Hitscan> + '_ {
+        self.effects.iter().filter_map(Effect::hitscan)
+    }
 }
 
-impl Weapon {
-    fn range(&self) -> Option<f64> {
-        match *self {
-            Weapon::Damage { range, .. } => Some(range.0),
-            Weapon::Build { .. } | Weapon::Extract { .. } => None,
-        }
-    }
-
+impl Hitscan {
     fn dps_through(&self, plating: f64) -> f64 {
+        (self.damage.0 - plating).max(0.0) * self.rate.0
+    }
+}
+
+impl Effect {
+    fn hitscan(&self) -> Option<Hitscan> {
         match *self {
-            Weapon::Damage { rate, damage, .. } => (damage.0 - plating).max(0.0) * rate.0,
-            Weapon::Build { .. } | Weapon::Extract { .. } => 0.0,
+            Effect::Damage(hitscan) => Some(hitscan),
+            Effect::Build { .. } | Effect::Extract { .. } => None,
         }
     }
 
     fn build_rate(&self) -> Option<f64> {
         match *self {
-            Weapon::Build { rate } => Some(rate.0),
-            Weapon::Damage { .. } | Weapon::Extract { .. } => None,
+            Effect::Build { rate } => Some(rate.0),
+            Effect::Damage(_) | Effect::Extract { .. } => None,
         }
     }
 
     fn extraction(&self) -> Option<(Material, f64)> {
         match *self {
-            Weapon::Extract { material, rate } => Some((material, rate.0)),
-            Weapon::Damage { .. } | Weapon::Build { .. } => None,
+            Effect::Extract { material, rate } => Some((material, rate.0)),
+            Effect::Damage(_) | Effect::Build { .. } => None,
         }
     }
 }
@@ -163,7 +164,7 @@ impl Weapon {
 mod tests {
     use super::*;
 
-    fn row(manoeuvring: f64, weapons: Vec<Weapon>) -> Row {
+    fn row(manoeuvring: f64, effects: Vec<Effect>) -> Row {
         Row {
             name: "test",
             role: Role::Scout,
@@ -174,24 +175,24 @@ mod tests {
             hp: Real(1.0),
             plating: Real(0.0),
             capacity: Materials::ZERO,
-            weapons,
+            effects,
         }
     }
 
-    fn extract(material: Material, rate: f64) -> Weapon {
-        Weapon::Extract {
+    fn extract(material: Material, rate: f64) -> Effect {
+        Effect::Extract {
             material,
             rate: Real(rate),
         }
     }
 
-    fn damage(damage: f64, range: f64, rate: f64) -> Weapon {
-        Weapon::Damage {
+    fn damage(damage: f64, range: f64, rate: f64) -> Effect {
+        Effect::Damage(Hitscan {
             range: Real(range),
             rate: Real(rate),
             damage: Real(damage),
             falloff: Real(0.0),
-        }
+        })
     }
 
     #[test]
@@ -202,21 +203,60 @@ mod tests {
 
     #[test]
     fn dps_through_subtracts_plating_per_hit_and_floors_at_zero() {
-        let armed = row(1.0, vec![damage(6.0, 6.0, 2.0), damage(20.0, 14.0, 1.0)]);
-        assert_eq!(armed.dps_through(0.0), 32.0);
-        assert_eq!(armed.dps_through(1.0), 29.0);
-        assert_eq!(armed.dps_through(10.0), 10.0);
-        assert_eq!(armed.dps_through(100.0), 0.0);
+        let two_hitscans = row(1.0, vec![damage(6.0, 6.0, 2.0), damage(20.0, 14.0, 1.0)]);
+        assert_eq!(two_hitscans.dps_through(0.0), 32.0);
+        assert_eq!(two_hitscans.dps_through(1.0), 29.0);
+        assert_eq!(two_hitscans.dps_through(10.0), 10.0);
+        assert_eq!(two_hitscans.dps_through(100.0), 0.0);
     }
 
     #[test]
-    fn range_and_arms_come_from_damage_weapons_only() {
-        let unarmed = row(1.0, vec![Weapon::Build { rate: Real(3.0) }]);
-        assert!(!unarmed.is_armed());
-        assert_eq!(unarmed.max_damage_range(), 0.0);
-        let armed = row(1.0, vec![damage(3.0, 3.0, 4.0), damage(20.0, 14.0, 1.0)]);
-        assert!(armed.is_armed());
-        assert_eq!(armed.max_damage_range(), 14.0);
+    fn only_a_hitscan_gives_a_row_damage_and_a_range() {
+        let builder = row(1.0, vec![Effect::Build { rate: Real(3.0) }]);
+        assert!(!builder.does_damage());
+        assert_eq!(builder.max_damage_range(), 0.0);
+        let two_hitscans = row(1.0, vec![damage(3.0, 3.0, 4.0), damage(20.0, 14.0, 1.0)]);
+        assert!(two_hitscans.does_damage());
+        assert_eq!(two_hitscans.max_damage_range(), 14.0);
+    }
+
+    #[test]
+    fn a_damage_place_carries_the_stats_standing_where_it_names_in_the_row() {
+        let mixed = row(
+            1.0,
+            vec![
+                Effect::Build { rate: Real(3.0) },
+                damage(3.0, 3.0, 4.0),
+                extract(Material::Metals, 1.0),
+                damage(20.0, 14.0, 1.0),
+            ],
+        );
+
+        let places: Vec<DamagePlace> = mixed.damage_places().collect();
+
+        assert_eq!(
+            places,
+            vec![
+                DamagePlace {
+                    in_row: 1,
+                    hitscan: Hitscan {
+                        range: Real(3.0),
+                        rate: Real(4.0),
+                        damage: Real(3.0),
+                        falloff: Real(0.0),
+                    },
+                },
+                DamagePlace {
+                    in_row: 3,
+                    hitscan: Hitscan {
+                        range: Real(14.0),
+                        rate: Real(1.0),
+                        damage: Real(20.0),
+                        falloff: Real(0.0),
+                    },
+                },
+            ]
+        );
     }
 
     #[test]
@@ -224,10 +264,10 @@ mod tests {
         let mixed = row(
             0.0,
             vec![
-                Weapon::Build { rate: Real(3.0) },
+                Effect::Build { rate: Real(3.0) },
                 extract(Material::Volatiles, 2.0),
                 damage(1.0, 1.0, 1.0),
-                Weapon::Build { rate: Real(15.0) },
+                Effect::Build { rate: Real(15.0) },
                 extract(Material::Volatiles, 0.5),
             ],
         );

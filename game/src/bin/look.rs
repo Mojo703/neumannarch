@@ -286,7 +286,7 @@ fn ship(seat: u8, row: RowId, pos: Vec3) -> EntityView {
         glyph: glyph_of(row),
         pos,
         range: Roster::shipped()[row]
-            .is_armed()
+            .does_damage()
             .then(|| Roster::shipped()[row].max_damage_range()),
     }
 }
@@ -475,7 +475,7 @@ fn fight_scene() -> Scene {
                 .stations_of(line.team, line.row)
                 .first()
                 .copied()
-                .expect("an armed row takes a station");
+                .expect("a row that does damage takes a station");
             ship(line.team.0, line.row, station)
         })
         .collect();

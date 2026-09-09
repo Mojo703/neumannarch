@@ -10,12 +10,12 @@ use crate::bots::scripted::personality::Personality;
 use crate::bots::scripted::plan::*;
 use crate::harness::fixture::{Fixture, surveyed};
 
-fn armed(count: usize) -> Vec<RowId> {
+fn damage_rows(count: usize) -> Vec<RowId> {
     let roster = Roster::shipped();
     let rows: Vec<RowId> = roster
         .iter()
         .map(|(id, _)| id)
-        .filter(|row| roster[*row].is_armed())
+        .filter(|row| roster[*row].does_damage())
         .collect();
     (0..count).map(|at| rows[at % rows.len()]).collect()
 }
@@ -75,7 +75,7 @@ fn a_decision_over_the_tick_s_cap_keeps_every_lowering_and_loses_only_its_lowest
     let asking: Vec<Posting> = fixture
         .free(2 * MAX_COMMANDS_PER_TICK)
         .into_iter()
-        .zip(armed(2 * MAX_COMMANDS_PER_TICK))
+        .zip(damage_rows(2 * MAX_COMMANDS_PER_TICK))
         .map(|(asteroid, row)| Posting::of(asteroid, SeatId(0), row))
         .collect();
     let plan = Plan {

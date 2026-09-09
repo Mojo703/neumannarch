@@ -86,7 +86,7 @@ impl Guarantees {
                 if view
                     .present
                     .iter()
-                    .any(|it| it.seat == seat && roster[it.row].is_armed())
+                    .any(|it| it.seat == seat && roster[it.row].does_damage())
                 {
                     watched.fielded.entry(seat).or_insert(now);
                 }
@@ -114,7 +114,7 @@ impl Guarantees {
             let at = self.fielded.get(seat).copied();
             if at.is_none_or(|at| at > arming) {
                 return Some(format!(
-                    "seat {} fielded its first armed unit at {:?}, not inside {:.0}s",
+                    "seat {} fielded its first unit that does damage at {:?}, not inside {:.0}s",
                     seat.0,
                     at.map(Time::seconds),
                     arming.seconds()
@@ -256,7 +256,7 @@ impl Guarantees {
         let from = *self.full_since.entry(view.seat).or_insert(view.time);
         if view.time.since(from).seconds() >= HOARDING_SECONDS {
             self.hoard = Some(format!(
-                "seat {} sat at its stockpile's capacity from {:.0}s to {:.0}s spending {:.0} a second against builders that could spend {build_rate:.0}, with an armed row it could afford",
+                "seat {} sat at its stockpile's capacity from {:.0}s to {:.0}s spending {:.0} a second against builders that could spend {build_rate:.0}, with a row that does damage it could afford",
                 view.seat.0,
                 from.seconds(),
                 view.time.seconds(),

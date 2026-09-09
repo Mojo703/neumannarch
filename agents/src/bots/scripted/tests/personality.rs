@@ -19,7 +19,7 @@ fn of(weights: &[(RowId, f64)], row: RowId) -> f64 {
 }
 
 #[test]
-fn every_mix_is_a_set_of_shares_over_the_armed_rows() {
+fn every_mix_is_a_set_of_shares_over_the_rows_that_do_damage() {
     for personality in [Personality::turtle(), Personality::expand()] {
         let weights = weights(&personality, 0.0, 0.0);
         assert_eq!(weights.len(), 3);

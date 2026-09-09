@@ -6,7 +6,7 @@ use crate::belt::Belt;
 use crate::fixture::World;
 use crate::ids::{AsteroidId, RowId, TeamId};
 use crate::orbit::body::Gravity;
-use crate::roster::{CONSTRUCTOR, FRIGATE, Kind, LANCER, METALS_EXTRACTOR, RAIDER, Weapon};
+use crate::roster::{CONSTRUCTOR, FRIGATE, Kind, LANCER, METALS_EXTRACTOR, RAIDER};
 use crate::state::Rolls;
 use crate::time::{Tick, Time};
 
@@ -77,13 +77,12 @@ fn plane(world: &mut World, unit: EntityId) -> Vec3 {
 
 fn reload_ticks(world: &World, row: RowId) -> u64 {
     let rate = world.state[row]
-        .weapons
-        .iter()
-        .find_map(|weapon| match weapon {
-            Weapon::Damage { rate, .. } => Some(rate.0),
-            _ => None,
-        })
-        .expect("an armed row");
+        .damage_places()
+        .next()
+        .expect("a row that does damage")
+        .hitscan
+        .rate
+        .0;
     (f64::from(TICKS_PER_SECOND) / rate) as u64
 }
 
@@ -271,7 +270,7 @@ fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_p
         let rolls = Rolls::called(&world.state);
         rolls[HOME]
             .station(chaser)
-            .expect("an armed unit is stationed")
+            .expect("a unit that does damage is stationed")
     };
     let asteroid = world.state.asteroid_body(HOME);
     world.state.steer(chaser, Body::new(station, asteroid.vel));
@@ -302,7 +301,7 @@ fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_p
 }
 
 #[test]
-fn an_unarmed_unit_is_steered_by_no_enemy_in_its_zone() {
+fn a_unit_that_does_no_damage_is_steered_by_no_enemy_in_its_zone() {
     let mut world = world();
     let builder = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
     let mut alone = World {
@@ -316,13 +315,13 @@ fn an_unarmed_unit_is_steered_by_no_enemy_in_its_zone() {
         assert_eq!(
             world.body(builder).pos,
             alone.body(builder).pos,
-            "an enemy in the zone steered an unarmed unit"
+            "an enemy in the zone steered a unit that does no damage"
         );
     }
 }
 
 #[test]
-fn an_unarmed_arrival_comes_in_from_the_rim_to_its_own_circle() {
+fn an_arrival_that_does_no_damage_comes_in_from_the_rim_to_its_own_circle() {
     let mut world = World::started(&[TeamId(0)]);
     let (from, to) = neighbours(&world.state)
         .first()
@@ -348,7 +347,7 @@ fn an_unarmed_arrival_comes_in_from_the_rim_to_its_own_circle() {
     let rolls = Rolls::called(&world.state);
     let station = rolls[to]
         .station(unit)
-        .expect("an unarmed unit is stationed");
+        .expect("a unit that does no damage is stationed");
     let behind = world.body(unit).pos.distance(station);
     assert!(
         behind < WALKING_METERS,
@@ -376,7 +375,7 @@ fn no_unit_of_the_shipped_roster_ever_enters_the_asteroid() {
 }
 
 #[test]
-fn an_unarmed_unit_circles_its_asteroid_within_a_minute_on_its_own_radius() {
+fn a_unit_that_does_no_damage_circles_its_asteroid_within_a_minute_on_its_own_radius() {
     let mut world = world();
     let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
     world.steers(seconds(SETTLING_SECONDS));
@@ -399,7 +398,7 @@ fn an_unarmed_unit_circles_its_asteroid_within_a_minute_on_its_own_radius() {
 }
 
 #[test]
-fn two_unarmed_units_of_one_row_circle_on_two_planes_and_never_share_a_point() {
+fn two_units_of_a_row_that_does_no_damage_circle_on_two_planes_and_never_share_a_point() {
     let mut world = world();
     let one = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
     let other = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
@@ -423,7 +422,7 @@ fn two_unarmed_units_of_one_row_circle_on_two_planes_and_never_share_a_point() {
 }
 
 #[test]
-fn an_unarmed_units_circling_is_reproduced_by_a_rewind_to_the_same_tick() {
+fn the_circling_of_a_unit_that_does_no_damage_is_reproduced_by_a_rewind_to_the_same_tick() {
     let mut world = world();
     let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
     let start = world.state.clone();
@@ -452,11 +451,13 @@ fn two_sides_form_two_lines_facing_across_the_stage() {
     world.steers(seconds(60));
 
     let rolls = Rolls::called(&world.state);
-    let standoff = world.state[LANCER].standoff().expect("an armed row");
+    let standoff = world.state[LANCER]
+        .standoff()
+        .expect("a row that does damage");
     for one in sides.iter().flatten() {
         let station = rolls[HOME]
             .station(*one)
-            .expect("an armed unit is stationed");
+            .expect("a unit that does damage is stationed");
         let off = world.body(*one).pos.distance(station);
         assert!(off < 1.0, "{one:?} holds {off} meters off its station");
     }
@@ -520,7 +521,9 @@ fn an_arrival_walks_from_the_rim_to_its_station() {
     world.steers(seconds(60));
 
     let rolls = Rolls::called(&world.state);
-    let station = rolls[to].station(unit).expect("an armed unit is stationed");
+    let station = rolls[to]
+        .station(unit)
+        .expect("a unit that does damage is stationed");
     let off = world.body(unit).pos.distance(station);
     assert!(off < 1.0, "it holds {off} meters off the station it joined");
 }

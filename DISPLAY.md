@@ -360,12 +360,12 @@ and the opening of a match all open at that zoom.
 ## Ranges
 
 Every asteroid's zone is drawn as one faint circle at the zone's radius in
-the belt, always, in one ink. Every armed ship at an asteroid carries one
-faint circle at its longest weapon range in its owner's colour; a ship
-in flight carries none, since it is not a shooter. Both are painted on
-the HUD over the belt camera's projection, thin, at low alpha, fading
-with zoom as every resting mark does, and are never brighter than a
-wheel. Nothing else on the HUD states a distance.
+the belt, always, in one ink. Every ship that does damage at an asteroid
+carries one faint circle at its longest damage range in its owner's
+colour; a ship in flight carries none, since it is not a shooter. Both
+are painted on the HUD over the belt camera's projection, thin, at low
+alpha, fading with zoom as every resting mark does, and are never
+brighter than a wheel. Nothing else on the HUD states a distance.
 
 ## Words on screen
 

@@ -76,7 +76,7 @@ impl Personality {
         }
     }
 
-    pub fn armed_unit_cost(&self, roster: &Roster, weights: &[(RowId, f64)]) -> f64 {
+    pub fn damage_unit_cost(&self, roster: &Roster, weights: &[(RowId, f64)]) -> f64 {
         weights
             .iter()
             .filter_map(|(row, share)| roster.get(*row).map(|row| row.cost.total() * share))
@@ -107,7 +107,7 @@ impl Personality {
         )
     }
 
-    pub fn armed_mix(&self, survey: &Survey) -> Materials {
+    pub fn damage_mix(&self, survey: &Survey) -> Materials {
         self.shares(survey)
             .iter()
             .filter_map(|(row, share)| survey.roster.get(*row).map(|stats| stats.cost * *share))
@@ -115,10 +115,10 @@ impl Personality {
     }
 
     pub fn to_build(&self, survey: &Survey) -> Materials {
-        let armed = self.armed_mix(survey);
+        let damage_mix = self.damage_mix(survey);
         let laid_down = survey.build_rate() * BUILD_HORIZON;
-        let units = (laid_down / armed.total().max(f64::MIN_POSITIVE)).max(1.0);
-        survey.standing_cost() + armed * units
+        let units = (laid_down / damage_mix.total().max(f64::MIN_POSITIVE)).max(1.0);
+        survey.standing_cost() + damage_mix * units
     }
 
     pub fn demand(&self, survey: &Survey) -> Materials {

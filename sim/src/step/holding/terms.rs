@@ -103,7 +103,7 @@ mod tests {
             hp: Real(1.0),
             plating: Real(0.0),
             capacity: Materials::ZERO,
-            weapons: vec![],
+            effects: vec![],
         }
     }
 

@@ -26,11 +26,11 @@ impl Roles {
                 .filter_map(|material| best(roster, material).map(|row| (material, row)))
                 .collect(),
             stores: ranked(roster, |row| {
-                (!row.is_armed() && builds(row) == 0.0 && row.capacity.total() > 0.0)
+                (!row.does_damage() && builds(row) == 0.0 && row.capacity.total() > 0.0)
                     .then(|| row.capacity.total() / row.cost.total())
             }),
             army: ranked(roster, |row| {
-                (row.kind() == Kind::Unit && row.is_armed())
+                (row.kind() == Kind::Unit && row.does_damage())
                     .then(|| row.dps_through(0.0) / row.cost.total())
             }),
         }

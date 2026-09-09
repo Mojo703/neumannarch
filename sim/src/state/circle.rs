@@ -155,10 +155,10 @@ mod tests {
     }
 
     #[test]
-    fn every_unarmed_unit_of_the_shipped_roster_circles_a_radius_a_row_of_its_limit_can_hold() {
+    fn every_unit_that_does_no_damage_circles_a_radius_a_row_of_its_limit_can_hold() {
         let state = state();
         for (id, row) in Roster::shipped().iter() {
-            if row.kind() != Kind::Unit || row.is_armed() {
+            if row.kind() != Kind::Unit || row.does_damage() {
                 continue;
             }
             let circle = Circle::of(EntityId(0), row, &state[HOME], state.asteroid_body(HOME));
@@ -169,7 +169,11 @@ mod tests {
                 row.name,
                 circle.radius_meters
             );
-            assert_eq!(id, CONSTRUCTOR, "{} is a second unarmed unit", row.name);
+            assert_eq!(
+                id, CONSTRUCTOR,
+                "{} is a second unit that does no damage",
+                row.name
+            );
         }
     }
 

@@ -112,28 +112,20 @@ adds it here in the same change; a unit that deletes one removes it.
   orbit has, rather than from the ship's offset, which a ship at the
   centre has not, would delete it, at the price of a push that leans one
   way at every other point inside the floor.
-- Two unarmed units can circle one plane from one starting phase. A
-  circle's plane and phase are drawn from the unit's identifier through
-  the digest, and nothing holds two draws apart, so a pair whose digests
-  collide holds one station; separation parts them there as it parts any
-  pair that meets. A plane taken from a fixed sequence per asteroid, the
-  nth unit standing at the nth plane, would delete it, at the price of a
-  unit that changed its circle whenever another arrived or died.
+- Two units that do no damage can circle one plane from one starting
+  phase. A circle's plane and phase are drawn from the unit's
+  identifier through the digest, and nothing holds two draws apart, so a
+  pair whose digests collide holds one station; separation parts them
+  there as it parts any pair that meets. A plane taken from a fixed
+  sequence per asteroid, the nth unit standing at the nth plane, would
+  delete it, at the price of a unit that changed its circle whenever
+  another arrived or died.
 - `Threats::best` answers with no target where the shooter's team and
-  plating name no ranking of the roll. A ranking is built for every armed
-  row standing at the asteroid, and only a unit standing there and armed
-  ever asks, so the arm cannot be reached. A ranking read by the asking
-  entity rather than by a pair of values would delete it, at one ranking
-  per unit rather than one per pair.
-- `Ready` names a weapon by its place in its row, so a ready weapon that
-  is not a damage weapon is representable, and two arms answer for one:
-  `Fire::run` passes over a ready whose place holds no damage stats, and
-  `Fire::keep_stands` drops the keep of a ready whose place states no
-  range. Neither is reachable, since `ReadyWeapons::armed` arms only the
-  places `Row::damage_weapons` names and an entity never changes row. A
-  place minted only by `Row::damage_weapons`, with the damage stats
-  lifted out of `Weapon::Damage` into a type the row answers with rather
-  than an option, would delete both arms.
+  plating name no ranking of the roll. A ranking is built for every row
+  that does damage standing at the asteroid, and only a unit standing
+  there that does damage ever asks, so the arm cannot be reached. A
+  ranking read by the asking entity rather than by a pair of values
+  would delete it, at one ranking per unit rather than one per pair.
 - A bot's frame stands for one decision at an asteroid where no builder
   of its seat stands or arrives. The funding pass justifies a want once
   a decision, a second apart, while `Fulfilment` opens frames every tick

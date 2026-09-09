@@ -81,7 +81,7 @@ mod tests {
         Shots {
             hits: vec![Hit {
                 shooter,
-                weapon: 0,
+                place: 0,
                 target,
                 damage: 1.0,
             }],
@@ -102,7 +102,7 @@ mod tests {
         let rolls = Rolls::called(&world.state);
         rolls[HOME]
             .station(unit)
-            .expect("an armed unit is stationed")
+            .expect("a unit that does damage is stationed")
     }
 
     fn radial(world: &World) -> Vec3 {

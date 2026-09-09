@@ -59,7 +59,7 @@ impl<'a> Survey<'a> {
                 if stats.kind() == Kind::Structure {
                     enemy_asteroids.push(post.asteroid);
                 }
-                if stats.is_armed() {
+                if stats.does_damage() {
                     *threats.entry(post.asteroid).or_default() +=
                         stats.cost.total() * f64::from(count);
                 }
@@ -208,14 +208,14 @@ impl<'a> Survey<'a> {
     pub fn army(&self) -> f64 {
         self.mine
             .keys()
-            .map(|asteroid| self.armed_value(*asteroid))
+            .map(|asteroid| self.damage_value(*asteroid))
             .sum()
     }
 
-    pub fn armed_value(&self, asteroid: AsteroidId) -> f64 {
+    pub fn damage_value(&self, asteroid: AsteroidId) -> f64 {
         self.rows(asteroid)
             .filter_map(|(row, held)| {
-                let stats = self.roster.get(*row).filter(|stats| stats.is_armed())?;
+                let stats = self.roster.get(*row).filter(|stats| stats.does_damage())?;
                 Some(stats.cost.total() * f64::from(held.present + held.arriving))
             })
             .sum()

@@ -10,7 +10,7 @@ use crate::harness::fixture::{Fixture, surveyed};
 
 const RAIDERS: u32 = 6;
 
-fn armed_against_a_yard() -> (Fixture, AsteroidId, AsteroidId) {
+fn raiders_against_a_shipyard() -> (Fixture, AsteroidId, AsteroidId) {
     let roster = Roster::shipped();
     let mut fixture = Fixture::drafted([None, None]);
     let free = fixture.free(2);
@@ -42,7 +42,7 @@ fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32
 }
 
 #[test]
-fn one_more_armed_unit_is_asked_for_at_every_asteroid_where_it_builds() {
+fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
     let fixture = Fixture::drafted([Some(personality.clone()), None]);
@@ -58,27 +58,31 @@ fn one_more_armed_unit_is_asked_for_at_every_asteroid_where_it_builds() {
     );
     for asteroid in &building {
         assert_eq!(
-            survey.armed_value(*asteroid),
+            survey.damage_value(*asteroid),
             0.0,
-            "the fixture already stands an armed force at {asteroid:?}"
+            "the fixture already stands a force that does damage at {asteroid:?}"
         );
         let asked: u32 = proposals
             .iter()
             .filter(|proposal| proposal.posting.asteroid() == *asteroid)
             .map(|proposal| proposal.count)
             .sum();
-        assert_eq!(asked, 1, "it asked for {asked} armed units at {asteroid:?}");
+        assert_eq!(
+            asked, 1,
+            "it asked for {asked} units that do damage at {asteroid:?}"
+        );
     }
     assert!(
         proposals
             .iter()
             .all(|proposal| building.contains(&proposal.posting.asteroid())),
-        "it armed an asteroid no builder of its own stands at"
+        "it asked for a unit at an asteroid no builder of its own stands at"
     );
 }
 
 #[test]
-fn no_armed_unit_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_completion() {
+fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_completion()
+ {
     let roster = Roster::shipped();
     let personality = Personality::expand();
     let mut fixture = Fixture::drafted([None, None]);
@@ -113,13 +117,13 @@ fn no_armed_unit_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_c
 fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
-    let (fixture, mine, theirs) = armed_against_a_yard();
+    let (fixture, mine, theirs) = raiders_against_a_shipyard();
     let view = fixture.view(0);
     let survey = surveyed(&view, &roster);
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
 
-    let unit_cost = personality.armed_unit_cost(&roster, &personality.shares(&survey));
+    let unit_cost = personality.damage_unit_cost(&roster, &personality.shares(&survey));
     let garrison = personality.garrison(survey.threat_at(mine), unit_cost);
     let count = |at: AsteroidId, row: RowId| {
         proposals
@@ -155,7 +159,7 @@ fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
 fn a_target_standing_under_its_want_is_still_reinforced() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
-    let (mut fixture, mine, theirs) = armed_against_a_yard();
+    let (mut fixture, mine, theirs) = raiders_against_a_shipyard();
     fixture.want(0, theirs, RAIDER, 1);
     let view = fixture.view(0);
     let survey = surveyed(&view, &roster);
@@ -181,7 +185,7 @@ fn a_target_standing_under_its_want_is_still_reinforced() {
 fn a_wave_still_in_the_air_is_not_sent_a_second_time() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
-    let (mut fixture, mine, theirs) = armed_against_a_yard();
+    let (mut fixture, mine, theirs) = raiders_against_a_shipyard();
     fixture.want(0, theirs, RAIDER, 1);
     fixture.want(0, mine, RAIDER, RAIDERS - 1);
     let view = fixture.view(0);
@@ -191,9 +195,9 @@ fn a_wave_still_in_the_air_is_not_sent_a_second_time() {
         1,
         "the surplus raider is not on its way to {theirs:?}"
     );
-    let unit_cost = personality.armed_unit_cost(survey.roster, &personality.shares(&survey));
+    let unit_cost = personality.damage_unit_cost(survey.roster, &personality.shares(&survey));
     assert!(
-        survey.armed_value(mine) > personality.garrison(survey.threat_at(mine), unit_cost),
+        survey.damage_value(mine) > personality.garrison(survey.threat_at(mine), unit_cost),
         "nothing stands at {mine:?} beyond its garrison to send"
     );
 

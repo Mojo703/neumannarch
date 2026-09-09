@@ -164,7 +164,7 @@ impl Ranking {
 fn shooters(state: &State, standing: Range<usize>) -> Vec<Shooter> {
     let mut shooters: Vec<Shooter> = standing
         .map(|at| state.entities.at(at))
-        .filter(|entity| state[entity.row()].is_armed())
+        .filter(|entity| state[entity.row()].does_damage())
         .map(|entity| Shooter {
             team: state[entity.seat()].team(),
             plating: state[entity.row()].plating,
@@ -357,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_zone_reaches_an_enemy_no_weapon_range_would() {
+    fn the_whole_zone_reaches_an_enemy_no_damage_range_would() {
         let mut world = world();
         let hunter = world.hold(0, RAIDER, HOME, 0.0);
         let far = world.hold(1, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(
             chased.map(|aim| aim.target),
             Some(far),
-            "the chase stops at the zone, whatever the weapon reaches"
+            "the chase stops at the zone, whatever the damage range reaches"
         );
         assert!(
             world

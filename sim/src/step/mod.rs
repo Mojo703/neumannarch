@@ -117,7 +117,7 @@ fn resolve(next: &mut State, shots: &Shots) {
         next.entities.hurt(target, damage);
     }
     for ready in &shots.ready {
-        next.set_ready(ready.entity(), ready.weapon(), ready.at(), ready.kept());
+        next.set_ready(ready.entity(), ready.place(), ready.at(), ready.kept());
     }
 }
 
@@ -454,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn an_armed_unit_kills_an_unarmed_enemy_at_its_asteroid() {
+    fn a_unit_that_does_damage_kills_an_enemy_that_does_none_at_its_asteroid() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
 
         world.tick(&[
@@ -495,12 +495,12 @@ mod tests {
         );
         assert!(
             !world.state.ready().any(|ready| ready.entity() == prey),
-            "a dead entity kept its weapons"
+            "a dead entity kept its damage effects"
         );
     }
 
     #[test]
-    fn a_weapon_fires_at_every_enemy_in_range_at_its_asteroid() {
+    fn a_damage_effect_fires_at_every_enemy_in_range_at_its_asteroid() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
         let reach = world.state[LANCER].max_damage_range();
         let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
@@ -509,12 +509,12 @@ mod tests {
 
         let hits = world.shots().hits;
 
-        assert_eq!(hits.len(), 1, "one weapon fires once a tick");
+        assert_eq!(hits.len(), 1, "one damage effect fires once a tick");
         assert_eq!(hits[0].shooter, shooter);
         assert_eq!(hits[0].target, near);
         assert!(
             world.shot_at(far, u64::from(TICKS_PER_SECOND)).is_none(),
-            "an enemy beyond the weapon's range was fired on"
+            "an enemy beyond the damage range was fired on"
         );
     }
 
@@ -527,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn a_weapon_keeps_its_target_from_one_tick_to_the_next_until_it_dies() {
+    fn a_damage_effect_keeps_its_target_from_one_tick_to_the_next_until_it_dies() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
         let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
         let first = world.hold(1, STORAGE, asteroid(0), 2.0);
@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn a_weapon_lets_a_target_go_the_tick_it_leaves_the_weapons_range() {
+    fn a_damage_effect_lets_a_target_go_the_tick_it_leaves_its_range() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
         let range = world.state[LANCER].max_damage_range();
         let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
@@ -591,7 +591,7 @@ mod tests {
         assert_eq!(
             kept_by(&world, shooter),
             None,
-            "the weapon kept a target its range no longer covers"
+            "the damage effect kept a target its range no longer covers"
         );
     }
 
@@ -626,13 +626,15 @@ mod tests {
         );
 
         let (mut world, [sooner, later], [doomed, spared]) = two_lancers_over_one_dying_store();
-        let at = world
+        let firing = world
             .state
             .ready()
             .find(|ready| ready.entity() == later)
-            .expect("an armed lancer carries its ready instant")
-            .at();
-        world.state.set_ready(later, 0, at.after(-1.0), None);
+            .cloned()
+            .expect("a lancer carries the ready instant of its damage place");
+        world
+            .state
+            .set_ready(later, firing.place(), firing.at().after(-1.0), None);
 
         let staggered = world.shots().hits;
 

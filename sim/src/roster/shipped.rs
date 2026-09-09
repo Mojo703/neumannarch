@@ -1,5 +1,5 @@
 use super::glyph::{Role, Tier};
-use super::row::{Row, Weapon, Weights};
+use super::row::{Effect, Hitscan, Row, Weights};
 use crate::ids::RowId;
 use crate::materials::{Material, Materials};
 use crate::real::Real;
@@ -36,7 +36,7 @@ pub(super) fn rows() -> Vec<Row> {
                 Tier::ONE,
                 Materials::new(30.0, 10.0, 10.0),
                 50.0,
-                vec![Weapon::Build { rate: Real(3.0) }],
+                vec![Effect::Build { rate: Real(3.0) }],
             )
         },
         extractor("metals extractor", Material::Metals),
@@ -61,7 +61,7 @@ pub(super) fn rows() -> Vec<Row> {
                 Tier::ONE,
                 Materials::new(100.0, 0.0, 40.0),
                 300.0,
-                vec![Weapon::Build { rate: Real(15.0) }],
+                vec![Effect::Build { rate: Real(15.0) }],
             )
         },
         Row {
@@ -76,12 +76,12 @@ pub(super) fn rows() -> Vec<Row> {
                 Tier::ONE,
                 Materials::new(20.0, 20.0, 5.0),
                 40.0,
-                vec![Weapon::Damage {
+                vec![Effect::Damage(Hitscan {
                     range: Real(3.0),
                     rate: Real(4.0),
                     damage: Real(3.0),
                     falloff: Real(0.5),
-                }],
+                })],
             )
         },
         Row {
@@ -94,12 +94,12 @@ pub(super) fn rows() -> Vec<Row> {
                 Tier::TWO,
                 Materials::new(80.0, 10.0, 30.0),
                 150.0,
-                vec![Weapon::Damage {
+                vec![Effect::Damage(Hitscan {
                     range: Real(6.0),
                     rate: Real(2.0),
                     damage: Real(6.0),
                     falloff: Real(0.0),
-                }],
+                })],
             )
         },
         Row {
@@ -111,12 +111,12 @@ pub(super) fn rows() -> Vec<Row> {
                 Tier::THREE,
                 Materials::new(40.0, 5.0, 40.0),
                 60.0,
-                vec![Weapon::Damage {
+                vec![Effect::Damage(Hitscan {
                     range: Real(14.0),
                     rate: Real(1.0),
                     damage: Real(20.0),
                     falloff: Real(0.0),
-                }],
+                })],
             )
         },
     ]
@@ -129,7 +129,7 @@ fn extractor(name: &'static str, material: Material) -> Row {
         Tier::ONE,
         Materials::new(20.0, 0.0, 5.0),
         120.0,
-        vec![Weapon::Extract {
+        vec![Effect::Extract {
             material,
             rate: Real(2.0),
         }],
@@ -142,7 +142,7 @@ fn row(
     tier: Tier,
     cost: Materials,
     hp: f64,
-    weapons: Vec<Weapon>,
+    effects: Vec<Effect>,
 ) -> Row {
     Row {
         name,
@@ -154,7 +154,7 @@ fn row(
         hp: Real(hp),
         plating: Real(0.0),
         capacity: Materials::ZERO,
-        weapons,
+        effects,
     }
 }
 
@@ -247,7 +247,7 @@ mod tests {
                     assert!(row.steering.separation.0 > 0.0, "{}", row.name);
                     assert!(
                         row.steering.station.0 > 0.0,
-                        "{} weighs no station, and takes one armed or not",
+                        "{} weighs no station, and takes one whether it does damage or not",
                         row.name
                     );
                 }
@@ -256,12 +256,12 @@ mod tests {
     }
 
     #[test]
-    fn every_shipped_row_that_is_armed_stands_off_the_stage_and_no_other_does() {
+    fn every_shipped_row_that_does_damage_stands_off_the_stage_and_no_other_does() {
         for (_, row) in Roster::shipped().iter() {
             assert_eq!(
                 row.standoff().is_some(),
-                row.is_armed(),
-                "{} stands off the stage without a weapon to reach across it",
+                row.does_damage(),
+                "{} stands off the stage with no damage to reach across it",
                 row.name
             );
             assert!(

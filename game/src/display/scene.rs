@@ -362,8 +362,8 @@ pub fn asteroid_name(asteroid: AsteroidId) -> String {
 }
 
 fn reach(roster: &Roster, row: RowId, standing: bool) -> Option<f64> {
-    let armed = roster[row].is_armed();
-    (standing && armed).then(|| roster[row].max_damage_range())
+    let does_damage = roster[row].does_damage();
+    (standing && does_damage).then(|| roster[row].max_damage_range())
 }
 
 type Rows = BTreeMap<RowId, Vec<Shown>>;
@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     #[test]
-    fn an_armed_ship_at_a_asteroid_carries_its_range_and_one_in_flight_carries_none() {
+    fn a_ship_that_does_damage_at_an_asteroid_carries_its_range_and_one_in_flight_carries_none() {
         let mut local = Local::start(2);
         local.want(&[(at(0), SHIPYARD, 1)]);
         let roster = local.session().state().roster();
@@ -1072,7 +1072,11 @@ mod tests {
             "a frigate at an asteroid draws its longest range"
         );
         assert_eq!(reach(roster, FRIGATE, false), None, "and none in flight");
-        assert_eq!(reach(roster, SHIPYARD, true), None, "a shipyard is unarmed");
+        assert_eq!(
+            reach(roster, SHIPYARD, true),
+            None,
+            "a shipyard does no damage"
+        );
 
         let scene = scene(&local);
         assert_eq!(scene.entities.len(), 1);

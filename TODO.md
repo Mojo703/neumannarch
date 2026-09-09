@@ -10,26 +10,32 @@ is the record. Agents see this file only through their briefs.
 ## In flight
 
 Uncommitted and verified green by the overseer's own gate, replay and
-rollback (2026-09-09): the bot spends what it pulls. Its army was
-wanted at one asteroid only, and one asteroid holds one frame per row
-fed by the builders standing on it, so the whole army throughput was
-three frames while 687 a second of build rate sat idle across fifty
-rocks. Arming now asks at every asteroid where a builder of its own
-stands, waves muster from everywhere and send only what stands, the
-economy builds one income row at a time at an asteroid since a row that
-pays on completion finishes sooner alone, and `check.sh` runs `verify
-11`, the shortest whole-minute clock that reaches the failure on the
-old code. With it, the worst tick: `Entities::re_home` and `arrive`
-settled the whole store once per unit, so a wave re-homing two hundred
-units ran two hundred full re-sorts; both now take the batch and settle
-once, and `Fulfilment` reads asteroid positions from the roll the tick
-already builds instead of solving the orbit twice per comparison.
-Measured: armed units at fifteen minutes 25 to 1503, spend 39 a second
-to 638 of 885 available, income through the opening six minutes roughly
-doubled, worst tick 95.84 ms to 4.10, ticks over the 8.33 ms budget 38
-to none, every minute's hash unchanged.
+rollback (2026-09-09): the row's effects. `Weapon` is `Effect`, since
+build and extract are not weapons, and the damage stats are lifted into
+`Hitscan`, which the row answers with rather than with an option, so a
+`Ready` carries its own stats and the two arms `Fire` tolerated are
+unrepresentable instead of merely unwritten. The words weapon, armed and
+unarmed are gone from the code, the tests and all three documents; a row
+that fights does damage. Ruled with it: the state hash value moves, and
+`Hitscan` is defined where it stands, since the shot landing the instant
+it is fired is a rule no other sentence states. Measured against a
+scratch build of the last commit over the same fifteen-minute match:
+entity counts identical at every minute, p50 within 0.01 ms at every
+count, worst tick 4.24 ms against 8.33 available. Budgets: code +7,
+tests +92, docs -8.
 
-Three holes that work opened, none of them fixed:
+The next two units, ruled 2026-09-09 and briefed in this order: the
+match clock, then the four holes in the tests below.
+
+Three holes open, none of them fixed:
+- The match clock is a duration compared against an absolute tick, at
+  `server/src/records.rs` in `Records::take` and at
+  `server/src/forwarding.rs` in `Forwarding::reported`. A match ends at
+  the draft's end plus the clock, so for the final stretch of every
+  multiplayer match, as long as the draft took, every relayed command is
+  refused by the room while its issuer applied it, and hash reports are
+  ignored over the same span. The deciding minute is played blind and
+  undetected: 12 seconds at two seats, up to 110 at four. The next unit.
 - `game/src/net/machine.rs` expects its own controller's command to be
   taken, and the bot clears the thirty-two command cap with no margin,
   since `Plan::commands` ends in `take(MAX_COMMANDS_PER_TICK)` and emits
@@ -38,16 +44,65 @@ Three holes that work opened, none of them fixed:
   the likeliest explanation for the crashes the owner saw and blamed on
   an agent. The fix is for the controller to hand over a type that
   cannot hold more than a tick's commands, so the refusal has no arm to
-  reach.
+  reach. The cap is enforced in three places that do not know about each
+  other, which is the root it shares with the hole below.
 - `Machine::apply` drops a refused relayed command silently, so a
-  machine that learns a command late or early loses it for good and
-  desyncs at the next hash. A silently ignored input with no entry.
-- The bot now fields about fifteen hundred armed units by the clock,
-  half its entities. That is the fight the owner was missing, and
-  whether it is the right amount is a balance question nobody has asked.
+  machine that learns a command late loses it for good and desyncs at
+  the next hash. Only `Refused::Late` is reachable from a peer, and only
+  on one boundary: a command tick a multiple of sixteen, a receiver
+  pinned at the pacing ceiling, and a delivery gap of 133 ms or more
+  between a peer's acknowledgement and the command after it. Three of
+  the sim's four refusals are unreachable only because of facts held in
+  `game/src/net/pace.rs` and `server/src/records.rs`, crates the sim
+  cannot see; that inversion is the shape defect under it. The fix is
+  for the session's oldest tick to be the settled one rather than a
+  rewind budget used as a validity bound, which leaves only a tick a
+  broken sender could name, and that is a desync to surface.
 
-Everything below this line about the bot unit is its history and landed
-in e3dc9a9; prune it in the next session that has the budget.
+Holes in the tests, measured 2026-09-09, the unit after the clock:
+- Falloff has never been exercised. Every test row is built with a
+  falloff of zero and the raider's is never checked, so the term can be
+  deleted from `step/fire.rs` with the whole gate still green.
+- A hit is never checked against the target's plating. The crate's one
+  damage assertion fires at a storage, whose plating is zero. One test
+  with the falloff above.
+- Repair has no test anywhere in the workspace: `Construction::repair`,
+  `Progress::repairs`, `State::heal` and `Entities::heal`.
+- The win rule is untested. `Standings::leaders` decides every match and
+  its only caller is the harness; `Team::value` is asserted nowhere.
+
+Rulings of 2026-09-09, so they are not re-raised:
+- Three and four sides divide the circle with a dead arc of 25 degrees
+  between sectors, which lifts the worst enemy station pair at four
+  teams from 0.707 m to the 1.414 m ceiling and leaves two and three
+  teams bit-identical. The cap on a line's spread is written as an
+  absolute length where it is a fraction of the sector; at four teams
+  the sector half-angle is 45 degrees and the two coincide exactly. The
+  binding constraint is the raider's 1 m stand-off, so no rule keeping a
+  row at its own stand-off can beat 1.414 at four teams.
+- Two rows of one team can hold the same station, whenever their damage
+  ranges differ by a multiple of four metres, as the frigate's and the
+  lancer's do. Left as it stands (owner: it has not affected a game), so
+  it owes an INVARIANTS.md entry with the shape change that would delete
+  it, and the sentence claiming long-range rows stand behind short-range
+  rows is false for four of the frigate's six ranks and wants
+  correcting. Both land with the dead arc.
+- Factions are built on top of the entity refactor, not before it, and
+  the refactor's const stats are not reopened for them.
+- The refactor's type is `EntityPattern` as ruled.
+
+Read at 820a036 and written to the session scratchpad, each a durable
+list rather than a warm agent: the overhaul's impact map over 682 lines
+in 75 files, with nothing in the repo to re-baseline; a roster tree
+study from OpenRA, Zero-K, Warzone 2100 and Beyond All Reason read as
+real files; the circle arithmetic with its scripts; the relayed-command
+comparison; a contraction audit of 16 findings, about 230 lines falling
+out mechanically; an audit of the sim's 252 tests against the sentences
+they pin; and a survey of the three crates whose public surfaces hide
+dead code from the gate.
+
+Everything below this line is the history of units already committed;
+prune it in the next session that has the budget.
 
 The bot unit, built and verified 2026-09-08, awaiting the owner's
 review of the diff and the commit. The owner read the code and

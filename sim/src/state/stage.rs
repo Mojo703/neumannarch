@@ -181,7 +181,7 @@ mod tests {
     }
 
     fn station(world: &World, unit: EntityId) -> Vec3 {
-        stationed(world, &[unit])[0].expect("an armed unit is stationed")
+        stationed(world, &[unit])[0].expect("a unit that does damage is stationed")
     }
 
     fn floor(world: &World) -> f64 {
@@ -283,7 +283,10 @@ mod tests {
             let stations = stationed(&world, &force);
 
             for station in stations {
-                let off = off_asteroid(&world, station.expect("an armed unit is stationed"));
+                let off = off_asteroid(
+                    &world,
+                    station.expect("a unit that does damage is stationed"),
+                );
                 assert!(
                     off >= floor - 1e-9,
                     "{teams} teams: a station stands {off} off an asteroid whose floor is {floor}"
@@ -300,7 +303,9 @@ mod tests {
                 (World::ring(GRAVITY, 2, &seats), HOME),
                 (World::started(&seats), AsteroidId(3)),
             ] {
-                let standoff = world.state[LANCER].standoff().expect("an armed row");
+                let standoff = world.state[LANCER]
+                    .standoff()
+                    .expect("a row that does damage");
                 let deep = 3 * FightStage::stations_on_the_stage(standoff, usize::from(teams));
                 let force: Vec<EntityId> = (0..teams)
                     .flat_map(|seat| {
@@ -314,7 +319,7 @@ mod tests {
                 let stations = stationed_at(&world, at, &force);
 
                 for station in stations {
-                    let station = station.expect("an armed unit is stationed");
+                    let station = station.expect("a unit that does damage is stationed");
                     let off = station.distance(world.state.asteroid_body(at).pos);
                     assert!(
                         off < Belt::ZONE_RADIUS_METERS,
@@ -380,7 +385,9 @@ mod tests {
     fn a_station_stands_at_the_rows_standoff_from_the_centre_on_its_sides_side() {
         let mut world = world();
         let unit = world.hold(0, LANCER, HOME, 0.0);
-        let standoff = world.state[LANCER].standoff().expect("an armed row");
+        let standoff = world.state[LANCER]
+            .standoff()
+            .expect("a row that does damage");
 
         let stage = staged(&world);
 
@@ -418,17 +425,17 @@ mod tests {
         }
     }
 
-    fn armed_units() -> Vec<RowId> {
+    fn damage_units() -> Vec<RowId> {
         Roster::shipped()
             .iter()
-            .filter(|(_, row)| row.is_armed() && row.kind() == Kind::Unit)
+            .filter(|(_, row)| row.does_damage() && row.kind() == Kind::Unit)
             .map(|(id, _)| id)
             .collect()
     }
 
     fn lined_up(teams: u8, row: RowId) -> World {
         let mut world = teamed(teams);
-        let standoff = world.state[row].standoff().expect("an armed row");
+        let standoff = world.state[row].standoff().expect("a row that does damage");
         let deep = 2 * FightStage::stations_on_the_stage(standoff, usize::from(teams));
         for seat in 0..teams {
             for at in 0..deep {
@@ -463,7 +470,7 @@ mod tests {
     #[test]
     fn no_two_seats_stations_stand_closer_than_the_spacing_however_many_teams_stand_there() {
         for teams in 1..=4 {
-            for row in armed_units() {
+            for row in damage_units() {
                 let world = lined_up(teams, row);
                 let name = world.state[row].name;
 
@@ -482,7 +489,7 @@ mod tests {
     #[test]
     fn every_station_stands_on_its_own_teams_side_of_the_stage() {
         for teams in 2..=4 {
-            for row in armed_units() {
+            for row in damage_units() {
                 let world = lined_up(teams, row);
                 let name = world.state[row].name;
                 let stage = staged(&world);
@@ -515,7 +522,9 @@ mod tests {
     #[test]
     fn no_station_stands_further_off_the_body_than_the_roster_is_checked_against() {
         let mut world = world();
-        let standoff = world.state[LANCER].standoff().expect("an armed row");
+        let standoff = world.state[LANCER]
+            .standoff()
+            .expect("a row that does damage");
         let force: Vec<EntityId> = (0..FightStage::stations_on_the_stage(standoff, 1))
             .map(|at| world.hold(0, LANCER, HOME, at as f64 * 0.01))
             .collect();
@@ -564,7 +573,9 @@ mod tests {
 
         let stage = staged(&world);
 
-        let standoff = world.state[FRIGATE].standoff().expect("an armed row");
+        let standoff = world.state[FRIGATE]
+            .standoff()
+            .expect("a row that does damage");
         let aside: Vec<f64> = stationed(&world, &force)
             .into_iter()
             .map(|station| {
@@ -598,7 +609,9 @@ mod tests {
     #[test]
     fn a_row_wider_than_the_stage_wraps_into_a_rank_behind() {
         let mut world = world();
-        let standoff = world.state[FRIGATE].standoff().expect("an armed row");
+        let standoff = world.state[FRIGATE]
+            .standoff()
+            .expect("a row that does damage");
         let across = FightStage::stations_in_a_rank(standoff, 1);
         let force: Vec<EntityId> = (0..across + 1)
             .map(|at| world.hold(0, FRIGATE, HOME, at as f64 * 0.1))
@@ -632,7 +645,9 @@ mod tests {
     #[test]
     fn a_row_longer_than_the_stage_fills_it_again_from_the_front() {
         let mut world = world();
-        let standoff = world.state[RAIDER].standoff().expect("an armed row");
+        let standoff = world.state[RAIDER]
+            .standoff()
+            .expect("a row that does damage");
         let stations = FightStage::stations_on_the_stage(standoff, 1);
         let force: Vec<EntityId> = (0..stations + 1)
             .map(|at| world.hold(0, RAIDER, HOME, at as f64 * 0.01))
@@ -648,29 +663,29 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_with_no_damage_weapon_and_a_structure_however_armed_take_no_place_on_the_stage() {
+    fn a_unit_that_does_no_damage_and_any_structure_take_no_place_on_the_stage() {
         let mut world = world();
         world.hold(0, CONSTRUCTOR, HOME, 0.0);
         world.fix(0, METALS_EXTRACTOR, HOME);
         world.fix(0, FRIGATE, HOME);
-        assert!(world.state[FRIGATE].is_armed());
+        assert!(world.state[FRIGATE].does_damage());
 
         let stage = staged(&world);
 
         assert_eq!(
             stage.stations_of(TeamId(0), CONSTRUCTOR),
             &[],
-            "an unarmed unit took a place on the stage"
+            "a unit that does no damage took a place on the stage"
         );
         assert_eq!(
             stage.stations_of(TeamId(0), METALS_EXTRACTOR),
             &[],
-            "an unarmed structure took a place on the stage"
+            "a structure that does no damage took a place on the stage"
         );
         assert_eq!(
             stage.stations_of(TeamId(0), FRIGATE),
             &[],
-            "a structure of an armed row took a place it can never move to"
+            "a structure of a row that does damage took a place it can never move to"
         );
     }
 

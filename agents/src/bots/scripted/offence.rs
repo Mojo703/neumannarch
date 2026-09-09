@@ -17,7 +17,7 @@ impl Offence {
         commitments: &mut Commitments,
     ) -> Vec<Proposal> {
         let weights = personality.shares(survey);
-        let unit_cost = personality.armed_unit_cost(survey.roster, &weights);
+        let unit_cost = personality.damage_unit_cost(survey.roster, &weights);
         if unit_cost <= 0.0 {
             return Vec::new();
         }
@@ -67,7 +67,7 @@ impl Offence {
         Offence::mustering(survey, target)
             .map(|asteroid| {
                 let garrison = personality.garrison(survey.threat_at(asteroid), unit_cost);
-                (survey.armed_value(asteroid) - garrison).max(0.0)
+                (survey.damage_value(asteroid) - garrison).max(0.0)
             })
             .sum()
     }

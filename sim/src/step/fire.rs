@@ -2,14 +2,13 @@ use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::post::Post;
-use crate::roster::Weapon;
 use crate::state::{AssignedDamage, Reach, Ready, Rolls, Shooter, State};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub(crate) shooter: EntityId,
-    pub(crate) weapon: u8,
+    pub(crate) place: u8,
     pub(crate) target: EntityId,
     pub damage: f64,
 }
@@ -48,18 +47,7 @@ impl<'a> Fire<'a> {
                 shots.lapse(&ready);
                 continue;
             };
-            let Some(Weapon::Damage {
-                range,
-                rate,
-                damage,
-                falloff,
-            }) = self.state[shooter.row()]
-                .weapons
-                .get(usize::from(ready.weapon()))
-                .copied()
-            else {
-                continue;
-            };
+            let hitscan = ready.place().hitscan;
             let roll = &self.rolls[here];
             let Some(aim) = roll.best(
                 Shooter {
@@ -67,7 +55,7 @@ impl<'a> Fire<'a> {
                     plating: self.state[shooter.row()].plating,
                 },
                 roll.body_of(shooter).pos,
-                Reach::WithinMeters(range.0),
+                Reach::WithinMeters(hitscan.range.0),
                 &assigned,
                 ready.kept(),
             ) else {
@@ -75,18 +63,21 @@ impl<'a> Fire<'a> {
                 continue;
             };
             let plating = self.state[self.state.entity(aim.target).row()].plating.0;
-            let dealt = (damage.0 * (1.0 - falloff.0 * aim.distance / range.0) - plating).max(0.0);
+            let dealt = (hitscan.damage.0
+                * (1.0 - hitscan.falloff.0 * aim.distance / hitscan.range.0)
+                - plating)
+                .max(0.0);
             assigned.take(aim.target, dealt);
             shots.hits.push(Hit {
                 shooter: shooter.id(),
-                weapon: ready.weapon(),
+                place: ready.place().in_row,
                 target: aim.target,
                 damage: dealt,
             });
             shots.ready.push(Ready::new(
                 ready.entity(),
-                ready.weapon(),
-                self.next_ready(ready.at(), rate.0),
+                ready.place(),
+                self.next_ready(ready.at(), hitscan.rate.0),
                 Some(aim.target),
             ));
         }
@@ -111,7 +102,7 @@ impl<'a> Fire<'a> {
             a.at()
                 .cmp(&b.at())
                 .then(a.entity().cmp(&b.entity()))
-                .then(a.weapon().cmp(&b.weapon()))
+                .then(a.place().in_row.cmp(&b.place().in_row))
         });
         due
     }
@@ -133,11 +124,9 @@ impl<'a> Fire<'a> {
         if target.standing() != Some(here) {
             return false;
         }
-        let Some(range) = self.state[shooter.row()].damage_range(ready.weapon()) else {
-            return false;
-        };
         let roll = &self.rolls[here];
-        roll.body_of(target).pos.distance(roll.body_of(shooter).pos) <= range
+        roll.body_of(target).pos.distance(roll.body_of(shooter).pos)
+            <= ready.place().hitscan.range.0
     }
 
     fn next_ready(&self, at: Moment, rate: f64) -> Moment {
@@ -150,7 +139,7 @@ impl Shots {
     fn lapse(&mut self, ready: &Ready) {
         if ready.kept().is_some() {
             self.ready
-                .push(Ready::new(ready.entity(), ready.weapon(), ready.at(), None));
+                .push(Ready::new(ready.entity(), ready.place(), ready.at(), None));
         }
     }
 

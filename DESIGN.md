@@ -142,7 +142,7 @@ HP, and its home asteroid.
 | holding weights | one weight per term of the holding rule; every weight is zero for a structure, which never moves, and above zero for every unit |
 | HP | |
 | plating | flat damage reduction per hit |
-| weapons | see Weapons |
+| effects | see Effects |
 | cost | a material triple |
 | capacity | stockpile capacity contributed, per material |
 | orbit, caps | asteroids only |
@@ -157,16 +157,18 @@ HP, and its home asteroid.
 - Counters come from the stats. The role is a field, read only by the
   glyph and by the pass.
 
-## Weapons
+## Effects
 
-Every weapon has a kind, and each kind carries its own fields.
+Every effect has a kind, and each kind carries its own fields.
 
-- **Damage.** Hitscan, with a range, a rate, a damage, and a falloff that
-  reduces damage with distance. Plating is subtracted per hit.
+- **Damage.** Hitscan: the shot lands the instant it is fired, at any
+  distance inside its range, so nothing travels and nothing is led. It
+  states a range, a rate, a damage, and a falloff that reduces damage
+  with distance. Plating is subtracted per hit.
 - **Build.** Spends stockpile at `rate` toward frames at its home asteroid and
   repairs damaged friendlies there. Its reach is the asteroid's zone: a
   builder reaches everything inside it and nothing elsewhere.
-- **Extract.** Pulls up to `rate` of one material, the weapon's, from
+- **Extract.** Pulls up to `rate` of one material, the effect's, from
   its home asteroid. The asteroid's cap for that material is the
   ceiling: at the cap, it is split equally among the extractors of that
   material there, and any share an extractor cannot use is split among
@@ -186,18 +188,19 @@ return term keeps, the asteroid's radius and one spacing, and one further
 spacing per unit already there, so nothing spawns inside the asteroid and no
 two spawn coincident. The spacing is one constant of the zone.
 
-**Target selection is by threat.** A weapon keeps the target it last
-fired at while that target is alive and in range, whatever else stands
-in range. Where it kept none, it fires at the enemy in range with the
-highest damage per second through the shooter's plating per point of its
-HP; ties by nearest, then lowest id. Range is the only gate on either.
+**Target selection is by threat.** A unit that does damage keeps the
+target it last fired at, one keep per damage effect it carries, while
+that target is alive and in range, whatever else stands in range. Where
+it kept none, it fires at the enemy in range with the highest damage per
+second through the shooter's plating per point of its HP; ties by
+nearest, then lowest id. Range is the only gate on either.
 
-**Shots resolve in order.** Every weapon carries the instant it is next
-ready. Within a tick, shots resolve in ready-time order, then shooter id,
-each against the state at the start of the tick plus the damage already
-assigned this tick; a target whose assigned damage is lethal is skipped.
-Damage applies at the end of the step, so a unit destroyed this tick still
-acts this tick.
+**Shots resolve in order.** A unit holds the instant it is next ready to
+fire, one per damage effect it carries. Within a tick, shots resolve in
+ready-time order, then shooter id, each against the state at the start
+of the tick plus the damage already assigned this tick; a target whose
+assigned damage is lethal is skipped. Damage applies at the end of the
+step, so a unit destroyed this tick still acts this tick.
 
 **No damage or armour types.** Plating and falloff produce the counters.
 
@@ -277,9 +280,9 @@ sets one count.
   so the zone is a soft shell around the asteroid and no ship moves inside
   the asteroid. Separation: a weak push from any ship of any seat nearer
   than the spacing, the distance a pair settles at; weak, since
-  space is large. Station: every armed unit holds a place on the
-  asteroid's fight stage. The stage's centre is a point half the
-  roster's longest weapon range outward from the asteroid's body along
+  space is large. Station: every unit that does damage holds a place on
+  the asteroid's fight stage. The stage's centre is a point half the
+  roster's longest damage range outward from the asteroid's body along
   its radial, inside the zone, so a fight sits below the asteroid on the
   player's screen, where the star is always up, and never under the
   structures, whichever sides own them. Its plane stands off the body
@@ -310,8 +313,8 @@ sets one count.
   carries what will not fit into the ranks behind, so no station stands
   nearer another team's side than its own and no two lines cross. Two
   sides stand opposite and their lines run parallel, so at two teams a
-  line spreads its full width. A roster with a weapon that
-  reaches no further than that distance cannot be built, nor one whose
+  line spreads its full width. A roster carrying a damage range no
+  longer than that distance cannot be built, nor one whose
   stations would stand outside the zone. A row lies
   centred on its stand-off point and spreads both ways square to it, in
   id order, a stated count of stations each way at the station spacing,
@@ -324,7 +327,7 @@ sets one count.
   side alone at an asteroid holds its side of the stage, so a garrison
   stands before an attacker arrives, and an arrival walks from the rim
   to its station.
-  A unit with no damage weapon takes no place on the fight stage and
+  A unit that does no damage takes no place on the fight stage and
   holds a station on its own circle about the asteroid's body. The
   circle's radius is the floor the return term keeps, the asteroid's
   radius and one spacing, and one station spacing further out, so it
@@ -337,10 +340,10 @@ sets one count.
   phase drawn from the identifier too, so two units of one row do not
   begin together. The station is the point on the circle at the current
   phase: it moves every tick and the unit circles by steering to it, by
-  the same station term at the same weight as an armed unit's. So an
-  unarmed unit comes in from the rim like every other, reaches the
-  whole zone to build from anywhere on its circle, and stands where an
-  enemy can reach and kill it.
+  the same station term at the same weight as a unit that does damage.
+  So a unit that does no damage comes in from the rim like every other,
+  reaches the whole zone to build from anywhere on its circle, and
+  stands where an enemy can reach and kill it.
   Heading never gates fire.
   Pass: a unit of a row whose role runs passes runs at the enemy of the
   highest threat standing inside the zone, at any distance, taking that
@@ -361,17 +364,17 @@ sets one count.
   the station term steers to, in the station's stead, at the row's
   station weight, so a runner and a row that holds its station steer by
   the same sum and differ only in where that place stands. The enemy a
-  unit runs at and the enemy its weapons fire at are two separate
-  choices: the pass takes one enemy in the zone to run at, its weapons
-  take their own targets by the rule under Weapons, and the two need not
-  be the same. Only the enemy it runs at can turn it around, so a runner
-  fires at whatever stands in its weapons' range as it runs, and holds
-  its run through fire from anyone else. A row whose role
-  holds its station holds it and fires from it; return stays in the sum
-  throughout, so a pass never leaves the zone. A weapon passes over a
-  target whose assigned damage this tick already kills it, so a force
-  spreads its fire along the enemy line. There is no facing. The rule is
-  one module and is replaceable whole.
+  unit runs at and the enemy it fires at are two separate choices: the
+  pass takes one enemy in the zone to run at, the unit takes what it
+  fires at by the rule under Effects, and the two need not be the same.
+  Only the enemy it runs at can turn it around, so a runner fires at
+  whatever stands in the range of any damage effect it carries as it
+  runs, and holds its run through fire from anyone else. A row whose
+  role holds its station holds it and fires from it; return stays in the
+  sum throughout, so a pass never leaves the zone. A unit does not fire
+  at a target whose assigned damage this tick already kills it, so a
+  force spreads its fire along the enemy line. There is no facing. The
+  rule is one module and is replaceable whole.
 - A flying unit is neither a shooter nor a target: battles happen at
   asteroids.
 
@@ -404,7 +407,7 @@ Not rules. Each is a hypothesis the harness confirms or kills.
   force?
 - Does a drifting map force contact, or does turtling win?
 - Does "nearest shortfall" surprise the player often enough to matter?
-- What zone radius and weapon ranges read well in the densest regions?
+- What zone radius and damage ranges read well in the densest regions?
 - Do plating and falloff give enough counters without a matrix?
 - Do regional caps make three materials distinct?
 - Do outcomes hold when the tick rate is doubled?

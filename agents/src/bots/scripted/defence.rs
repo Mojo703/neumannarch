@@ -7,7 +7,7 @@ pub struct Defence;
 impl Defence {
     pub fn proposals(survey: &Survey, personality: &Personality) -> Vec<Proposal> {
         let weights = personality.shares(survey);
-        let unit_cost = personality.armed_unit_cost(survey.roster, &weights);
+        let unit_cost = personality.damage_unit_cost(survey.roster, &weights);
         if unit_cost <= 0.0 {
             return Vec::new();
         }

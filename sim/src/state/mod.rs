@@ -10,7 +10,7 @@ pub use entities::Berth;
 pub(crate) use entities::{Entities, Entity, Motion, Pass};
 pub(crate) use frame::Frame;
 pub use preview::{Preview, ShortfallFilling};
-pub(crate) use ready::{Ready, ReadyWeapons};
+pub(crate) use ready::{Ready, ReadyDamage};
 pub(crate) use roll::{Roll, Rolls};
 pub use seat::Seat;
 pub use stage::{FightStage, Line};
@@ -25,7 +25,7 @@ use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
 use crate::posting::Posting;
-use crate::roster::{Kind, Roster, Row};
+use crate::roster::{DamagePlace, Kind, Roster, Row};
 use crate::time::{Moment, Tick, Time};
 use crate::vec3::Vec3;
 
@@ -49,7 +49,7 @@ pub struct State {
     pub(crate) entities: Entities,
     wants: BTreeMap<Post, Wants>,
     frames: Vec<Frame>,
-    ready: ReadyWeapons,
+    ready: ReadyDamage,
 }
 
 impl State {
@@ -73,7 +73,7 @@ impl State {
             entities: Entities::empty(),
             wants: BTreeMap::new(),
             frames: Vec::new(),
-            ready: ReadyWeapons::default(),
+            ready: ReadyDamage::default(),
         }
     }
 
@@ -260,9 +260,9 @@ impl State {
         motion: Motion,
     ) -> EntityId {
         let id = self.entities.spawn(seat, row, home, self[row].hp.0, motion);
-        let weapons: Vec<u8> = self[row].damage_weapons().collect();
+        let places: Vec<DamagePlace> = self[row].damage_places().collect();
         self.ready
-            .armed(id, weapons.into_iter(), Moment::at(self.time()));
+            .ready_from(id, places.into_iter(), Moment::at(self.time()));
         id
     }
 
@@ -367,11 +367,11 @@ impl State {
     pub(crate) fn set_ready(
         &mut self,
         entity: EntityId,
-        weapon: u8,
+        place: DamagePlace,
         at: Moment,
         kept: Option<EntityId>,
     ) {
-        self.ready.arm(entity, weapon, at, kept);
+        self.ready.ready_again(entity, place, at, kept);
     }
 
     pub(crate) fn refresh_capacities(&mut self) {
@@ -458,11 +458,11 @@ mod tests {
     }
 
     #[test]
-    fn reaping_the_dead_takes_every_dead_units_weapons_whatever_order_they_stand_in() {
+    fn reaping_the_dead_takes_every_dead_units_damage_places_whatever_order_they_stand_in() {
         let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)]);
-        let armed = crate::roster::RAIDER;
-        let later_asteroid_first = world.hold(0, armed, AsteroidId(1), 0.0);
-        let earlier_asteroid_second = world.hold(0, armed, AsteroidId(0), 0.0);
+        let raider = crate::roster::RAIDER;
+        let later_asteroid_first = world.hold(0, raider, AsteroidId(1), 0.0);
+        let earlier_asteroid_second = world.hold(0, raider, AsteroidId(0), 0.0);
         for unit in [later_asteroid_first, earlier_asteroid_second] {
             world.state.entities.hurt(unit, f64::MAX);
         }
@@ -471,7 +471,7 @@ mod tests {
 
         assert!(
             world.state.ready().next().is_none(),
-            "a dead unit kept a weapon: {:?}",
+            "a dead unit kept a damage place: {:?}",
             world.state.ready().map(Ready::entity).collect::<Vec<_>>()
         );
     }

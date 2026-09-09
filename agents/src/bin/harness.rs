@@ -185,10 +185,10 @@ fn verified(clock: Tick) -> bool {
         "no frame of a bot outlives a decision at an asteroid where no builder of its seat stands or arrives",
         guarantees.no_frame_outlives_a_decision_without_a_builder(),
     ) & held(
-        "two bots field armed units early and trade shots by the middle of the clock",
+        "two bots field units that do damage early and trade shots by the middle of the clock",
         trading.as_deref(),
     ) & held(
-        "no bot sits at its capacity for a minute with builders idle while an armed row is affordable",
+        "no bot sits at its capacity for a minute with builders idle while a row that does damage is affordable",
         guarantees.no_stockpile_sits_full_with_builders_idle(),
     ) & grew()
 }
