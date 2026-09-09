@@ -60,7 +60,7 @@ impl Preview {
             .iter()
             .filter(|(route, _)| route.seat == seat)
         {
-            for entity in members.iter().filter_map(|id| state.entity(*id)) {
+            for entity in members.iter().map(|id| state.entity(*id)) {
                 let arriving = shortfalls
                     .entry(Posting::of(route.destination, seat, entity.row()))
                     .or_default();

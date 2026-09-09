@@ -90,6 +90,22 @@ impl Schedule {
         None
     }
 
+    pub(crate) fn burns_fit(
+        source: Body,
+        target: Body,
+        depart: Time,
+        arrive: Time,
+        limit: f64,
+        gravity: Gravity,
+    ) -> bool {
+        let Some(span) = arrive.0.checked_sub(depart.0) else {
+            return false;
+        };
+        lambert::solve(source, target, Time(span).seconds(), gravity)
+            .and_then(|impulses| Schedule::coasting(impulses, limit, depart, arrive))
+            .is_some()
+    }
+
     #[cfg(test)]
     pub(crate) fn arrive(self) -> Time {
         self.arrive

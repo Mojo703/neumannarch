@@ -94,11 +94,10 @@ fn totals(view: &View) -> BTreeMap<(AsteroidId, SeatId), f64> {
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::belt::Belt;
-    use neumannarch_sim::orbit::Body;
-    use neumannarch_sim::state::view::{Berth, Present};
-    use neumannarch_sim::state::{Draft, Standings};
-    use neumannarch_sim::step::fire::Exchange;
-    use neumannarch_sim::{AsteroidId, EntityId, Materials, RowId, Stockpile, TeamId, Vec3};
+    use neumannarch_sim::state::view::Present;
+    use neumannarch_sim::state::{Batch, Command, Draft, Issued, Standings, State};
+    use neumannarch_sim::step::fire::{Exchange, Shots};
+    use neumannarch_sim::{AsteroidId, Materials, Setup, Stockpile, TeamId};
 
     use super::*;
 
@@ -121,15 +120,7 @@ mod tests {
             compositions: BTreeMap::new(),
             plans: BTreeMap::new(),
             still_in: true,
-            present: vec![Present {
-                id: EntityId(0),
-                row: RowId(0),
-                seat: SEAT,
-                body: Body::new(Vec3::ZERO, Vec3::ZERO),
-                hp,
-                home: ASTEROID,
-                at: Berth::Standing(ASTEROID),
-            }],
+            present: vec![Present { hp, ..placed() }],
             teams: Box::new([TeamId(0)]),
             exchanges: match shooting {
                 true => vec![Exchange {
@@ -148,6 +139,29 @@ mod tests {
             belt_outer_radius: Belt::OUTER_RADIUS_METERS,
             standings: Standings::new(Vec::new(), false),
         }
+    }
+
+    fn placed() -> Present {
+        let setup = Setup::new(vec![TeamId(0)], 0, neumannarch_sim::Tick(1)).expect("one seat");
+        let state = State::start(&setup);
+        let stage = state.draft().stages()[0];
+        let mut batch = Batch::new();
+        let placing = Issued {
+            seat: stage.seat,
+            seq: 0,
+            command: Command::Want {
+                asteroid: ASTEROID,
+                row: stage.row,
+                count: 1,
+            },
+        };
+        assert_eq!(batch.insert(placing), Ok(()));
+        let (state, _) = state.step(&batch);
+        View::of(&state, SEAT, &Shots::default())
+            .present
+            .into_iter()
+            .next()
+            .expect("the pick placed a structure")
     }
 
     fn arc(fights: &Fights) -> Option<Arc> {

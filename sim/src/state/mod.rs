@@ -6,15 +6,17 @@ pub use command::{
     Batch, Command, Issued, MAX_COMMANDS_PER_TICK, MAX_WANT, Refused, Rejected, Sequence, Stamped,
 };
 pub use draft::{Draft, GRACE, STAGE_SPAN, STAGES_PER_SEAT, Stage};
-pub(crate) use entity::{Entity, Motion};
+pub use entities::Berth;
+pub(crate) use entities::{Entities, Entity, Motion};
 pub(crate) use frame::Frame;
 pub use preview::{Preview, ShortfallFilling};
-pub(crate) use ready::Ready;
+pub(crate) use ready::{Ready, ReadyWeapons};
+pub(crate) use roll::{Roll, Rolls};
 pub(crate) use schedule::{Flight, Schedule};
 pub use seat::Seat;
 pub use send::{Route, Send};
 pub use standings::Standings;
-pub(crate) use threat::{Aim, Assigned, Threat};
+pub(crate) use threat::{AssignedDamage, Shooter};
 pub(crate) use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
@@ -25,7 +27,6 @@ use crate::orbit::body::{Body, Gravity};
 use crate::post::Post;
 use crate::posting::Posting;
 use crate::roster::{Kind, Roster, Row};
-use crate::state::sweep::Sweep;
 use crate::time::{Moment, Tick, Time};
 use crate::vec3::Vec3;
 
@@ -47,11 +48,10 @@ pub struct State {
     seats: Vec<Seat>,
     roster: Roster,
     asteroids: Vec<Asteroid>,
-    entities: BTreeMap<EntityId, Entity>,
-    next_entity: EntityId,
+    pub(crate) entities: Entities,
     wants: BTreeMap<Post, Wants>,
     frames: Vec<Frame>,
-    ready: Vec<Ready>,
+    ready: ReadyWeapons,
 }
 
 impl State {
@@ -72,11 +72,10 @@ impl State {
             seats,
             roster,
             asteroids,
-            entities: BTreeMap::new(),
-            next_entity: EntityId(0),
+            entities: Entities::empty(),
             wants: BTreeMap::new(),
             frames: Vec::new(),
-            ready: Vec::new(),
+            ready: ReadyWeapons::default(),
         }
     }
 
@@ -122,12 +121,12 @@ impl State {
         self.asteroids.get(id.0 as usize)
     }
 
-    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
-        self.entities.values()
+    pub fn entities(&self) -> impl Iterator<Item = Entity<'_>> {
+        self.entities.iter()
     }
 
-    pub fn entity(&self, id: EntityId) -> Option<&Entity> {
-        self.entities.get(&id)
+    pub fn entity(&self, id: EntityId) -> Entity<'_> {
+        self.entities.entity(id)
     }
 
     pub fn seats(&self) -> &[Seat] {
@@ -150,27 +149,15 @@ impl State {
         self.wants.iter().map(|(post, wants)| (*post, wants))
     }
 
-    pub fn entities_at(&self, asteroid: AsteroidId) -> impl Iterator<Item = &Entity> {
-        self.entities
-            .values()
-            .filter(move |entity| entity.home() == asteroid)
-    }
-
-    pub fn standing_at(&self, asteroid: AsteroidId) -> impl Iterator<Item = &Entity> {
-        self.entities
-            .values()
-            .filter(move |entity| entity.standing(self.time()) == Some(asteroid))
-    }
-
     pub fn is_taken(&self, asteroid: AsteroidId) -> bool {
-        self.entities_at(asteroid).next().is_some()
+        self.entities.homed_at(asteroid).next().is_some()
     }
 
     pub fn held_by(&self, seat: SeatId) -> impl Iterator<Item = AsteroidId> {
         self.deduped(
             self.of_seat(seat)
                 .filter(|entity| self[entity.row()].kind() == Kind::Structure)
-                .filter_map(|entity| entity.standing(self.time())),
+                .filter_map(Entity::standing),
         )
     }
 
@@ -178,7 +165,7 @@ impl State {
         self.deduped(self.of_seat(seat).map(Entity::home))
     }
 
-    fn of_seat(&self, seat: SeatId) -> impl Iterator<Item = &Entity> {
+    fn of_seat(&self, seat: SeatId) -> impl Iterator<Item = Entity<'_>> {
         self.entities().filter(move |entity| entity.seat() == seat)
     }
 
@@ -192,8 +179,8 @@ impl State {
         asteroids.into_iter()
     }
 
-    pub(crate) fn ready(&self) -> &[Ready] {
-        &self.ready
+    pub(crate) fn ready(&self) -> impl Iterator<Item = &Ready> {
+        self.ready.iter()
     }
 
     pub fn frames(&self) -> &[Frame] {
@@ -212,10 +199,7 @@ impl State {
     }
 
     pub fn count(&self, post: Post, row: RowId) -> u32 {
-        let counted = self
-            .entities_at(post.asteroid)
-            .filter(|entity| entity.seat() == post.seat && entity.row() == row)
-            .count();
+        let counted = self.posted(post, row).count();
         u32::try_from(counted).unwrap_or(u32::MAX)
     }
 
@@ -225,27 +209,36 @@ impl State {
             .wants(post)
             .map_or(0, |wants| wants.get(row))
             .saturating_sub(self.frames_of(post, row).count() as u32);
-        let mut held: Vec<EntityId> = self
-            .entities_at(post.asteroid)
-            .filter(|entity| entity.seat() == post.seat && entity.row() == row)
-            .filter(|entity| entity.flight().is_none())
-            .map(Entity::id)
-            .collect();
-        held.sort_unstable_by(|a, b| b.cmp(a));
-        held.truncate(self.count(post, row).saturating_sub(covered) as usize);
+        let mut posted: usize = 0;
+        let mut held: Vec<EntityId> = Vec::new();
+        for entity in self.posted(post, row) {
+            posted += 1;
+            if entity.flight().is_none() {
+                held.push(entity.id());
+            }
+        }
+        held.sort_unstable_by(|first, second| second.cmp(first));
+        held.truncate(posted.saturating_sub(covered as usize));
         held
+    }
+
+    fn posted(&self, post: Post, row: RowId) -> impl Iterator<Item = Entity<'_>> {
+        self.entities
+            .homed_at(post.asteroid)
+            .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
     }
 
     pub fn holdings(&self) -> BTreeMap<Posting, Held> {
         let mut holdings: BTreeMap<Posting, Held> = BTreeMap::new();
-        for entity in self.entities.values() {
+        for entity in self.entities.iter() {
             let at = |asteroid: AsteroidId| Posting::of(asteroid, entity.seat(), entity.row());
-            match (entity.standing(self.time()), entity.flight()) {
-                (Some(asteroid), None) => holdings.entry(at(asteroid)).or_default().present += 1,
-                (Some(asteroid), Some(_)) => holdings.entry(at(asteroid)).or_default().leaving += 1,
+            let flying = entity.flight().is_some();
+            match (entity.standing(), flying) {
+                (Some(asteroid), false) => holdings.entry(at(asteroid)).or_default().present += 1,
+                (Some(asteroid), true) => holdings.entry(at(asteroid)).or_default().leaving += 1,
                 (None, _) => {}
             }
-            if entity.flight().is_some() {
+            if flying {
                 holdings.entry(at(entity.home())).or_default().arriving += 1;
             }
         }
@@ -256,18 +249,10 @@ impl State {
         self[asteroid].orbit().at(self.time(), self.gravity)
     }
 
-    pub fn body_of(&self, entity: &Entity) -> Body {
-        match entity.motion() {
-            Motion::Fixed => self.asteroid_body(entity.home()),
-            Motion::Steered { body, .. } => body,
-        }
-    }
-
-    pub(crate) fn sweep(&self) -> Sweep {
-        Sweep::build(
-            self.entities()
-                .map(|entity| (entity.id(), self.body_of(entity).pos)),
-        )
+    pub fn body_of(&self, entity: Entity) -> Body {
+        entity
+            .steered()
+            .unwrap_or_else(|| self.asteroid_body(entity.home()))
     }
 
     pub fn hash(&self) -> u64 {
@@ -281,18 +266,10 @@ impl State {
         home: AsteroidId,
         motion: Motion,
     ) -> EntityId {
-        let id = self.next_entity;
-        self.next_entity = EntityId(id.0 + 1);
-        let hp = self[row].hp.0;
-        self.entities
-            .insert(id, Entity::new(id, seat, row, home, hp, motion));
+        let id = self.entities.spawn(seat, row, home, self[row].hp.0, motion);
         let weapons: Vec<u8> = self[row].damage_weapons().collect();
-        let now = Moment::at(self.time());
-        self.ready.extend(
-            weapons
-                .into_iter()
-                .map(|weapon| Ready::new(id, weapon, now)),
-        );
+        self.ready
+            .armed(id, weapons.into_iter(), Moment::at(self.time()));
         id
     }
 
@@ -311,7 +288,6 @@ impl State {
             Kind::Structure => Motion::Fixed,
             Kind::Unit => Motion::Steered {
                 body: self.spawn_body(post.asteroid, self.time().next()),
-                flight: None,
             },
         };
         self.spawn(post.seat, row, post.asteroid, motion);
@@ -320,8 +296,9 @@ impl State {
     pub(crate) fn spawn_body(&self, asteroid: AsteroidId, at: Time) -> Body {
         let home = self[asteroid].orbit().at(at, self.gravity());
         let already = self
-            .standing_at(asteroid)
-            .filter(|entity| entity.motion() != Motion::Fixed)
+            .entities
+            .iter()
+            .filter(|entity| entity.standing() == Some(asteroid) && entity.steered().is_some())
             .count();
         let radial = home.pos.normalized().unwrap_or(Vec3::ZERO);
         let floor = self[asteroid].radius() + Belt::SPACING_METERS;
@@ -331,10 +308,23 @@ impl State {
         )
     }
 
-    pub(crate) fn set_motion(&mut self, id: EntityId, motion: Motion) {
-        if let Some(entity) = self.entities.get_mut(&id) {
-            entity.set_motion(motion);
-        }
+    pub(crate) fn steer(&mut self, id: EntityId, body: Body, flight: Option<Flight>) {
+        self.entities.steer(id, body, flight, self.time());
+    }
+
+    pub(crate) fn join(&mut self, id: EntityId, destination: AsteroidId, flight: Flight) {
+        self.entities.join(id, destination, flight, self.time());
+    }
+
+    pub(crate) fn heal(&mut self, id: EntityId, hp: f64) {
+        let full = self[self.entity(id).row()].hp.0;
+        self.entities.heal(id, hp, full);
+    }
+
+    pub(crate) fn reap(&mut self) -> Vec<EntityId> {
+        let dead = self.entities.reap();
+        self.ready.reap(&dead);
+        dead
     }
 
     pub(crate) fn advance(&mut self) {
@@ -344,20 +334,11 @@ impl State {
             self.seats.iter_mut().for_each(Seat::close_second);
             self.asteroids.iter_mut().for_each(Asteroid::close_second);
         }
-    }
-
-    pub fn remove_entity(&mut self, id: EntityId) {
-        if self.entities.remove(&id).is_some() {
-            self.ready.retain(|ready| ready.entity() != id);
-        }
+        self.entities.settle(self.time());
     }
 
     pub(crate) fn seat_mut(&mut self, id: SeatId) -> Option<&mut Seat> {
         self.seats.get_mut(usize::from(id.0))
-    }
-
-    pub fn entity_mut(&mut self, id: EntityId) -> Option<&mut Entity> {
-        self.entities.get_mut(&id)
     }
 
     pub(crate) fn add_frame(&mut self, frame: Frame) {
@@ -387,19 +368,13 @@ impl State {
         self.wants.remove(&post);
     }
 
-    pub fn set_ready(&mut self, entity: EntityId, weapon: u8, at: Moment) {
-        if let Some(ready) = self
-            .ready
-            .iter_mut()
-            .find(|ready| ready.entity() == entity && ready.weapon() == weapon)
-        {
-            ready.arm(at);
-        }
+    pub(crate) fn set_ready(&mut self, entity: EntityId, weapon: u8, at: Moment) {
+        self.ready.arm(entity, weapon, at);
     }
 
     pub(crate) fn refresh_capacities(&mut self) {
         let mut carried = vec![Materials::ZERO; self.seats.len()];
-        for entity in self.entities.values() {
+        for entity in self.entities.iter() {
             if let Some(sum) = carried.get_mut(usize::from(entity.seat().0)) {
                 *sum += self.roster[entity.row()].capacity;
             }
@@ -408,15 +383,6 @@ impl State {
             let capacity = seat.base_capacity() + carried;
             seat.stockpile_mut().set_capacity(capacity);
         }
-    }
-}
-
-impl Index<EntityId> for State {
-    type Output = Entity;
-
-    fn index(&self, id: EntityId) -> &Entity {
-        self.entity(id)
-            .unwrap_or_else(|| panic!("no living entity {id:?}"))
     }
 }
 
@@ -459,16 +425,16 @@ impl IndexMut<SeatId> for State {
 mod asteroid;
 mod command;
 mod draft;
-mod entity;
+mod entities;
 mod frame;
 pub(crate) mod hash;
 mod preview;
 mod ready;
+mod roll;
 mod schedule;
 mod seat;
 mod send;
 pub mod standings;
-pub(crate) mod sweep;
 mod threat;
 pub mod view;
 mod wants;
@@ -536,12 +502,10 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(world.count(0, ASTEROID, structure), 2);
         assert_eq!(world.count(0, ASTEROID, unit), 0);
-        assert_eq!(world.state.entities_at(ASTEROID).count(), 3);
-        assert_eq!(world.state[first].hp(), world.state[structure].hp.0);
-        world.state.remove_entity(first);
-        assert_eq!(world.count(0, ASTEROID, structure), 1);
-        assert_eq!(world.state.entity(first), None);
-        assert_eq!(world.state[second].id(), second);
+        assert_eq!(world.count(1, ASTEROID, structure), 1);
+        assert_eq!(world.state.entities().count(), 3);
+        assert_eq!(world.state.entity(first).hp(), world.state[structure].hp.0);
+        assert_eq!(world.state.entity(second).id(), second);
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, SeatId};
 use crate::materials::{Material, Materials};
-use crate::state::State;
+use crate::state::{Roll, Rolls, State};
 use crate::time::Tick;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -16,13 +16,15 @@ struct Extractor {
 }
 
 impl Income {
-    pub(crate) fn extracted(state: &State) -> Income {
+    pub(crate) fn extracted(state: &State, rolls: &Rolls) -> Income {
         let dt = Tick(1).seconds();
         let mut taken = Income::default();
-        for (id, asteroid) in state.asteroids() {
+        for roll in rolls.iter() {
+            let caps = state[roll.asteroid()].caps();
+            let pulling = Extractor::pulling(state, roll);
             taken
                 .0
-                .extend(extract(id, asteroid.caps(), &Extractor::standing_at(state, id), dt).0);
+                .extend(extract(roll.asteroid(), caps, &pulling, dt).0);
         }
         taken
     }
@@ -36,9 +38,9 @@ impl Income {
 }
 
 impl Extractor {
-    fn standing_at(state: &State, asteroid: AsteroidId) -> Vec<Extractor> {
+    fn pulling(state: &State, roll: &Roll) -> Vec<Extractor> {
         let mut extractors = Vec::new();
-        for entity in state.standing_at(asteroid) {
+        for entity in roll.standing() {
             let seat = entity.seat();
             let pulls = state[entity.row()].extracts();
             extractors.extend(pulls.map(|(material, rate)| Extractor {

@@ -1,5 +1,5 @@
-use crate::ids::{AsteroidId, EntityId, SeatId};
-use crate::state::{Batch, Flight, Frame, Issued, Motion, Rejected, State};
+use crate::ids::SeatId;
+use crate::state::{Batch, Flight, Frame, Issued, Rejected, Rolls, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::Income;
 use crate::step::fire::{Fire, Shots};
@@ -32,13 +32,13 @@ impl State {
             );
         }
         let snap = &applied;
-        let sweep = snap.sweep();
-        let thrusts = Holding::of(snap, &sweep).run();
+        let rolls = Rolls::called(snap);
+        let thrusts = Holding::of(snap, &rolls).run();
         let moved = Propagation::of(snap, &thrusts).run();
         let filled = Fulfilment::of(snap).run();
-        let income = Income::extracted(snap);
-        let work = Construction::of(snap).run();
-        let shots = Fire::of(snap, &sweep).run();
+        let income = Income::extracted(snap, &rolls);
+        let work = Construction::of(snap, &rolls).run();
+        let shots = Fire::of(snap, &rolls).run();
         let next = State::next(snap, &moved, &filled, &income, &work, &shots);
         (next, Outcome { rejected, shots })
     }
@@ -59,7 +59,8 @@ impl State {
         build(&mut next, snap, work, &mut closing);
         resolve(&mut next, shots);
         next.close_frames(&closing);
-        reap(&mut next);
+        next.reap();
+        eliminate(&mut next);
         next.refresh_capacities();
         next.advance();
         next
@@ -68,13 +69,7 @@ impl State {
 
 fn move_bodies(next: &mut State, moved: &Moved) {
     for step in moved.iter() {
-        next.set_motion(
-            step.entity,
-            Motion::Steered {
-                body: step.body,
-                flight: step.flight,
-            },
-        );
+        next.steer(step.entity, step.body, step.flight);
     }
 }
 
@@ -86,7 +81,7 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
         let route = send.route();
         let flight = Flight::new(route.source, send.schedule);
         for member in &send.members {
-            join(next, *member, route.destination, flight);
+            next.join(*member, route.destination, flight);
         }
     }
     for opening in &filled.openings {
@@ -116,38 +111,20 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
         }
     }
     for repair in &work.repairs {
-        let Some(full) = next
-            .entity(repair.entity)
-            .map(|entity| snap[entity.row()].hp.0)
-        else {
-            continue;
-        };
-        if let Some(entity) = next.entity_mut(repair.entity) {
-            entity.heal(repair.hp, full);
-        }
+        next.heal(repair.entity, repair.hp);
     }
 }
 
 fn resolve(next: &mut State, shots: &Shots) {
     for (target, damage) in shots.damage() {
-        if let Some(entity) = next.entity_mut(target) {
-            entity.hurt(damage);
-        }
+        next.entities.hurt(target, damage);
     }
     for ready in &shots.ready {
         next.set_ready(ready.entity(), ready.weapon(), ready.at());
     }
 }
 
-fn reap(next: &mut State) {
-    let dead: Vec<EntityId> = next
-        .entities()
-        .filter(|entity| entity.hp() <= 0.0)
-        .map(|entity| entity.id())
-        .collect();
-    for id in dead {
-        next.remove_entity(id);
-    }
+fn eliminate(next: &mut State) {
     let lost: Vec<SeatId> = next
         .seats()
         .iter()
@@ -176,20 +153,6 @@ fn reap(next: &mut State) {
     }
 }
 
-fn join(next: &mut State, entity: EntityId, destination: AsteroidId, flight: Flight) {
-    let Some(target) = next.entity_mut(entity) else {
-        return;
-    };
-    let Motion::Steered { body, .. } = target.motion() else {
-        return;
-    };
-    target.set_home(destination);
-    target.set_motion(Motion::Steered {
-        body,
-        flight: Some(flight),
-    });
-}
-
 pub(crate) mod construction;
 pub(crate) mod extraction;
 pub mod fire;
@@ -204,7 +167,7 @@ mod tests {
     use super::*;
     use crate::belt::Belt;
     use crate::fixture::World;
-    use crate::ids::{RowId, TeamId};
+    use crate::ids::{AsteroidId, EntityId, RowId, TeamId};
     use crate::materials::Material;
     use crate::orbit::body::Gravity;
     use crate::post::Post;
@@ -242,7 +205,7 @@ mod tests {
         assert_eq!(state[SeatId(0)].reserved(CONSTRUCTOR), 1);
         assert_eq!(state.frames().len(), 0, "the reserve needs no frame");
         let shipyard = state.entities().next().expect("the shipyard");
-        assert_eq!(shipyard.motion(), Motion::Fixed);
+        assert_eq!(shipyard.steered(), None);
         assert_eq!(state.body_of(shipyard), state.asteroid_body(AsteroidId(0)));
 
         world.run(seconds);
@@ -365,12 +328,12 @@ mod tests {
             Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
         ]);
 
-        let flight = world.state[unit].flight().expect("a flight");
+        let flight = world.state.entity(unit).flight().expect("a flight");
         world.run(flight.departs().0 - world.state.time().0);
         let left = world.off_asteroid(unit, asteroid(0));
         world.run(flight.arrive().0 - world.state.time().0);
         assert!(
-            !world.state[unit].is_flying(world.state.time()),
+            !world.state.entity(unit).is_flying(),
             "it is still flying at its arrival tick"
         );
         let landed = world.off_asteroid(unit, asteroid(1));
@@ -418,10 +381,7 @@ mod tests {
         );
         assert_eq!(world.state.time(), first.departs());
         assert!(
-            world
-                .state
-                .entities()
-                .all(|entity| entity.is_flying(world.state.time())),
+            world.state.entities().all(|entity| entity.is_flying()),
             "the window closed and the send did not depart"
         );
     }
@@ -480,13 +440,12 @@ mod tests {
             Issued::numbered(0, 3, asteroid(1), FRIGATE, 1),
         ]);
 
-        let now = world.state.time();
         assert!(
-            world.state[shooter].flight().is_some(),
+            world.state.entity(shooter).flight().is_some(),
             "its send is forming"
         );
-        assert!(!world.state[shooter].is_flying(now));
-        assert_eq!(world.state[shooter].standing(now), Some(asteroid(0)));
+        assert!(!world.state.entity(shooter).is_flying());
+        assert_eq!(world.state.entity(shooter).standing(), Some(asteroid(0)));
         assert_eq!(
             world.count(0, asteroid(1), FRIGATE),
             1,
@@ -515,10 +474,10 @@ mod tests {
         ]);
 
         assert!(
-            world.state[unit].flight().is_none(),
+            world.state.entity(unit).flight().is_none(),
             "a unit that cannot fly was sent"
         );
-        assert_eq!(world.state[unit].home(), asteroid(0), "it left home");
+        assert_eq!(world.state.entity(unit).home(), asteroid(0), "it left home");
         assert_eq!(world.count(0, asteroid(1), CONSTRUCTOR), 0);
         assert_eq!(
             world.state.frames().len(),
@@ -537,13 +496,13 @@ mod tests {
         world.run(8 * u64::from(TICKS_PER_SECOND));
 
         let state = &world.state;
-        assert!(state.entity(unit).is_some(), "the surplus was scrapped");
+        assert!(world.still_holds(unit), "the surplus was scrapped");
         assert_eq!(
-            state[unit].home(),
+            state.entity(unit).home(),
             asteroid(0),
             "it left the asteroid it stands on"
         );
-        assert_eq!(state[unit].hp(), state[CONSTRUCTOR].hp.0);
+        assert_eq!(state.entity(unit).hp(), state[CONSTRUCTOR].hp.0);
         let gained = state[SeatId(0)].stockpile().stock() - stock;
         assert!(
             gained.total() < state[CONSTRUCTOR].cost.total(),
@@ -572,7 +531,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            world.state[unit].home(),
+            world.state.entity(unit).home(),
             asteroid(1),
             "the unit stayed home"
         );
@@ -590,7 +549,11 @@ mod tests {
 
         world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
 
-        assert_eq!(world.state[unit].home(), asteroid(0), "the unit left");
+        assert_eq!(
+            world.state.entity(unit).home(),
+            asteroid(0),
+            "the unit left"
+        );
         let left = world.frames(0, asteroid(0), CONSTRUCTOR);
         assert_eq!(left, 0, "a frame nothing wants kept building");
     }
@@ -637,7 +600,7 @@ mod tests {
 
         let state = &world.state;
         let unit = state.entities().next().expect("the constructor").id();
-        let flight = state[unit].flight().expect("a flight");
+        let flight = state.entity(unit).flight().expect("a flight");
         let arrive = flight.arrive();
         assert_eq!(flight.departs(), depart);
         let gravity = state.gravity();
@@ -676,19 +639,15 @@ mod tests {
             .expect("the frigate fired");
         assert_eq!(hit.damage, 6.0, "six damage through no plating");
 
-        let shots = (world.state[prey].hp() / hit.damage).ceil();
+        let shots = (world.state.entity(prey).hp() / hit.damage).ceil();
         world.run((shots / 2.0 * f64::from(TICKS_PER_SECOND)) as u64 - interval);
-        assert!(world.state.entity(prey).is_some(), "it died too soon");
+        assert!(world.still_holds(prey), "it died too soon");
 
         world.run(2 * interval);
 
-        assert_eq!(world.state.entity(prey), None, "it outlived its hit points");
+        assert!(!world.still_holds(prey), "it outlived its hit points");
         assert!(
-            !world
-                .state
-                .ready()
-                .iter()
-                .any(|ready| ready.entity() == prey),
+            !world.state.ready().any(|ready| ready.entity() == prey),
             "a dead entity kept its weapons"
         );
     }
@@ -735,7 +694,7 @@ mod tests {
         ]);
         world.run(Send::FORMING_TICKS + 1);
 
-        assert!(world.state[prey].is_flying(world.state.time()));
+        assert!(world.state.entity(prey).is_flying());
         assert_eq!(
             world.shot_at(prey, interval + 1),
             None,

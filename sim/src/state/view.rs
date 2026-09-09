@@ -9,18 +9,13 @@ use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
 use crate::post::Post;
 use crate::posting::Posting;
+pub use crate::state::Berth;
 use crate::state::draft::Draft;
-use crate::state::entity::Entity;
 use crate::state::standings::Standings;
+
 use crate::state::{Frame, Held};
 use crate::step::fire::{Exchange, Shots};
 use crate::time::{Tick, Time};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Berth {
-    Standing(AsteroidId),
-    Flying { from: AsteroidId },
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Present {
@@ -105,7 +100,7 @@ impl View {
             plans: plans(state, seat),
             present: present(state),
             teams: state.seats().iter().map(Seat::team).collect(),
-            exchanges: shots.exchanges(state),
+            exchanges: shots.exchanges.clone(),
             terrain: terrain(state),
             zone: Belt::ZONE_RADIUS_METERS,
             star_radius: Belt::STAR_RADIUS_METERS,
@@ -146,32 +141,6 @@ impl View {
     }
 }
 
-impl Berth {
-    fn of(entity: &Entity, now: Time) -> Berth {
-        match entity.flight() {
-            Some(flight) if flight.has_departed(now) => Berth::Flying {
-                from: flight.source(),
-            },
-            Some(flight) => Berth::Standing(flight.source()),
-            None => Berth::Standing(entity.home()),
-        }
-    }
-
-    pub fn standing(self) -> Option<AsteroidId> {
-        match self {
-            Berth::Standing(asteroid) => Some(asteroid),
-            Berth::Flying { .. } => None,
-        }
-    }
-
-    pub fn flying_from(self) -> Option<AsteroidId> {
-        match self {
-            Berth::Standing(_) => None,
-            Berth::Flying { from } => Some(from),
-        }
-    }
-}
-
 fn compositions(state: &State, seat: SeatId) -> BTreeMap<Post, Composition> {
     let mut compositions: BTreeMap<Post, Composition> = BTreeMap::new();
     for (posting, held) in state.holdings() {
@@ -198,6 +167,7 @@ fn compositions(state: &State, seat: SeatId) -> BTreeMap<Post, Composition> {
 
 fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
     state
+        .entities
         .standing_at(asteroid)
         .filter(|entity| entity.seat() == seat && entity.flight().is_none())
         .any(|entity| state[entity.row()].builds().next().is_some())
@@ -234,7 +204,8 @@ fn building(state: &State, frame: &Frame) -> Building {
 
 fn present(state: &State) -> Vec<Present> {
     state
-        .entities()
+        .entities
+        .in_id_order()
         .map(|entity| Present {
             id: entity.id(),
             row: entity.row(),
@@ -242,7 +213,7 @@ fn present(state: &State) -> Vec<Present> {
             body: state.body_of(entity),
             hp: entity.hp(),
             home: entity.home(),
-            at: Berth::of(entity, state.time()),
+            at: entity.berth(),
         })
         .collect()
 }

@@ -1,10 +1,11 @@
 use super::*;
 use crate::TICKS_PER_SECOND;
+use crate::belt::Belt;
 use crate::fixture::World;
-use crate::ids::{SeatId, TeamId};
+use crate::ids::{AsteroidId, SeatId, TeamId};
 use crate::orbit::body::Gravity;
 use crate::roster::{CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER};
-use crate::state::{Flight, Route, Send};
+use crate::state::{Flight, Rolls, Route, Send};
 use crate::time::Tick;
 
 const FAST: Gravity = Gravity::new(4.4e17);
@@ -230,10 +231,16 @@ fn a_flight_ends_at_the_tick_its_schedule_arrives() {
     let arrive = send.schedule.arrive();
 
     world.steers(arrive.0 - world.state.tick().0 - 1);
-    assert!(world.state[flier].flight().is_some(), "it arrived early");
+    assert!(
+        world.state.entity(flier).flight().is_some(),
+        "it arrived early"
+    );
 
     world.steers(1);
-    assert!(world.state[flier].flight().is_none(), "it is still flying");
+    assert!(
+        world.state.entity(flier).flight().is_none(),
+        "it is still flying"
+    );
     assert_eq!(world.state.time(), arrive);
 }
 
@@ -264,20 +271,12 @@ fn an_arrived_send_holds_inside_its_destinations_zone() {
 }
 
 #[test]
-fn a_flying_unit_thrusts_by_its_schedule_and_by_separation_alone() {
+fn a_flying_unit_is_given_no_thrust_and_holds_by_its_schedule_alone() {
     let mut world = World::ring(SLOW, 2, &[TeamId(0), TeamId(1)]);
     let flier = world.hold(0, FRIGATE, AWAY, 0.0);
     let send =
         Send::joining(&world.state, home_to_away(), &[flier]).expect("a send across the ring");
     world.launch(flier, HOME, 0.0, Flight::new(HOME, send.schedule));
-    while !world.state[flier].is_flying(world.state.time()) {
-        world.state.advance();
-    }
-
-    let sweep = world.state.sweep();
-    let alone = Holding::of(&world.state, &sweep).run();
-    assert_eq!(alone.of(flier), Vec3::ZERO);
-
     let body = world.body(flier);
     world.free(
         0,
@@ -288,12 +287,26 @@ fn a_flying_unit_thrusts_by_its_schedule_and_by_separation_alone() {
             body.vel,
         ),
     );
-    let crowded = world.state.sweep();
-    let pushed = Holding::of(&world.state, &crowded).run().of(flier);
+    let forming = Holding::of(&world.state, &Rolls::called(&world.state))
+        .run()
+        .of(flier);
+    assert_ne!(
+        forming,
+        Vec3::ZERO,
+        "a unit whose send is forming still holds at its asteroid"
+    );
 
-    assert!(
-        pushed.x < 0.0,
-        "a flier in company is not pushed: {pushed:?}"
+    while !world.state.entity(flier).is_flying() {
+        world.state.advance();
+    }
+
+    let flying = Holding::of(&world.state, &Rolls::called(&world.state))
+        .run()
+        .of(flier);
+    assert_eq!(
+        flying,
+        Vec3::ZERO,
+        "a flier is steered by nothing but its schedule"
     );
 }
 
@@ -306,8 +319,7 @@ fn a_thrust_never_exceeds_the_rows_manoeuvring_limit() {
     }
 
     for _ in 0..seconds(5) {
-        let sweep = world.state.sweep();
-        let thrusts = Holding::of(&world.state, &sweep).run();
+        let thrusts = Holding::of(&world.state, &Rolls::called(&world.state)).run();
         for entity in world.state.entities() {
             let limit = world.state[entity.row()].manoeuvring.0;
             let asked = thrusts.of(entity.id()).length();
@@ -326,9 +338,8 @@ fn the_rule_reads_only_the_tick_it_is_given() {
     }
     world.steers(seconds(3));
 
-    let sweep = world.state.sweep();
-    let once = Holding::of(&world.state, &sweep).run();
-    let twice = Holding::of(&world.state, &sweep).run();
+    let once = Holding::of(&world.state, &Rolls::called(&world.state)).run();
+    let twice = Holding::of(&world.state, &Rolls::called(&world.state)).run();
 
     assert_eq!(once, twice);
     assert_ne!(once, Thrusts::default());
@@ -340,10 +351,10 @@ fn a_structure_is_never_given_a_thrust() {
     let fixed = world.fix(0, FRIGATE, HOME);
     world.hold(0, FRIGATE, HOME, 0.2);
 
-    let sweep = world.state.sweep();
-
     assert_eq!(
-        Holding::of(&world.state, &sweep).run().of(fixed),
+        Holding::of(&world.state, &Rolls::called(&world.state))
+            .run()
+            .of(fixed),
         Vec3::ZERO
     );
 }

@@ -1,12 +1,16 @@
 use core::ops::Add;
+use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::{Material, Materials, Stockpile};
-use crate::state::{Entity, State};
+use crate::post::Post;
+use crate::state::{Entity, Roll, Rolls, State};
 use crate::time::Tick;
 
 pub(crate) struct Construction<'a> {
     state: &'a State,
+    rolls: &'a Rolls<'a>,
+    frames: BTreeMap<Post, Vec<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,73 +26,64 @@ pub(crate) struct Progress {
 }
 
 impl<'a> Construction<'a> {
-    pub(crate) fn of(state: &'a State) -> Construction<'a> {
-        Construction { state }
+    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Construction<'a> {
+        let mut frames: BTreeMap<Post, Vec<usize>> = BTreeMap::new();
+        for (at, frame) in state.frames().iter().enumerate() {
+            frames.entry(frame.post()).or_default().push(at);
+        }
+        Construction {
+            state,
+            rolls,
+            frames,
+        }
     }
 
     pub(crate) fn run(self) -> Progress {
         let mut progress = Progress::default();
         let dt = Tick(1).seconds();
-        for seat in self.seats() {
+        for (seat, asteroids) in self.building() {
             let mut stockpile = *self.state[seat].stockpile();
-            for asteroid in self.asteroids_of(seat) {
-                let rates = self.builders(seat, asteroid);
-                let left = self.build(&mut progress, seat, asteroid, &rates, dt, &mut stockpile);
-                self.repair(&mut progress, seat, asteroid, left);
+            for asteroid in asteroids {
+                let roll = &self.rolls[asteroid];
+                let post = Post { asteroid, seat };
+                let rates = self.builders(roll, seat);
+                let left = self.build(&mut progress, post, &rates, dt, &mut stockpile);
+                self.repair(&mut progress, roll, seat, left);
             }
         }
         progress
     }
 
-    fn seats(&self) -> Vec<SeatId> {
-        let mut seats: Vec<SeatId> = self
-            .state
-            .entities()
-            .filter(|entity| self.rate_of(entity) > 0.0)
-            .map(Entity::seat)
-            .collect();
-        seats.sort_unstable();
-        seats.dedup();
-        seats
+    fn building(&self) -> BTreeMap<SeatId, Vec<AsteroidId>> {
+        let mut building: BTreeMap<SeatId, Vec<AsteroidId>> = BTreeMap::new();
+        for roll in self.rolls.iter() {
+            for seat in roll.seats() {
+                if roll
+                    .of_seat(seat)
+                    .any(|entity| self.state[entity.row()].builds().next().is_some())
+                {
+                    building.entry(seat).or_default().push(roll.asteroid());
+                }
+            }
+        }
+        building
     }
 
-    fn asteroids_of(&self, seat: SeatId) -> Vec<AsteroidId> {
-        let mut asteroids: Vec<AsteroidId> = self
-            .state
-            .entities()
-            .filter(|entity| entity.seat() == seat && self.rate_of(entity) > 0.0)
-            .filter_map(|entity| entity.standing(self.state.time()))
-            .collect();
-        asteroids.sort_unstable();
-        asteroids.dedup();
-        asteroids
-    }
-
-    fn builders(&self, seat: SeatId, asteroid: AsteroidId) -> Vec<f64> {
-        self.state
-            .standing_at(asteroid)
-            .filter(|entity| entity.seat() == seat)
+    fn builders(&self, roll: &Roll, seat: SeatId) -> Vec<f64> {
+        roll.of_seat(seat)
             .flat_map(|entity| self.state[entity.row()].builds())
             .collect()
-    }
-
-    fn rate_of(&self, entity: &Entity) -> f64 {
-        if entity.is_flying(self.state.time()) {
-            return 0.0;
-        }
-        self.state[entity.row()].builds().sum()
     }
 
     fn build(
         &self,
         progress: &mut Progress,
-        seat: SeatId,
-        asteroid: AsteroidId,
+        post: Post,
         rates: &[f64],
         dt: f64,
         stockpile: &mut Stockpile,
     ) -> f64 {
-        let frames = self.frames_at(seat, asteroid);
+        let frames = self.frames.get(&post).map_or(&[][..], Vec::as_slice);
         let works: Vec<Work> = frames
             .iter()
             .map(|at| {
@@ -117,11 +112,9 @@ impl<'a> Construction<'a> {
         unused + spare
     }
 
-    fn repair(&self, progress: &mut Progress, seat: SeatId, asteroid: AsteroidId, effort: f64) {
-        let damaged: Vec<&Entity> = self
-            .state
-            .standing_at(asteroid)
-            .filter(|entity| entity.seat() == seat)
+    fn repair(&self, progress: &mut Progress, roll: &Roll, seat: SeatId, effort: f64) {
+        let damaged: Vec<Entity> = roll
+            .of_seat(seat)
             .filter(|entity| entity.hp() < self.state[entity.row()].hp.0)
             .collect();
         if damaged.is_empty() || effort <= 0.0 {
@@ -135,16 +128,6 @@ impl<'a> Construction<'a> {
                 hp: share.min(missing),
             });
         }
-    }
-
-    fn frames_at(&self, seat: SeatId, asteroid: AsteroidId) -> Vec<usize> {
-        self.state
-            .frames()
-            .iter()
-            .enumerate()
-            .filter(|(_, frame)| frame.post().seat == seat && frame.post().asteroid == asteroid)
-            .map(|(at, _)| at)
-            .collect()
     }
 }
 

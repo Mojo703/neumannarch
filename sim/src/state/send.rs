@@ -40,8 +40,9 @@ impl Send {
 
     fn forming(state: &State, route: Route) -> Option<Schedule> {
         state
-            .entities()
-            .filter(|entity| entity.seat() == route.seat && entity.home() == route.destination)
+            .entities
+            .in_transit_to(route.destination)
+            .filter(|entity| entity.seat() == route.seat)
             .filter_map(|entity| entity.flight())
             .find(|flight| flight.source() == route.source && !flight.has_departed(state.time()))
             .map(|flight| flight.schedule())
@@ -52,13 +53,29 @@ impl Send {
         let depart = Time(state.time().0 + Send::FORMING_TICKS).next();
         let from = state[source].orbit().at(depart, gravity);
         let limit = state.roster().movement_limit().0;
-        (SEARCH_STEP..=SEARCH_BOUND)
-            .step_by(SEARCH_STEP as usize)
-            .find_map(|step| {
-                let arrive = Time(depart.0 + step);
-                let to = state[destination].orbit().at(arrive, gravity);
-                Schedule::between(from, to, depart, arrive, limit, gravity)
-            })
+        let arrival = |candidate: u64| Time(depart.0 + candidate * SEARCH_STEP);
+        let target = |arrive: Time| state[destination].orbit().at(arrive, gravity);
+        let burns_fit = |candidate: u64| {
+            let arrive = arrival(candidate);
+            Schedule::burns_fit(from, target(arrive), depart, arrive, limit, gravity)
+        };
+        let last = SEARCH_BOUND / SEARCH_STEP;
+        if !burns_fit(last) {
+            return None;
+        }
+        let mut earliest = 1;
+        let mut fitting = last;
+        while earliest < fitting {
+            let middle = earliest + (fitting - earliest) / 2;
+            match burns_fit(middle) {
+                true => fitting = middle,
+                false => earliest = middle + 1,
+            }
+        }
+        (fitting..=last).find_map(|candidate| {
+            let arrive = arrival(candidate);
+            Schedule::between(from, target(arrive), depart, arrive, limit, gravity)
+        })
     }
 }
 
@@ -125,6 +142,43 @@ mod tests {
             (15.0..=25.0).contains(&middling),
             "half the two kilometer hops take longer than {middling} seconds"
         );
+    }
+
+    fn walked(state: &State, source: usize, destination: usize) -> Option<Time> {
+        let gravity = state.gravity();
+        let depart = Time(state.time().0 + Send::FORMING_TICKS).next();
+        let from = state[AsteroidId(source as u32)].orbit().at(depart, gravity);
+        let limit = state.roster().movement_limit().0;
+        (SEARCH_STEP..=SEARCH_BOUND)
+            .step_by(SEARCH_STEP as usize)
+            .find_map(|step| {
+                let arrive = Time(depart.0 + step);
+                let to = state[AsteroidId(destination as u32)]
+                    .orbit()
+                    .at(arrive, gravity);
+                Schedule::between(from, to, depart, arrive, limit, gravity).map(|_| arrive)
+            })
+    }
+
+    #[test]
+    fn the_solve_arrives_when_a_walk_over_every_candidate_arrival_would() {
+        let world = World::seated(Vec::new());
+        let state = &world.state;
+        let (far_source, far_destination) = farthest(state);
+        let pairs = [(0, 1), (0, 2), (3, 4), (far_source, far_destination)];
+        for (source, destination) in pairs {
+            let solved = Send::solved(
+                state,
+                AsteroidId(source as u32),
+                AsteroidId(destination as u32),
+            )
+            .map(|schedule| schedule.arrive());
+            assert_eq!(
+                solved,
+                walked(state, source, destination),
+                "from {source} to {destination}"
+            );
+        }
     }
 
     #[test]

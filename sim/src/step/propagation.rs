@@ -1,6 +1,6 @@
 use crate::ids::EntityId;
 use crate::orbit::body::Body;
-use crate::state::{Entity, Flight, Motion, State};
+use crate::state::{Entity, Flight, State};
 use crate::step::holding::Thrusts;
 use crate::vec3::Vec3;
 
@@ -27,16 +27,16 @@ impl<'a> Propagation<'a> {
     pub(crate) fn run(self) -> Moved {
         Moved(
             self.state
-                .entities()
+                .entities
+                .steered()
                 .filter_map(|entity| self.moved(entity))
                 .collect(),
         )
     }
 
-    fn moved(&self, entity: &Entity) -> Option<Move> {
-        let Motion::Steered { body, flight } = entity.motion() else {
-            return None;
-        };
+    fn moved(&self, entity: Entity) -> Option<Move> {
+        let body = entity.steered()?;
+        let flight = entity.flight();
         let tick = self.state.time();
         let scheduled = flight.map_or(Vec3::ZERO, |flight| flight.thrust(tick));
         let thrust = scheduled + self.thrusts.of(entity.id());

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use super::power::Power;
 use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId};
-use crate::state::{Entity, Motion, State};
+use crate::ids::{EntityId, TeamId};
+use crate::state::{Entity, Roll, Rolls, State};
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -21,26 +21,9 @@ pub(crate) struct Fraction(f64);
 pub struct Fields(BTreeMap<EntityId, Sample>);
 
 impl Fields {
-    pub(crate) fn of(state: &State) -> Fields {
-        let mut rolls: BTreeMap<AsteroidId, Vec<&Entity>> = BTreeMap::new();
-        for entity in state.entities() {
-            if entity.motion() == Motion::Fixed {
-                continue;
-            }
-            if let Some(asteroid) = entity.standing(state.time()) {
-                rolls.entry(asteroid).or_default().push(entity);
-            }
-        }
+    pub(crate) fn among(state: &State, rolls: &Rolls) -> Fields {
         let mut fields = Fields(BTreeMap::new());
-        for roll in rolls.values_mut() {
-            roll.sort_by(|a, b| {
-                state
-                    .body_of(a)
-                    .pos
-                    .x
-                    .total_cmp(&state.body_of(b).pos.x)
-                    .then(a.id().cmp(&b.id()))
-            });
+        for roll in rolls.iter() {
             fields.over(state, roll);
         }
         fields
@@ -50,58 +33,61 @@ impl Fields {
         self.0.get(&id).copied().unwrap_or_default()
     }
 
-    fn over(&mut self, state: &State, roll: &[&Entity]) {
-        for entity in roll {
-            self.0.insert(
-                entity.id(),
-                Sample {
-                    own: power(state, entity).get(),
-                    ..Sample::default()
-                },
-            );
-        }
-        for (at, source) in roll.iter().enumerate() {
-            let from = state.body_of(source).pos;
-            for other in roll[at + 1..]
-                .iter()
-                .take_while(|other| state.body_of(other).pos.x - from.x <= Belt::FIELD_SCALE_METERS)
-            {
-                let offset = state.body_of(other).pos - from;
+    fn over(&mut self, state: &State, roll: &Roll) {
+        let mut along_x: Vec<Entity> = roll
+            .standing()
+            .filter(|entity| entity.steered().is_some())
+            .collect();
+        along_x.sort_by(|first, second| {
+            roll.body_of(*first)
+                .pos
+                .x
+                .total_cmp(&roll.body_of(*second).pos.x)
+                .then(first.id().cmp(&second.id()))
+        });
+        let places: Vec<Vec3> = along_x.iter().map(|at| roll.body_of(*at).pos).collect();
+        let powers: Vec<f64> = along_x.iter().map(|at| power(state, *at).get()).collect();
+        let teams: Vec<TeamId> = along_x.iter().map(|at| state[at.seat()].team()).collect();
+        let mut samples: Vec<Sample> = powers
+            .iter()
+            .map(|own| Sample {
+                own: *own,
+                ..Sample::default()
+            })
+            .collect();
+        for source in 0..along_x.len() {
+            for other in source + 1..along_x.len() {
+                let offset = places[other] - places[source];
+                if offset.x > Belt::FIELD_SCALE_METERS {
+                    break;
+                }
                 let (weight, slope) = kernel(offset.length());
-                let friendly = state[source.seat()].team() == state[other.seat()].team();
-                self.add(
-                    source.id(),
-                    friendly,
-                    power(state, other),
-                    weight,
-                    offset * slope,
-                );
-                self.add(
-                    other.id(),
-                    friendly,
-                    power(state, source),
-                    weight,
-                    offset * -slope,
-                );
+                let friendly = teams[source] == teams[other];
+                samples[source].add(friendly, powers[other], weight, offset * slope);
+                samples[other].add(friendly, powers[source], weight, offset * -slope);
             }
         }
+        self.0.extend(
+            along_x
+                .iter()
+                .zip(samples)
+                .map(|(entity, sample)| (entity.id(), sample)),
+        );
     }
+}
 
-    fn add(&mut self, id: EntityId, friendly: bool, power: Power, weight: f64, toward: Vec3) {
-        let Some(sample) = self.0.get_mut(&id) else {
-            return;
-        };
+impl Sample {
+    fn add(&mut self, friendly: bool, power: f64, weight: f64, toward: Vec3) {
         let (strength, gradient) = match friendly {
-            true => (&mut sample.own, &mut sample.own_gradient),
-            false => (&mut sample.enemy, &mut sample.enemy_gradient),
+            true => (&mut self.own, &mut self.own_gradient),
+            false => (&mut self.enemy, &mut self.enemy_gradient),
         };
-        let power = power.get();
         *strength += power * weight;
         *gradient += toward * power;
     }
 }
 
-fn power(state: &State, entity: &Entity) -> Power {
+fn power(state: &State, entity: Entity) -> Power {
     Power::of(&state[entity.row()], entity.hp())
 }
 
@@ -152,7 +138,7 @@ mod tests {
     use crate::ids::{AsteroidId, SeatId, TeamId};
     use crate::orbit::body::Gravity;
     use crate::roster::{CONSTRUCTOR, FRIGATE};
-    use crate::state::{Flight, Route, Send};
+    use crate::state::{Flight, Rolls, Route, Send};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -160,6 +146,10 @@ mod tests {
 
     fn world() -> World {
         World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)])
+    }
+
+    fn fields(state: &State) -> Fields {
+        Fields::among(state, &Rolls::called(state))
     }
 
     fn kernel(distance: f64) -> f64 {
@@ -177,12 +167,12 @@ mod tests {
         let full = world.state[FRIGATE].hp.0;
         let power = Power::of(&world.state[FRIGATE], full).get();
 
-        let sample = Fields::of(&world.state).at(alone);
+        let sample = fields(&world.state).at(alone);
 
         assert!((sample.own - power * (1.0 + kernel(4.0))).abs() < 1e-9);
         assert!((sample.enemy - power * kernel(6.0)).abs() < 1e-9);
-        assert_eq!(world.state[ally].hp(), full);
-        assert_eq!(world.state[enemy].hp(), full);
+        assert_eq!(world.state.entity(ally).hp(), full);
+        assert_eq!(world.state.entity(enemy).hp(), full);
     }
 
     #[test]
@@ -191,7 +181,7 @@ mod tests {
         let alone = world.hold(0, FRIGATE, HOME, 0.0);
         world.hold(1, FRIGATE, HOME, Belt::FIELD_SCALE_METERS + 1.0);
 
-        let sample = Fields::of(&world.state).at(alone);
+        let sample = fields(&world.state).at(alone);
 
         assert_eq!(sample.enemy, 0.0);
         assert_eq!(sample.enemy_gradient, Vec3::ZERO);
@@ -223,7 +213,7 @@ mod tests {
         };
         let step = 1e-4;
 
-        let gradient = Fields::of(&world.state).at(reader).own_gradient;
+        let gradient = fields(&world.state).at(reader).own_gradient;
 
         for (along, analytic) in [
             (Vec3::new(1.0, 0.0, 0.0), gradient.x),
@@ -250,7 +240,7 @@ mod tests {
             .normalized()
             .expect("a radius");
 
-        let gradient = Fields::of(&world.state).at(alone).own_gradient;
+        let gradient = fields(&world.state).at(alone).own_gradient;
 
         assert!(gradient.dot(outward) > 0.0, "{gradient:?}");
     }
@@ -260,18 +250,18 @@ mod tests {
         let mut world = world();
         let alone = world.hold(0, CONSTRUCTOR, HOME, 0.0);
 
-        assert_eq!(Fields::of(&world.state).at(alone).hostile(), None);
+        assert_eq!(fields(&world.state).at(alone).hostile(), None);
     }
 
     #[test]
     fn the_hostile_fraction_rises_as_the_enemy_outweighs_the_unit() {
         let mut world = world();
         let alone = world.hold(0, FRIGATE, HOME, 0.0);
-        let even = Fields::of(&world.state).at(alone).hostile();
+        let even = fields(&world.state).at(alone).hostile();
         assert_eq!(even, Fraction::of(0.0, 1.0));
 
         world.hold(1, FRIGATE, HOME, 1.0);
-        let outnumbered = Fields::of(&world.state)
+        let outnumbered = fields(&world.state)
             .at(alone)
             .hostile()
             .expect("power stands here");
@@ -284,7 +274,7 @@ mod tests {
         let mut world = world();
         let reader = world.hold(0, FRIGATE, HOME, 0.0);
         let flier = world.hold(0, FRIGATE, HOME, 2.0);
-        let together = Fields::of(&world.state).at(reader).own;
+        let together = fields(&world.state).at(reader).own;
         let send = Send::joining(
             &world.state,
             Route {
@@ -298,28 +288,28 @@ mod tests {
         world.launch(flier, HOME, 2.0, Flight::new(HOME, send.schedule));
 
         assert_eq!(
-            Fields::of(&world.state).at(reader).own,
+            fields(&world.state).at(reader).own,
             together,
             "a unit whose send is forming stands where it is"
         );
 
-        while !world.state[flier].is_flying(world.state.time()) {
+        while !world.state.entity(flier).is_flying() {
             world.state.advance();
         }
 
-        assert!(Fields::of(&world.state).at(reader).own < together);
-        assert_eq!(Fields::of(&world.state).at(flier), Sample::default());
+        assert!(fields(&world.state).at(reader).own < together);
+        assert_eq!(fields(&world.state).at(flier), Sample::default());
     }
 
     #[test]
     fn a_structure_is_neither_a_source_nor_a_reader() {
         let mut world = world();
         let reader = world.hold(0, FRIGATE, HOME, 0.0);
-        let alone = Fields::of(&world.state).at(reader).own;
+        let alone = fields(&world.state).at(reader).own;
 
         let fixed = world.fix(0, FRIGATE, HOME);
 
-        assert_eq!(Fields::of(&world.state).at(reader).own, alone);
-        assert_eq!(Fields::of(&world.state).at(fixed), Sample::default());
+        assert_eq!(fields(&world.state).at(reader).own, alone);
+        assert_eq!(fields(&world.state).at(fixed), Sample::default());
     }
 }

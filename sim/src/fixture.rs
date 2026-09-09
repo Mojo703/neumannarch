@@ -10,7 +10,9 @@ use crate::post::Post;
 use crate::roster::Roster;
 use crate::setup::Setup;
 use crate::state::view::View;
-use crate::state::{Asteroid, Batch, Command, Flight, Issued, Motion, Rejected, Seat, State, view};
+use crate::state::{
+    Asteroid, Batch, Command, Flight, Issued, Motion, Rejected, Rolls, Seat, State, view,
+};
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
@@ -121,17 +123,12 @@ impl World {
 
     pub(crate) fn steers(&mut self, ticks: u64) {
         for _ in 0..ticks {
-            let sweep = self.state.sweep();
-            let thrusts = Holding::of(&self.state, &sweep).run();
+            let rolls = Rolls::called(&self.state);
+            let thrusts = Holding::of(&self.state, &rolls).run();
             let moved = Propagation::of(&self.state, &thrusts).run();
+            drop(rolls);
             for step in moved.iter() {
-                self.state.set_motion(
-                    step.entity,
-                    Motion::Steered {
-                        body: step.body,
-                        flight: step.flight,
-                    },
-                );
+                self.state.steer(step.entity, step.body, step.flight);
             }
             self.state.advance();
         }
@@ -164,23 +161,17 @@ impl World {
     }
 
     pub fn free(&mut self, seat: u8, row: RowId, asteroid: AsteroidId, body: Body) -> EntityId {
-        self.state.spawn(
-            SeatId(seat),
-            row,
-            asteroid,
-            Motion::Steered { body, flight: None },
-        )
+        self.state
+            .spawn(SeatId(seat), row, asteroid, Motion::Steered { body })
     }
 
     pub fn launch(&mut self, entity: EntityId, from: AsteroidId, out_meters: f64, flight: Flight) {
         let body = self.state.asteroid_body(from);
         let radial = body.pos.normalized().expect("a radius");
-        self.state.set_motion(
+        self.state.steer(
             entity,
-            Motion::Steered {
-                body: Body::new(body.pos + radial * out_meters, body.vel),
-                flight: Some(flight),
-            },
+            Body::new(body.pos + radial * out_meters, body.vel),
+            Some(flight),
         );
     }
 
@@ -202,8 +193,12 @@ impl World {
             .count()
     }
 
+    pub fn still_holds(&self, entity: EntityId) -> bool {
+        self.state.entities().any(|held| held.id() == entity)
+    }
+
     pub fn body(&self, entity: EntityId) -> Body {
-        self.state.body_of(&self.state[entity])
+        self.state.body_of(self.state.entity(entity))
     }
 
     pub fn off_asteroid(&self, entity: EntityId, asteroid: AsteroidId) -> f64 {
@@ -213,7 +208,7 @@ impl World {
     }
 
     pub(crate) fn shots(&self) -> Shots {
-        Fire::of(&self.state, &self.state.sweep()).run()
+        Fire::of(&self.state, &Rolls::called(&self.state)).run()
     }
 
     pub fn shot_at(&self, target: EntityId, ticks: u64) -> Option<Hit> {

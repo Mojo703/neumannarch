@@ -53,6 +53,8 @@ impl SendSchedules {
 
 pub(crate) struct Fulfilment<'a> {
     state: &'a State,
+    posted: BTreeMap<Posting, u32>,
+    frames: BTreeMap<Posting, Vec<usize>>,
     surplus: BTreeMap<SeatId, BTreeMap<RowId, Vec<Surplus>>>,
 }
 
@@ -64,8 +66,10 @@ struct Surplus {
 
 impl<'a> Fulfilment<'a> {
     pub(crate) fn of(state: &'a State) -> Fulfilment<'a> {
+        let posted = posted(state);
+        let frames = framed(state);
         let mut surplus: BTreeMap<SeatId, BTreeMap<RowId, Vec<Surplus>>> = BTreeMap::new();
-        for (posting, over) in surpluses(state) {
+        for (posting, over) in surpluses(state, &posted, &frames) {
             if state[posting.row()].kind() == Kind::Unit {
                 surplus
                     .entry(posting.seat())
@@ -78,7 +82,16 @@ impl<'a> Fulfilment<'a> {
                     }));
             }
         }
-        Fulfilment { state, surplus }
+        Fulfilment {
+            state,
+            posted,
+            frames,
+            surplus,
+        }
+    }
+
+    fn count(&self, posting: Posting) -> u32 {
+        self.posted.get(&posting).copied().unwrap_or_default()
     }
 
     pub(crate) fn run(mut self) -> Assigned {
@@ -90,7 +103,7 @@ impl<'a> Fulfilment<'a> {
     pub(crate) fn assign(&mut self) -> ShortfallAssignment {
         let mut assignment = ShortfallAssignment::default();
         let mut reserved: BTreeMap<SeatId, BTreeMap<RowId, u32>> = BTreeMap::new();
-        for (posting, shortfall) in shortfalls(self.state) {
+        for (posting, shortfall) in shortfalls(self.state, &self.posted) {
             let from_reserve = self.take_reserved(posting, shortfall, &mut reserved);
             for _ in 0..from_reserve {
                 assignment.from_reserve.push(posting);
@@ -147,7 +160,7 @@ impl<'a> Fulfilment<'a> {
             let back = held_back.get(posting).copied().unwrap_or_default();
             self.reconcile(&mut assigned, *posting, still + back);
         }
-        for (posting, over) in unwanted_frames(self.state, &leaving) {
+        for (posting, over) in self.unwanted_frames(&leaving) {
             self.cancel(&mut assigned, posting, over);
         }
         assigned
@@ -219,14 +232,31 @@ impl<'a> Fulfilment<'a> {
             .extend(self.open_frames(posting).into_iter().take(count as usize));
     }
 
+    fn unwanted_frames(&self, leaving: &BTreeMap<Posting, u32>) -> BTreeMap<Posting, u32> {
+        self.frames
+            .iter()
+            .filter(|(posting, _)| {
+                let want = self
+                    .state
+                    .wants(posting.post())
+                    .map_or(0, |wants| wants.get(posting.row()));
+                let gone = leaving.get(*posting).copied().unwrap_or_default();
+                want + gone <= self.count(**posting)
+            })
+            .map(|(posting, open)| (*posting, open.len() as u32))
+            .collect()
+    }
+
     fn open_frames(&self, posting: Posting) -> Vec<Cancellation> {
         let mut open: Vec<Cancellation> = self
-            .state
-            .frames_of(posting.post(), posting.row())
-            .map(|(at, frame)| Cancellation {
+            .frames
+            .get(&posting)
+            .into_iter()
+            .flatten()
+            .map(|at| Cancellation {
                 posting,
-                frame: at,
-                progress: frame.progress(),
+                frame: *at,
+                progress: self.state.frames()[*at].progress(),
             })
             .collect();
         open.sort_by(|first, second| {
@@ -273,7 +303,7 @@ impl<'a> Fulfilment<'a> {
         members: &[EntityId],
         into: &mut BTreeMap<Posting, u32>,
     ) {
-        for entity in members.iter().filter_map(|id| self.state.entity(*id)) {
+        for entity in members.iter().map(|id| self.state.entity(*id)) {
             *into
                 .entry(Posting::of(asteroid, seat, entity.row()))
                 .or_default() += 1;
@@ -281,47 +311,67 @@ impl<'a> Fulfilment<'a> {
     }
 }
 
-fn shortfalls(state: &State) -> BTreeMap<Posting, u32> {
+fn shortfalls(state: &State, posted: &BTreeMap<Posting, u32>) -> BTreeMap<Posting, u32> {
     state
         .posts()
         .flat_map(|(post, wants)| {
             wants.iter().filter_map(move |(row, want)| {
-                want.checked_sub(state.count(post, row))
+                let posting = Posting::new(post, row);
+                want.checked_sub(posted.get(&posting).copied().unwrap_or_default())
                     .filter(|missing| *missing > 0)
-                    .map(|missing| (Posting::new(post, row), missing))
+                    .map(|missing| (posting, missing))
             })
         })
         .collect()
 }
 
-fn surpluses(state: &State) -> BTreeMap<Posting, Vec<EntityId>> {
-    held_rows(state)
-        .into_iter()
-        .map(|posting| (posting, state.surplus_at(posting)))
-        .filter(|(_, held)| !held.is_empty())
-        .collect()
-}
-
-fn held_rows(state: &State) -> BTreeSet<Posting> {
-    state
-        .entities()
-        .map(|entity| Posting::of(entity.home(), entity.seat(), entity.row()))
-        .collect()
-}
-
-fn unwanted_frames(state: &State, leaving: &BTreeMap<Posting, u32>) -> BTreeMap<Posting, u32> {
-    let mut open: BTreeMap<Posting, u32> = BTreeMap::new();
-    for frame in state.frames() {
-        *open
-            .entry(Posting::new(frame.post(), frame.row()))
+fn posted(state: &State) -> BTreeMap<Posting, u32> {
+    let mut posted: BTreeMap<Posting, u32> = BTreeMap::new();
+    for entity in state.entities() {
+        *posted
+            .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
             .or_default() += 1;
     }
-    open.retain(|posting, _| {
-        let want = state
+    posted
+}
+
+fn framed(state: &State) -> BTreeMap<Posting, Vec<usize>> {
+    let mut framed: BTreeMap<Posting, Vec<usize>> = BTreeMap::new();
+    for (at, frame) in state.frames().iter().enumerate() {
+        framed
+            .entry(Posting::new(frame.post(), frame.row()))
+            .or_default()
+            .push(at);
+    }
+    framed
+}
+
+fn surpluses(
+    state: &State,
+    posted: &BTreeMap<Posting, u32>,
+    frames: &BTreeMap<Posting, Vec<usize>>,
+) -> BTreeMap<Posting, Vec<EntityId>> {
+    let mut standing: BTreeMap<Posting, Vec<EntityId>> = BTreeMap::new();
+    for entity in state.entities().filter(|entity| entity.flight().is_none()) {
+        standing
+            .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+            .or_default()
+            .push(entity.id());
+    }
+    standing.retain(|posting, held| {
+        let open = frames.get(posting).map_or(0, Vec::len) as u32;
+        let covered = state
             .wants(posting.post())
-            .map_or(0, |wants| wants.get(posting.row()));
-        let gone = leaving.get(posting).copied().unwrap_or_default();
-        want + gone <= state.count(posting.post(), posting.row())
+            .map_or(0, |wants| wants.get(posting.row()))
+            .saturating_sub(open);
+        let over = posted
+            .get(posting)
+            .copied()
+            .unwrap_or_default()
+            .saturating_sub(covered) as usize;
+        held.sort_unstable_by(|first, second| second.cmp(first));
+        held.truncate(over);
+        !held.is_empty()
     });
-    open
+    standing
 }

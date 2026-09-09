@@ -110,8 +110,47 @@ the chase ranked once per asteroid per plating; the sweep deleted in
 favour of the slices; asteroid bodies solved once per tick; one hash
 re-baseline; every downstream reader (view, agents, game) propagated;
 timed before and after. Opus deletes, Fable writes it back (owner).
-Cuts the owner asked to be proposed are put to them beside it. The
-field sums are quadratic by design and wait for a DESIGN.md ruling.
+Cuts ruled in (owner, 2026-09-08): no separation in flight; the
+global sweep deleted. Kepler stays: one solve per steered unit and
+per structure lookup is 0.7 percent of the profile. Ruled out for
+now: fields by moments. Encapsulation and organisation, ruled with it
+(owner, 2026-09-08): the store's vector, order and id index are
+private to one type, `Entities`, whose surface is the slice standing
+at an asteroid, the fliers, one entity by id, spawn and reap; every
+phase reads a per-asteroid roll built once a tick (the slice, the
+asteroid's body, the units by seat, the threat ranking per plating)
+and cannot reach what the roll does not carry; the state's queries
+shrink to what leaves the sim and the Index impls go; one concern per
+file, phase files hold rules only; the sim's line count ends at or
+below where it started. Layout ruled (owner, 2026-09-08): columns
+now, one vector per field ordered by standing place, seat, then id,
+the entity a view over them, flights in a sparse side table, a
+per-tick asteroid body column; the demolition landed on Opus at full
+red (472 lines out, 33 in) with a critique the rebuild answers:
+home-keyed readers served by an in-transit index of entities whose
+home is not where they stand; `entity(id)` infallible and the id
+field private; the fields' x-sort over a borrowed index with bodies
+from the roll; `surplus_at` and `Send::forming` made explicit in id
+order; `Ready` reshaped so reaping and lookup are not scans; the
+damage `Assigned` renamed. The rebuild landed on Opus (owner,
+2026-09-08: a Fable agent read to 200k context before writing and
+was stopped; briefs now carry a reading rule, errors and diff first,
+a file only when about to change it): the tick at 781 entities is
+0.85 ms against 4.2, gate green, replay and rollback agree. Rulings
+on it (owner, 2026-09-08): the sim's non-test budget miss of 332
+lines accepted for the speed and the private store; shots carrying
+their own exchanges from the tick they fired accepted, since that
+was the one id that outlived its entity across the surface; the
+`Default` on `EntityId`, added so a game test could mint one, is
+replaced before commit; and the send solve, 25 to 54 ms on the tick
+a send is solved, is investigated to its root with the target under
+one millisecond, before the field sums (19 percent), separation (17)
+and propagation (10) that remain. Awaiting the owner's word to
+commit. After
+it: the roster's rows as a closed enum (owner, 2026-09-08), so every
+roster lookup is infallible and the `Option` every reader of a row
+carries is deleted; its own unit across every crate. The field sums
+are quadratic by design and wait for a DESIGN.md ruling.
 
 Held for after the bot fights: tiers, ruled 2026-09-08 to be designed
 in parallel and to land only once the bot fights. The mechanism as

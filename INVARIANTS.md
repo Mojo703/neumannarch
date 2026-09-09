@@ -20,16 +20,17 @@ adds it here in the same change; a unit that deletes one removes it.
 
 ## Tolerated runtime failures
 
+- `Entities::entity` panics on an id the store no longer holds. Every id the
+  state keeps is reaped in the same `next` that removes the entity, and the
+  effect values a step passes between its phases are read inside that step,
+  so no live code can ask; an id that leaves the sim is only ever read back
+  by the display, which never asks the store. A borrowed entity in place of
+  an id everywhere would delete it, which the effect values cannot carry
+  across the borrow of the tick-start snapshot.
 - Two ships at exactly one point push each other nowhere, since a push has
   no direction there. Their drift differs by id, so they part within a tick.
   A spacing that could not be zero would delete it, which no placement rule
   can promise once ships are free to move.
-- Holding's chase scans an asteroid's roll once per unit standing there,
-  so one asteroid holding a thousand units costs about 11.7 ms a tick
-  against a budget of 8.3; a hundred at one asteroid costs about 0.5 ms.
-  Ranking the roll once per asteroid and per plating, and breaking only
-  the distance tie per unit, would delete it, since the threat order
-  depends on the unit through its plating alone.
 - `orbit::universal` caps Newton's iteration at sixty steps; reaching the
   cap means the span was outside the contract. A `Span` type bounded by
   the body's period would delete the cap.

@@ -477,7 +477,7 @@ mod tests {
                 SeatId((at / 21 % 2) as u8),
                 FRIGATE,
                 place,
-                Motion::Steered { body, flight: None },
+                Motion::Steered { body },
             );
         }
         let entities = session.live.entities().count();

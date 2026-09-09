@@ -252,9 +252,7 @@ sets one count.
   destination's. While its send forms a unit stands at its asteroid, a
   shooter and a target there, and is counted toward its destination. A
   unit is flying from the tick its schedule departs until it ends. The
-  tolerance is the schedule's. Separation in flight can push a ship in
-  company off its schedule by arrival, and it holds from wherever it
-  ends.
+  tolerance is the schedule's.
 - **Power.** Every unit has a power: its damage per second, through no
   plating, times its remaining HP. It is the one number the fields below
   sum and it falls as a unit is hurt.
@@ -291,8 +289,8 @@ sets one count.
   no damage weapon has no chase and only its other terms. Cohesion is
   weighted so a force closes on its target as one body, which is what
   makes a battle predictable; there is no facing. The rule is one module
-  and is replaceable whole. In flight a unit thrusts by its schedule and
-  by separation alone.
+  and is replaceable whole. In flight a unit thrusts by its schedule
+  alone.
 - A flying unit is neither a shooter nor a target: battles happen at
   asteroids.
 

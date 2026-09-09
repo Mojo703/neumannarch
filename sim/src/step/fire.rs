@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, EntityId, SeatId};
+use crate::post::Post;
 use crate::roster::Weapon;
-use crate::state::sweep::Sweep;
-use crate::state::{Aim, Assigned, Entity, Ready, State, Threat};
+use crate::state::{AssignedDamage, Ready, Rolls, Shooter, State};
 use crate::time::Moment;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -26,23 +26,25 @@ pub struct Exchange {
 pub struct Shots {
     pub hits: Vec<Hit>,
     pub(crate) ready: Vec<Ready>,
+    pub(crate) exchanges: Vec<Exchange>,
 }
 
 pub(crate) struct Fire<'a> {
     state: &'a State,
-    sweep: &'a Sweep,
+    rolls: &'a Rolls<'a>,
 }
 
 impl<'a> Fire<'a> {
-    pub(crate) fn of(state: &'a State, sweep: &'a Sweep) -> Fire<'a> {
-        Fire { state, sweep }
+    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Fire<'a> {
+        Fire { state, rolls }
     }
 
     pub(crate) fn run(self) -> Shots {
         let mut shots = Shots::default();
-        let mut assigned = Assigned::default();
+        let mut assigned = AssignedDamage::default();
         for ready in self.ready() {
-            let Some(shooter) = self.state.entity(ready.entity()) else {
+            let shooter = self.state.entity(ready.entity());
+            let Some(here) = shooter.standing() else {
                 continue;
             };
             let Some(Weapon::Damage {
@@ -57,10 +59,19 @@ impl<'a> Fire<'a> {
             else {
                 continue;
             };
-            let Some(aim) = self.aim(shooter, range.0, &assigned) else {
+            let roll = &self.rolls[here];
+            let Some(aim) = roll.best(
+                Shooter {
+                    team: self.state[shooter.seat()].team(),
+                    plating: self.state[shooter.row()].plating,
+                },
+                roll.body_of(shooter).pos,
+                range.0,
+                &assigned,
+            ) else {
                 continue;
             };
-            let plating = self.state[self.state[aim.target].row()].plating.0;
+            let plating = self.state[self.state.entity(aim.target).row()].plating.0;
             let dealt = (damage.0 * (1.0 - falloff.0 * aim.distance / range.0) - plating).max(0.0);
             assigned.take(aim.target, dealt);
             shots.hits.push(Hit {
@@ -75,6 +86,7 @@ impl<'a> Fire<'a> {
                 self.next_ready(ready.at(), rate.0),
             ));
         }
+        shots.exchanges = Shots::exchanged(&shots.hits, self.state);
         shots
     }
 
@@ -83,13 +95,8 @@ impl<'a> Fire<'a> {
         let mut ready: Vec<Ready> = self
             .state
             .ready()
-            .iter()
             .filter(|ready| ready.at() < now)
-            .filter(|ready| {
-                self.state
-                    .entity(ready.entity())
-                    .is_some_and(|entity| !entity.is_flying(self.state.time()))
-            })
+            .filter(|ready| !self.state.entity(ready.entity()).is_flying())
             .cloned()
             .collect();
         ready.sort_by(|a, b| {
@@ -105,16 +112,6 @@ impl<'a> Fire<'a> {
         let interval = if rate > 0.0 { 1.0 / rate } else { f64::MAX };
         at.after(interval).max(Moment::at(self.state.time()))
     }
-
-    fn aim(&self, shooter: &Entity, range: f64, assigned: &Assigned) -> Option<Aim> {
-        let from = self.state.body_of(shooter).pos;
-        Threat::of(self.state, shooter)?.best(
-            self.sweep
-                .within(from, range)
-                .filter_map(|id| self.state.entity(id)),
-            assigned,
-        )
-    }
 }
 
 impl Shots {
@@ -126,35 +123,32 @@ impl Shots {
         damage
     }
 
-    pub(crate) fn exchanges(&self, state: &State) -> Vec<Exchange> {
-        let mut found: BTreeMap<(AsteroidId, SeatId), (bool, bool)> = BTreeMap::new();
+    fn exchanged(hits: &[Hit], state: &State) -> Vec<Exchange> {
+        let mut found: BTreeMap<Post, Exchange> = BTreeMap::new();
         let mut note = |id: EntityId, landed: bool| {
-            let Some(entity) = state.entity(id) else {
+            let entity = state.entity(id);
+            let Some(asteroid) = entity.standing() else {
                 return;
             };
-            let Some(asteroid) = entity.standing(state.time()) else {
-                return;
+            let post = Post {
+                asteroid,
+                seat: entity.seat(),
             };
-            let at = found
-                .entry((asteroid, entity.seat()))
-                .or_insert((false, false));
+            let at = found.entry(post).or_insert(Exchange {
+                asteroid,
+                seat: post.seat,
+                fired: false,
+                landed: false,
+            });
             match landed {
-                true => at.1 = true,
-                false => at.0 = true,
+                true => at.landed = true,
+                false => at.fired = true,
             }
         };
-        for hit in &self.hits {
+        for hit in hits {
             note(hit.shooter, false);
             note(hit.target, true);
         }
-        found
-            .into_iter()
-            .map(|((asteroid, seat), (fired, landed))| Exchange {
-                asteroid,
-                seat,
-                fired,
-                landed,
-            })
-            .collect()
+        found.into_values().collect()
     }
 }

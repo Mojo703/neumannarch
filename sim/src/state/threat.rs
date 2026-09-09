@@ -1,8 +1,11 @@
+use core::ops::Range;
 use std::collections::BTreeMap;
 
 use super::State;
-use super::entity::Entity;
-use crate::ids::{AsteroidId, EntityId, TeamId};
+use super::entities::Entity;
+use super::roll::Roll;
+use crate::ids::{EntityId, TeamId};
+use crate::real::Real;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -11,68 +14,127 @@ pub(crate) struct Aim {
     pub(crate) distance: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Shooter {
+    pub(crate) team: TeamId,
+    pub(crate) plating: Real,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Assigned(BTreeMap<EntityId, f64>);
+pub(crate) struct AssignedDamage(BTreeMap<EntityId, f64>);
 
-pub(crate) struct Threat<'a> {
-    state: &'a State,
-    here: AsteroidId,
-    team: TeamId,
-    from: Vec3,
-    dealt: Vec<f64>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Threats {
+    rankings: Vec<Ranking>,
 }
 
-impl<'a> Threat<'a> {
-    pub(crate) fn of(state: &'a State, shooter: &Entity) -> Option<Threat<'a>> {
-        let plating = state[shooter.row()].plating.0;
-        Some(Threat {
-            state,
-            here: shooter.standing(state.time())?,
-            team: state[shooter.seat()].team(),
-            from: state.body_of(shooter).pos,
-            dealt: state
-                .roster()
-                .iter()
-                .map(|(_, row)| row.dps_through(plating))
-                .collect(),
-        })
+#[derive(Clone, Debug, PartialEq)]
+struct Ranking {
+    shooter: Shooter,
+    ranked: Vec<Ranked>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Ranked {
+    at: u32,
+    threat: f64,
+}
+
+impl Threats {
+    pub(crate) fn among(state: &State, standing: Range<usize>) -> Threats {
+        let mut rankings = Vec::new();
+        for shooter in shooters(state, standing.clone()) {
+            let mut ranked: Vec<Ranked> = standing
+                .clone()
+                .filter(|at| state[state.entities.at(*at).seat()].team() != shooter.team)
+                .map(|at| {
+                    let target = state.entities.at(at);
+                    Ranked {
+                        at: at as u32,
+                        threat: state[target.row()].dps_through(shooter.plating.0) / target.hp(),
+                    }
+                })
+                .collect();
+            ranked.sort_by(|first, second| {
+                second.threat.total_cmp(&first.threat).then(
+                    state
+                        .entities
+                        .at(first.at as usize)
+                        .id()
+                        .cmp(&state.entities.at(second.at as usize).id()),
+                )
+            });
+            rankings.push(Ranking { shooter, ranked });
+        }
+        Threats { rankings }
     }
 
-    pub(crate) fn best<'e>(
+    pub(crate) fn best(
         &self,
-        candidates: impl Iterator<Item = &'e Entity>,
-        assigned: &Assigned,
+        shooter: Shooter,
+        from: Vec3,
+        range: f64,
+        dealt: &AssignedDamage,
+        roll: &Roll,
     ) -> Option<Aim> {
-        candidates
-            .filter(|target| self.is_prey(target, assigned))
-            .map(|target| {
-                let dealt = self.dealt[usize::from(target.row().0)];
-                let distance = self.state.body_of(target).pos.distance(self.from);
-                (dealt / target.hp(), distance, target.id())
-            })
-            .max_by(|a, b| {
-                a.0.total_cmp(&b.0)
-                    .then(b.1.total_cmp(&a.1))
-                    .then(b.2.cmp(&a.2))
-            })
-            .map(|(_, distance, target)| Aim { target, distance })
-    }
-
-    fn is_prey(&self, target: &Entity, assigned: &Assigned) -> bool {
-        self.state[target.seat()].team() != self.team
-            && target.standing(self.state.time()) == Some(self.here)
-            && assigned.survived(target)
+        let ranked = &self
+            .rankings
+            .iter()
+            .find(|ranking| ranking.shooter == shooter)?
+            .ranked;
+        let mut best: Option<Aim> = None;
+        let mut taken = 0.0;
+        for target in ranked {
+            if best.is_some() && target.threat < taken {
+                break;
+            }
+            let prey = roll.at(target.at as usize);
+            if !dealt.survived(prey) {
+                continue;
+            }
+            let distance = roll.body_of(prey).pos.distance(from);
+            if distance > range {
+                continue;
+            }
+            if best.is_none_or(|aim| distance < aim.distance) {
+                best = Some(Aim {
+                    target: prey.id(),
+                    distance,
+                });
+                taken = target.threat;
+            }
+        }
+        best
     }
 }
 
-impl Assigned {
-    pub fn take(&mut self, target: EntityId, damage: f64) {
+impl AssignedDamage {
+    pub(crate) fn take(&mut self, target: EntityId, damage: f64) {
         *self.0.entry(target).or_default() += damage;
     }
 
-    fn survived(&self, target: &Entity) -> bool {
+    pub(crate) fn survived(&self, target: Entity) -> bool {
         target.hp() > self.0.get(&target.id()).copied().unwrap_or(0.0)
     }
+}
+
+fn shooters(state: &State, standing: Range<usize>) -> Vec<Shooter> {
+    let mut shooters: Vec<Shooter> = standing
+        .map(|at| state.entities.at(at))
+        .filter(|entity| state[entity.row()].is_armed())
+        .map(|entity| Shooter {
+            team: state[entity.seat()].team(),
+            plating: state[entity.row()].plating,
+        })
+        .collect();
+    shooters.sort_unstable_by(|first, second| {
+        first
+            .team
+            .cmp(&second.team)
+            .then(first.plating.0.total_cmp(&second.plating.0))
+    });
+    shooters.dedup();
+    shooters
 }
 
 #[cfg(test)]
@@ -80,9 +142,10 @@ mod tests {
     use super::*;
     use crate::belt::Belt;
     use crate::fixture::World;
-    use crate::ids::TeamId;
+    use crate::ids::{AsteroidId, EntityId};
     use crate::orbit::body::Gravity;
     use crate::roster::{CONSTRUCTOR, FRIGATE, RAIDER};
+    use crate::state::Rolls;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -92,15 +155,26 @@ mod tests {
         World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)])
     }
 
-    fn aimed(world: &World, shooter: EntityId) -> Option<Aim> {
-        let sweep = world.state.sweep();
-        let here = world.state.asteroid_body(HOME).pos;
-        Threat::of(&world.state, &world.state[shooter])?.best(
-            sweep
-                .within(here, Belt::ZONE_RADIUS_METERS)
-                .filter_map(|id| world.state.entity(id)),
-            &Assigned::default(),
+    fn shooting(state: &State, shooter: EntityId) -> Shooter {
+        let entity = state.entity(shooter);
+        Shooter {
+            team: state[entity.seat()].team(),
+            plating: state[entity.row()].plating,
+        }
+    }
+
+    fn aimed_within(world: &World, shooter: EntityId, range: f64) -> Option<Aim> {
+        let rolls = Rolls::called(&world.state);
+        rolls[HOME].best(
+            shooting(&world.state, shooter),
+            world.state.body_of(world.state.entity(shooter)).pos,
+            range,
+            &AssignedDamage::default(),
         )
+    }
+
+    fn aimed(world: &World, shooter: EntityId) -> Option<Aim> {
+        aimed_within(world, shooter, Belt::ZONE_RADIUS_METERS)
     }
 
     #[test]
@@ -132,39 +206,36 @@ mod tests {
     }
 
     #[test]
+    fn a_target_beyond_the_range_is_never_taken() {
+        let mut world = world();
+        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
+        let far = world.hold(1, RAIDER, HOME, 8.0);
+
+        assert_eq!(aimed_within(&world, hunter, 4.0), None);
+        assert_eq!(
+            aimed_within(&world, hunter, 12.0).map(|aim| aim.target),
+            Some(far)
+        );
+    }
+
+    #[test]
     fn damage_already_assigned_this_tick_passes_over_a_dead_target() {
         let mut world = world();
         let hunter = world.hold(0, FRIGATE, HOME, 0.0);
         let dangerous = world.hold(1, RAIDER, HOME, 2.0);
         let harmless = world.hold(1, CONSTRUCTOR, HOME, 4.0);
-        let sweep = world.state.sweep();
-        let here = world.state.asteroid_body(HOME).pos;
-        let threat = Threat::of(&world.state, &world.state[hunter]).expect("a standing shooter");
+        let rolls = Rolls::called(&world.state);
+        let from = world.state.body_of(world.state.entity(hunter)).pos;
+        let shooter = shooting(&world.state, hunter);
+        let mut dealt = AssignedDamage::default();
 
-        let mut assigned = Assigned::default();
-        assert_eq!(
-            threat
-                .best(
-                    sweep
-                        .within(here, Belt::ZONE_RADIUS_METERS)
-                        .filter_map(|id| world.state.entity(id)),
-                    &assigned
-                )
-                .map(|aim| aim.target),
-            Some(dangerous)
-        );
-        assigned.take(dangerous, world.state[dangerous].hp());
-        assert_eq!(
-            threat
-                .best(
-                    sweep
-                        .within(here, Belt::ZONE_RADIUS_METERS)
-                        .filter_map(|id| world.state.entity(id)),
-                    &assigned
-                )
-                .map(|aim| aim.target),
-            Some(harmless)
-        );
+        let first = rolls[HOME].best(shooter, from, Belt::ZONE_RADIUS_METERS, &dealt);
+        assert_eq!(first.map(|aim| aim.target), Some(dangerous));
+
+        dealt.take(dangerous, world.state.entity(dangerous).hp());
+
+        let second = rolls[HOME].best(shooter, from, Belt::ZONE_RADIUS_METERS, &dealt);
+        assert_eq!(second.map(|aim| aim.target), Some(harmless));
     }
 
     #[test]
@@ -175,5 +246,20 @@ mod tests {
         world.hold(1, CONSTRUCTOR, HOME, 6.0);
 
         assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(near));
+    }
+
+    #[test]
+    fn a_tie_at_one_point_breaks_by_the_lower_id() {
+        let mut coincident = world();
+        let hunter = coincident.hold(0, FRIGATE, HOME, 0.0);
+        let first = coincident.hold(1, CONSTRUCTOR, HOME, 3.0);
+        let second = coincident.hold(1, CONSTRUCTOR, HOME, 3.0);
+        assert!(first < second);
+
+        assert_eq!(
+            aimed(&coincident, hunter).map(|aim| aim.target),
+            Some(first),
+            "two enemies of one row at one point: the lower id"
+        );
     }
 }

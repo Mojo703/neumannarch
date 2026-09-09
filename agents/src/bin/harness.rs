@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use neumannarch_agents::{
     Guarantees, Mix, Personality, PlayedMatch, Scripted, Seated, free_for_all, minutes,
@@ -74,6 +75,20 @@ fn main() {
                 false
             }
         },
+        ["time"] => {
+            timed(CLOCK);
+            true
+        }
+        ["time", over] => match over.parse::<u64>() {
+            Ok(over) => {
+                timed(minutes(over));
+                true
+            }
+            Err(_) => {
+                println!("time takes a whole number of minutes");
+                false
+            }
+        },
         ["matrix"] => {
             matrix();
             true
@@ -88,7 +103,7 @@ fn main() {
         }
         _ => {
             println!(
-                "usage: harness match [turtle|expand|none] .. up to four\n       harness verify [minutes]\n       harness replay\n       harness rollback\n       harness matrix\n       harness draft\n       harness sweep"
+                "usage: harness match [turtle|expand|none] .. up to four\n       harness verify [minutes]\n       harness time [minutes]\n       harness replay\n       harness rollback\n       harness matrix\n       harness draft\n       harness sweep"
             );
             true
         }
@@ -121,6 +136,42 @@ fn played(named: &[&str]) {
     }
     println!("  {}", line(run.state()));
     report(run.state());
+}
+
+fn timed(clock: Tick) {
+    let seated = seats(&["expand", "expand"]).expect("both personalities ship");
+    let mut run = PlayedMatch::new(setup(clock, SEED, SEATS.len()), seated);
+    println!(
+        "expand against expand over {} minutes, milliseconds a tick",
+        clock.seconds() / 60.0
+    );
+    let mut spans: Vec<f64> = Vec::new();
+    while !run.over() {
+        let started = Instant::now();
+        run.advance();
+        spans.push(started.elapsed().as_secs_f64() * 1e3);
+        let tick = run.state().tick();
+        if tick
+            .0
+            .is_multiple_of(TRACE_INTERVAL * u64::from(TICKS_PER_SECOND))
+        {
+            spans.sort_by(f64::total_cmp);
+            println!(
+                "  {:>3}m  {:>4} entities  p50 {:.2}  p95 {:.2}  max {:.2}",
+                (tick.seconds() / 60.0) as u64,
+                run.state().entities().count(),
+                at_percentile(&spans, 0.5),
+                at_percentile(&spans, 0.95),
+                spans.last().copied().unwrap_or_default()
+            );
+            spans.clear();
+        }
+    }
+}
+
+fn at_percentile(sorted: &[f64], share: f64) -> f64 {
+    let at = ((sorted.len() as f64 * share) as usize).min(sorted.len().saturating_sub(1));
+    sorted.get(at).copied().unwrap_or_default()
 }
 
 fn verified(clock: Tick) -> bool {
@@ -465,10 +516,7 @@ fn line(state: &State) -> String {
             )
         })
         .collect();
-    let flying = state
-        .entities()
-        .filter(|entity| entity.is_flying(state.time()))
-        .count();
+    let flying = state.entities().filter(|entity| entity.is_flying()).count();
     format!(
         "{:>4}s  {flying} flying, {} frames, {} posts  |  {}",
         state.tick().seconds() as u64,
@@ -663,9 +711,7 @@ fn force(state: &State, seat: SeatId) -> Vec<EntityId> {
 fn closed(state: &State, force: &[EntityId]) -> bool {
     !force.is_empty()
         && force.iter().all(|id| {
-            let Some(one) = state.entity(*id) else {
-                return false;
-            };
+            let one = state.entity(*id);
             let range = state.roster()[one.row()].max_damage_range();
             let from = state.body_of(one).pos;
             state

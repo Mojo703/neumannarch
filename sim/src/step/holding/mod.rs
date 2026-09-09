@@ -2,91 +2,81 @@ use std::collections::BTreeMap;
 
 use field::Fields;
 
-use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId};
+use crate::ids::EntityId;
 use crate::orbit::body::Body;
 use crate::roster::Row;
-use crate::state::sweep::Sweep;
-use crate::state::{Assigned, Entity, Motion, State, Threat};
+use crate::state::{AssignedDamage, Entity, Roll, Rolls, Shooter, State};
 use crate::vec3::Vec3;
 
 pub(crate) struct Holding<'a> {
     state: &'a State,
-    sweep: &'a Sweep,
+    rolls: &'a Rolls<'a>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Thrusts(BTreeMap<EntityId, Vec3>);
 
 impl<'a> Holding<'a> {
-    pub(crate) fn of(state: &'a State, sweep: &'a Sweep) -> Holding<'a> {
-        Holding { state, sweep }
+    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Holding<'a> {
+        Holding { state, rolls }
     }
 
     pub(crate) fn run(self) -> Thrusts {
-        let fields = Fields::of(self.state);
-        Thrusts(
-            self.state
-                .entities()
-                .filter_map(|entity| Some((entity.id(), self.thrust(entity, &fields)?)))
-                .collect(),
-        )
+        let fields = Fields::among(self.state, self.rolls);
+        let mut thrusts = BTreeMap::new();
+        for roll in self.rolls.iter() {
+            for entity in roll.standing() {
+                if let Some(thrust) = self.thrust(entity, roll, &fields) {
+                    thrusts.insert(entity.id(), thrust);
+                }
+            }
+        }
+        Thrusts(thrusts)
     }
 
-    fn thrust(&self, entity: &Entity, fields: &Fields) -> Option<Vec3> {
-        let Motion::Steered { body, .. } = entity.motion() else {
-            return None;
-        };
+    fn thrust(&self, entity: Entity, roll: &Roll, fields: &Fields) -> Option<Vec3> {
+        let body = entity.steered()?;
         let row = &self.state[entity.row()];
-        let apart = terms::separation(body, row, self.neighbours(entity, body));
-        let Some(here) = entity.standing(self.state.time()) else {
-            return Some(apart.capped(row.manoeuvring.0));
-        };
         let sample = fields.at(entity.id());
-        let asteroid = &self.state[here];
-        let asteroid_body = self.state.asteroid_body(here);
-        let sum = apart
+        let asteroid = &self.state[roll.asteroid()];
+        let sum = terms::separation(body, row, self.neighbours(entity, roll))
             + terms::wander(row, self.state.time(), entity.id())
             + terms::returning(
                 body,
                 row,
-                asteroid_body,
-                asteroid.strayed(asteroid_body, body.pos),
+                roll.body(),
+                asteroid.strayed(roll.body(), body.pos),
             )
             + terms::cohesion(row, sample)
             + terms::caution(row, sample)
-            + self.chasing(entity, body, row, here);
+            + self.chasing(entity, body, row, roll);
         Some(sum.capped(row.manoeuvring.0))
     }
 
-    fn chasing(&self, entity: &Entity, body: Body, row: &Row, here: AsteroidId) -> Vec3 {
+    fn chasing(&self, entity: Entity, body: Body, row: &Row, roll: &Roll) -> Vec3 {
         let Some(standoff) = row.standoff() else {
             return Vec3::ZERO;
         };
-        let Some(target) = self.target(entity, here) else {
+        let shooter = Shooter {
+            team: self.state[entity.seat()].team(),
+            plating: row.plating,
+        };
+        let Some(aim) = roll.best(shooter, body.pos, f64::INFINITY, &AssignedDamage::default())
+        else {
             return Vec3::ZERO;
         };
-        let prey = self.state.body_of(target);
+        let prey = roll.body_of(self.state.entity(aim.target));
         let Some(toward) = (body.pos - prey.pos).normalized() else {
             return Vec3::ZERO;
         };
         terms::chase(body, row, Body::new(prey.pos + toward * standoff, prey.vel))
     }
 
-    fn target(&self, entity: &Entity, here: AsteroidId) -> Option<&Entity> {
-        let aim = Threat::of(self.state, entity)?
-            .best(self.state.standing_at(here), &Assigned::default())?;
-        self.state.entity(aim.target)
-    }
-
-    fn neighbours(&self, entity: &Entity, body: Body) -> impl Iterator<Item = Vec3> + '_ {
+    fn neighbours(&self, entity: Entity, roll: &'a Roll<'a>) -> impl Iterator<Item = Vec3> + 'a {
         let mine = entity.id();
-        self.sweep
-            .within(body.pos, Belt::SPACING_METERS)
-            .filter(move |id| *id != mine)
-            .filter_map(|id| self.state.entity(id))
-            .filter(|other| other.motion() != Motion::Fixed)
-            .map(|other| self.state.body_of(other).pos)
+        roll.standing()
+            .filter(move |other| other.id() != mine)
+            .filter_map(|other| other.steered().map(|body| body.pos))
     }
 }
 
