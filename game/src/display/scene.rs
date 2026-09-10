@@ -625,6 +625,7 @@ fn marked_on_bar(roster: &Roster, gesture: Option<&WheelGesture>) -> Option<BarM
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::TICKS_PER_SECOND;
     use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
 
     use super::*;
@@ -922,63 +923,81 @@ mod tests {
     #[test]
     fn a_wheels_surplus_is_the_count_the_sim_would_send_and_never_the_client_arithmetic() {
         let mut local = Local::start(2);
+        local.want(&[(at(1), SHIPYARD, 1), (at(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(1), CONSTRUCTOR, 1)]);
+        local.run(4 * u64::from(TICKS_PER_SECOND));
+        local.want(&[(at(1), CONSTRUCTOR, 0), (at(0), CONSTRUCTOR, 2)]);
         local.want(&[(at(0), CONSTRUCTOR, 1)]);
-        local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
-        local.want(&[(at(1), CONSTRUCTOR, 0)]);
         let view = local.view();
 
-        let arriving = view
+        let here = view
             .compositions
             .get(&Post {
-                asteroid: at(1),
+                asteroid: at(0),
                 seat: PLAYER,
             })
             .and_then(|composition| composition.rows.get(&CONSTRUCTOR))
             .copied()
-            .expect("the constructor is homed at its destination");
+            .expect("the constructors are homed here");
 
-        assert_eq!(arriving.arriving, 1);
-        assert_eq!(arriving.present, 0);
-        assert_eq!(view.want_of(Posting::of(at(1), PLAYER, CONSTRUCTOR)), 0);
+        assert_eq!(here.present, 1);
+        assert_eq!(here.arriving, 1);
+        assert_eq!(view.want_of(Posting::of(at(0), PLAYER, CONSTRUCTOR)), 1);
         assert_eq!(
-            arriving.surplus, 0,
-            "a unit still on its way stands nowhere to be surplus"
+            here.surplus, 1,
+            "the want covers one of the two homed here, so the other stands above it"
         );
-        assert!(
-            !entries(&scene(&local), at(1), PLAYER, CONSTRUCTOR)
+        assert_eq!(
+            entries(&scene(&local), at(0), PLAYER, CONSTRUCTOR)
                 .iter()
-                .any(|shown| matches!(shown.entry, Entry::Surplus(_))),
-            "the wheel says what the sim says"
+                .map(|shown| shown.entry)
+                .collect::<Vec<Entry>>(),
+            vec![
+                Entry::Present(1),
+                Entry::Surplus(1),
+                Entry::Arriving {
+                    count: 1,
+                    from: at(1)
+                },
+            ],
+            "the wheel says what the sim says, not what stands here less the want"
         );
     }
 
     #[test]
-    fn the_stockpile_bar_marks_the_cost_a_plus_would_pay_and_the_refund_a_minus_would_take() {
+    fn the_bar_marks_the_sims_cost_and_refund_and_nothing_where_the_reserve_fills_the_want() {
         let mut local = Local::start(2);
         local.want(&[(at(0), SHIPYARD, 1)]);
         let roster = local.session().state().roster();
-        let button = |button| {
-            let at = ButtonAt {
-                posting: Posting::of(at(0), PLAYER, FRIGATE),
-                button,
-            };
+        let marked = |posting, button| {
+            let pressed = ButtonAt { posting, button };
             drawn(
                 &local,
                 &Fights::default(),
-                Some(at.posting.asteroid()),
-                Some(pressing(&local, at)),
+                Some(pressed.posting.asteroid()),
+                Some(pressing(&local, pressed)),
             )
             .stockpile_bar
             .and_then(|bar| bar.marked)
         };
 
+        let frigate = Posting::of(at(0), PLAYER, FRIGATE);
+
         assert_eq!(
-            button(WheelButton::Plus(1)),
+            marked(frigate, WheelButton::Plus(1)),
             Some(BarMark::Cost(roster[FRIGATE].cost)),
             "one more frigate costs one frigate"
         );
         assert_eq!(
-            button(WheelButton::Minus(1)),
+            marked(
+                Posting::of(at(5), PLAYER, CONSTRUCTOR),
+                WheelButton::Plus(1)
+            ),
+            Some(BarMark::Cost(Materials::ZERO)),
+            "the reserve's constructor is paid for, so the bar marks nothing"
+        );
+        assert_eq!(
+            marked(frigate, WheelButton::Minus(1)),
             Some(BarMark::Refund(Materials::ZERO)),
             "nothing is building to refund"
         );

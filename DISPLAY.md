@@ -504,7 +504,7 @@ follows Controls, above.
   over the slow span, and the clock's numeral starts.
 - **Results.** At the clock: the final belt, held still, under a panel
   titled Results: one row per team in the match's colours, its asteroids held
-  as a count of asteroid glyphs and its army value, the winning row marked;
+  as a count of asteroid glyphs and its entity value, the winning row marked;
   then Rematch, which returns to the lobby with its shape kept, and Leave
   to the title. The word standings appears nowhere on screen.
 

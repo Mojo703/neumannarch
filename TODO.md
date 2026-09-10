@@ -9,33 +9,54 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Uncommitted and verified green by the overseer's own gate, replay and
-rollback (2026-09-09): the match clock is a duration. `Setup::clock` was
-a `Tick` while meaning a span of running match time, so the room could
-compare it against an absolute tick and did, in two places, dropping
-every relayed command and ignoring every hash report over the final
-stretch of every multiplayer match. It is a `Time` now, so both
-comparisons are type errors rather than plausible lines; `Tick::since`
-and `Tick::after` are the only named crossings between a moment and a
-duration, and the two puns elsewhere in `sim` are gone with them. The
-room bounds against `Setup::ends_by()`, the draft's certain end after
-the clock, and a sim test plays a match out at one, two, three and four
-seats and asserts the final tick equals it, so the bound cannot drift
-from the draft's stage count in silence. Shown failing first at the
-room, at tick 15,600 of a 7,200-tick clock, for the command and for the
-hash report separately. `Forwarding::commanded` no longer folds the
-ledger's refusal into the ownership check, so the two refusals are
-tellable apart and the test discriminates rather than merely passes.
-The hash did not move. Budgets: code +64/-50, tests +120/-18, docs +10.
+Next, ruled 2026-09-09, a red-state refactor that stops at full red for
+the owner's review of the demolition: the time split. Every phase owns
+its own clock today, `extraction.rs` and `construction.rs` both opening
+with `let dt = Tick(1).seconds()`, so no phase can be handed a shorter
+span and none can be handed a zero one. That is why the step returns
+early while the draft runs, and that early return is why a placement
+needed a second path into `place_from_reserve` beside the reserve rule's
+own. The shape: every phase takes the step's match-time span, zero
+during the draft, and there is no early return. Deleted first: the
+drafting early return, `pick()`, the `PICK` constant and the reading of
+a want of one as a placement, both `Tick(1).seconds()` literals, and the
+second caller of `place_from_reserve`. Rebuilt: the step hands each
+phase its span, and the draft gates wants and places nothing, so
+reserve placement is what DESIGN already calls it, a shortfall filled
+from reserve at once. A zero span is made unrepresentable to the phases
+that are not span-based rather than stated as a rule they observe
+(owner, 2026-09-09), so fire and the sends cannot act at zero because
+they are never handed a span they could act on. One verb survives
+untouched. Found with it, and closed by the same change: while the
+draft runs, a want of any count but one is admitted at a taken asteroid
+and silently places nothing, so wanting two is a way past the draft.
 
-The next unit, ruled 2026-09-09: the four holes in the tests below,
-widened to carry two `game` tests that assert the opposite of their
-names, at `display/scene.rs` — a surplus test that passes for a client
-doing `present - want` because present is zero in its scene, and a cost
-test that asserts exactly what client arithmetic gives, leaving
+Landed 2026-09-09: the holes in the tests. Six guarantees the
+documents state and nothing pins. In `sim`: a falloff reduces damage
+with distance, and every test row is built with a falloff of zero, so
+the term can be deleted from `step/fire.rs` with the gate still green;
+plating is subtracted per hit, and the one damage assertion in the crate
+fires at a storage whose plating is zero; build repairs damaged
+friendlies and takes shortfalls first, and `Construction::repair`,
+`Progress::repairs` and both `heal` paths have no test anywhere; the
+side holding the most asteroids wins with ties broken by army value, and
+`Standings::leaders` decides every match while `Team::value` is asserted
+nowhere. In `game`, two tests that name a guarantee they do not test,
+both guarding the rule that the preview is the sim's answer and the
+client computes nothing: a surplus test that a client doing
+`present - want` passes, because present is zero in its scene, and a
+cost test that asserts exactly what client arithmetic gives, leaving
 DISPLAY.md's own discriminator, that what the reserve or a surplus fills
-is free and the bar marks nothing, untested. After it, the relayed
-command below.
+is free and the bar marks nothing, untested. The unit is tests only: a
+test that fails against the code stops the work and reports rather than
+changing behaviour.
+
+After it, the relayed command below, carrying with it the split of
+`Refused::Ahead`, which today means "beyond the session's forward
+window" in `Session::insert` and "past the tick this match ends by" in
+`Log::take`. Both refusals also remain indistinguishable from outside
+the room, and deciding what a room says about a refusal it now swallows
+is that unit's question.
 
 Two holes open, neither fixed:
 - `game/src/net/machine.rs` expects its own controller's command to be

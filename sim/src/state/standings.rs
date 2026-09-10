@@ -79,3 +79,91 @@ impl Standings {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixture::World;
+    use crate::ids::AsteroidId;
+    use crate::orbit::body::Gravity;
+    use crate::roster::{RAIDER, STORAGE};
+
+    const GRAVITY: Gravity = Gravity::new(4.0e13);
+
+    const MINE: TeamId = TeamId(0);
+
+    const THEIRS: TeamId = TeamId(1);
+
+    fn world() -> World {
+        World::ring(GRAVITY, 4, &[MINE, THEIRS])
+    }
+
+    fn scored(standings: &Standings, team: TeamId) -> Team {
+        *standings
+            .teams()
+            .iter()
+            .find(|scored| scored.team == team)
+            .expect("the team stands in the standings")
+    }
+
+    #[test]
+    fn the_side_holding_the_most_asteroids_leads() {
+        let mut world = world();
+        world.fix(0, STORAGE, AsteroidId(0));
+        world.fix(0, STORAGE, AsteroidId(1));
+        world.fix(1, STORAGE, AsteroidId(2));
+        world.hold(1, RAIDER, AsteroidId(2), 5.0);
+
+        let standings = world.state.standings();
+
+        assert_eq!(scored(&standings, MINE).asteroids, 2);
+        assert_eq!(scored(&standings, THEIRS).asteroids, 1);
+        assert_eq!(
+            standings.leaders(),
+            vec![MINE],
+            "the smaller army holding more asteroids lost the match"
+        );
+    }
+
+    #[test]
+    fn an_asteroid_counts_for_a_side_with_a_structure_there() {
+        let mut world = world();
+        world.fix(0, STORAGE, AsteroidId(0));
+        world.hold(1, RAIDER, AsteroidId(1), 5.0);
+        world.hold(1, RAIDER, AsteroidId(2), 5.0);
+
+        let standings = world.state.standings();
+
+        assert_eq!(scored(&standings, MINE).asteroids, 1);
+        assert_eq!(
+            scored(&standings, THEIRS).asteroids,
+            0,
+            "a side standing units at an asteroid holds it without a structure"
+        );
+        assert_eq!(standings.leaders(), vec![MINE]);
+    }
+
+    #[test]
+    fn sides_holding_as_many_asteroids_break_by_total_army_value() {
+        let mut world = world();
+        world.fix(0, STORAGE, AsteroidId(0));
+        world.fix(1, STORAGE, AsteroidId(1));
+        world.hold(1, RAIDER, AsteroidId(1), 5.0);
+
+        let standings = world.state.standings();
+
+        assert_eq!(scored(&standings, MINE).asteroids, 1);
+        assert_eq!(scored(&standings, THEIRS).asteroids, 1);
+        assert_eq!(
+            scored(&standings, MINE).value,
+            40.0,
+            "a side's value is what its own entities cost"
+        );
+        assert_eq!(scored(&standings, THEIRS).value, 85.0);
+        assert_eq!(
+            standings.leaders(),
+            vec![THEIRS],
+            "the tie stood undecided or fell the wrong way"
+        );
+    }
+}

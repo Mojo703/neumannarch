@@ -36,8 +36,9 @@ probe; the win is holding the system when the clock runs out.
 ## Session
 
 - Win: at the clock, the side holding the most asteroids. An asteroid
-  counts for a player with a structure there; ties break by total army
-  value. A side with no entities and an empty reserve is out before the
+  counts for a player with a structure there; ties break by total entity
+  value, what everything a side holds cost to build, ships and structures
+  alike. A side with no entities and an empty reserve is out before the
   clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
   count per row, of one shipyard and one constructor. A match opens in
@@ -385,7 +386,7 @@ seat, its position and velocity, every asteroid with its orbit, its caps
 and all its future positions, and the standings. Wants and frames are
 the one exception: a player sees their own and not another's. The
 standings at any tick are what the win rule would decide were the clock
-now: per side, the asteroids held, the army value and whether it is
+now: per side, the asteroids held, the entity value and whether it is
 still in. Nothing is hidden and nothing is remembered, since there is
 nothing to remember.
 

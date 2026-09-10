@@ -283,6 +283,78 @@ mod tests {
         );
     }
 
+    fn a_shipyard_and_a_raider_hurt_by(damage: f64) -> (World, EntityId) {
+        let mut world = World::started(&[TeamId(0)]);
+        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        let raider = world.hold(0, RAIDER, asteroid(0), 5.0);
+        world.state.entities.hurt(raider, damage);
+        (world, raider)
+    }
+
+    #[test]
+    fn a_builders_leftover_effort_repairs_a_damaged_friendly_at_its_asteroid() {
+        let (mut world, hurt) = a_shipyard_and_a_raider_hurt_by(20.0);
+        assert_eq!(world.state.entity(hurt).hp(), 20.0);
+
+        world.run(2 * u64::from(TICKS_PER_SECOND));
+
+        assert_eq!(
+            world.state.entity(hurt).hp(),
+            world.state[RAIDER].hp.0,
+            "two seconds of a shipyard's effort with nothing to build left the raider hurt"
+        );
+    }
+
+    #[test]
+    fn a_shortfall_takes_the_builders_effort_before_a_repair_does() {
+        let (mut world, hurt) = a_shipyard_and_a_raider_hurt_by(20.0);
+
+        world.tick(&[Issued::want(0, asteroid(0), STORAGE, 1)]);
+        assert_eq!(world.frames(0, asteroid(0), STORAGE), 1);
+        let wounded = world.state.entity(hurt).hp();
+
+        world.run(u64::from(TICKS_PER_SECOND) / 2);
+
+        assert!(
+            world.progress(0, asteroid(0)) > 0.0,
+            "the storage's frame took none of the effort"
+        );
+        assert_eq!(
+            world.state.entity(hurt).hp(),
+            wounded,
+            "a repair took effort a frame at the asteroid still wanted"
+        );
+    }
+
+    #[test]
+    fn a_repair_never_heals_a_unit_past_its_rows_hit_points() {
+        let (mut world, hurt) = a_shipyard_and_a_raider_hurt_by(0.05);
+
+        world.run(u64::from(TICKS_PER_SECOND));
+
+        assert_eq!(
+            world.state.entity(hurt).hp(),
+            world.state[RAIDER].hp.0,
+            "a second of effort on a scratch carried the raider past its row's hit points"
+        );
+    }
+
+    #[test]
+    fn a_builder_repairs_at_its_own_asteroid_and_nowhere_else() {
+        let (mut world, near) = a_shipyard_and_a_raider_hurt_by(20.0);
+        let far = world.hold(0, RAIDER, asteroid(5), 5.0);
+        world.state.entities.hurt(far, 20.0);
+
+        world.run(2 * u64::from(TICKS_PER_SECOND));
+
+        assert_eq!(world.state.entity(near).hp(), world.state[RAIDER].hp.0);
+        assert_eq!(
+            world.state.entity(far).hp(),
+            20.0,
+            "a builder repaired a friendly an asteroid away"
+        );
+    }
+
     #[test]
     fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
         let mut world = stocked(Roster::shipped(), BTreeMap::from([(STORAGE, 1)]));
@@ -515,6 +587,36 @@ mod tests {
         assert!(
             world.shot_at(far, u64::from(TICKS_PER_SECOND)).is_none(),
             "an enemy beyond the damage range was fired on"
+        );
+    }
+
+    #[test]
+    fn a_falloff_reduces_damage_with_distance_and_the_targets_plating_is_subtracted_per_hit() {
+        let dealt = |meters: f64| {
+            let mut world = World::started(&[TeamId(0), TeamId(1)]);
+            let raider = world.hold(0, RAIDER, asteroid(0), 0.0);
+            let plated = world.hold(1, FRIGATE, asteroid(0), meters);
+            world
+                .shots()
+                .hits
+                .into_iter()
+                .find(|hit| hit.shooter == raider && hit.target == plated)
+                .expect("the raider fired at the frigate")
+                .damage
+        };
+
+        let near = dealt(0.75);
+        let far = dealt(2.25);
+
+        assert!(
+            (near - 1.625).abs() < 1e-6,
+            "a raider a quarter of its range off a frigate dealt {near}, not its three damage \
+             less an eighth of it to the falloff and one to the frigate's plating"
+        );
+        assert!(
+            (far - 0.875).abs() < 1e-6,
+            "a raider three quarters of its range off a frigate dealt {far}, not its three damage \
+             less three eighths of it to the falloff and one to the frigate's plating"
         );
     }
 
