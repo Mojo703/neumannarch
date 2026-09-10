@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::post::Post;
 use crate::state::{AssignedDamage, Reach, Ready, Rolls, Shooter, State};
-use crate::time::Moment;
+use crate::time::{Moment, RunningSpan};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
@@ -31,11 +31,12 @@ pub struct Shots {
 pub(crate) struct Fire<'a> {
     state: &'a State,
     rolls: &'a Rolls<'a>,
+    over: RunningSpan,
 }
 
 impl<'a> Fire<'a> {
-    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Fire<'a> {
-        Fire { state, rolls }
+    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>, over: RunningSpan) -> Fire<'a> {
+        Fire { state, rolls, over }
     }
 
     pub(crate) fn run(self) -> Shots {
@@ -91,7 +92,7 @@ impl<'a> Fire<'a> {
     }
 
     fn due(&self) -> Vec<Ready> {
-        let now = Moment::at(self.state.time().next());
+        let now = Moment::at(self.over.ends_at(self.state.time()));
         let mut due: Vec<Ready> = self
             .state
             .ready()
@@ -108,7 +109,7 @@ impl<'a> Fire<'a> {
     }
 
     fn reloading(&self) -> impl Iterator<Item = &Ready> {
-        let now = Moment::at(self.state.time().next());
+        let now = Moment::at(self.over.ends_at(self.state.time()));
         self.state.ready().filter(move |ready| ready.at() >= now)
     }
 

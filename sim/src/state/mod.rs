@@ -97,6 +97,13 @@ impl State {
         self.draft.ended().is_none()
     }
 
+    pub(crate) fn ran(&self) -> Time {
+        match self.drafting() {
+            true => Time::ZERO,
+            false => Time(1),
+        }
+    }
+
     pub(crate) fn close_draft(&mut self) {
         if !self.drafting() {
             return;
@@ -196,6 +203,31 @@ impl State {
             .filter(move |(_, frame)| frame.post() == post && frame.row() == row)
     }
 
+    pub(crate) fn homed(&self) -> BTreeMap<Posting, u32> {
+        let mut homed: BTreeMap<Posting, u32> = BTreeMap::new();
+        for entity in self.entities() {
+            *homed
+                .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+                .or_default() += 1;
+        }
+        homed
+    }
+
+    pub(crate) fn shortfalls(&self) -> BTreeMap<Posting, u32> {
+        let homed = self.homed();
+        self.posts()
+            .flat_map(|(post, wants)| {
+                let homed = &homed;
+                wants.iter().filter_map(move |(row, want)| {
+                    let posting = Posting::new(post, row);
+                    want.checked_sub(homed.get(&posting).copied().unwrap_or_default())
+                        .filter(|missing| *missing > 0)
+                        .map(|missing| (posting, missing))
+                })
+            })
+            .collect()
+    }
+
     pub fn count(&self, post: Post, row: RowId) -> u32 {
         let counted = self.posted(post, row).count();
         u32::try_from(counted).unwrap_or(u32::MAX)
@@ -266,21 +298,21 @@ impl State {
         id
     }
 
-    pub(crate) fn place_from_reserve(&mut self, post: Post, row: RowId) -> bool {
-        let taken = self
+    pub(crate) fn place_from_reserve(&mut self, post: Post, row: RowId, ran: Time) {
+        if self
             .seat_mut(post.seat)
-            .is_some_and(|seat| seat.take_reserved(row));
-        if taken {
-            self.spawn_at(post, row);
+            .is_some_and(|seat| seat.take_reserved(row))
+        {
+            self.draft.place(post.asteroid, post.seat, row, self.tick);
+            self.spawn_at(post, row, ran);
         }
-        taken
     }
 
-    pub(crate) fn spawn_at(&mut self, post: Post, row: RowId) {
+    pub(crate) fn spawn_at(&mut self, post: Post, row: RowId, ran: Time) {
         let motion = match self[row].kind() {
             Kind::Structure => Motion::Fixed,
             Kind::Unit => Motion::Steered {
-                body: self.spawn_body(post.asteroid, self.time().next()),
+                body: self.spawn_body(post.asteroid, self.time().after(ran)),
             },
         };
         self.spawn(post.seat, row, post.asteroid, motion);

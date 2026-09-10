@@ -2,6 +2,7 @@ use crate::ids::EntityId;
 use crate::orbit::body::Body;
 use crate::state::{Entity, State};
 use crate::step::holding::Thrusts;
+use crate::time::RunningSpan;
 use crate::transfer::Transfer;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -10,7 +11,7 @@ pub(crate) struct Move {
     pub body: Body,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Moved {
     steps: Vec<Move>,
     arrived: Vec<EntityId>,
@@ -19,11 +20,16 @@ pub(crate) struct Moved {
 pub(crate) struct Propagation<'a> {
     state: &'a State,
     thrusts: &'a Thrusts,
+    over: RunningSpan,
 }
 
 impl<'a> Propagation<'a> {
-    pub(crate) fn of(state: &'a State, thrusts: &'a Thrusts) -> Propagation<'a> {
-        Propagation { state, thrusts }
+    pub(crate) fn of(state: &'a State, thrusts: &'a Thrusts, over: RunningSpan) -> Propagation<'a> {
+        Propagation {
+            state,
+            thrusts,
+            over,
+        }
     }
 
     pub(crate) fn run(self) -> Moved {
@@ -53,7 +59,7 @@ impl<'a> Propagation<'a> {
         let gravity = self.state.gravity();
         let destination = self.state[entity.home()]
             .orbit()
-            .at(self.state.time().next(), gravity);
+            .at(self.over.ends_at(self.state.time()), gravity);
         Transfer::of(body, destination, self.state.roster().movement_limit().0).arrived()
     }
 }

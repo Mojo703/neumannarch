@@ -43,7 +43,8 @@ probe; the win is holding the system when the clock runs out.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
   count per row, of one shipyard and one constructor. A match opens in
   the placement draft, with time stopped: no body moves, nothing is
-  extracted and nothing builds until the clock starts, and the belt is
+  extracted, nothing builds, nothing is sent and nothing fires until the
+  clock starts, and the belt is
   whole and visible, its asteroids and their caps read by everyone. The
   draft is a sequence of placement stages, one per reserve structure per
   seat: the first round's in an order drawn from the seed, the second
@@ -52,11 +53,13 @@ probe; the win is holding the system when the clock runs out.
   the moment its seat places, or after a stated span if it has not, and
   the next begins at once. A seat whose placement stage ran out keeps
   the right to place and may do so at any later tick, alongside the
-  running one, first come first served. A placement puts the seat's
-  reserve row at the asteroid at once, complete, and an asteroid any
-  seat has a body homed at is taken. A reserve want before the seat's
-  first placement stage has begun is refused by name; a want at a taken
-  asteroid is refused by name. Any other want is accepted during the
+  running one, first come first served. A placement is a want the seat's
+  reserve fills: the row appears at the asteroid at once, complete, and
+  the placement stage it was held for is placed. An asteroid any seat
+  has a body homed at is taken. A want that would draw the seat's
+  reserve is refused by name before that seat's first placement stage
+  has begun, and refused by name at a taken asteroid, whatever its
+  count. Any other want is accepted during the
   draft and stands as a want, the way a build order is queued before a
   round starts; it is filled once the clock runs. The draft ends, and
   the clock starts, on the tick every seat has placed both structures,

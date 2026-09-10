@@ -18,6 +18,9 @@ pub struct Time(pub u64);
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Moment(pub f64);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct RunningSpan(Time);
+
 impl Tick {
     pub const ZERO: Tick = Tick(0);
 
@@ -61,8 +64,26 @@ impl Time {
         Time(self.0.saturating_sub(then.0))
     }
 
+    pub fn after(self, ran: Time) -> Time {
+        Time(self.0 + ran.0)
+    }
+
     pub fn seconds(self) -> f64 {
         self.0 as f64 / f64::from(TICKS_PER_SECOND)
+    }
+}
+
+impl RunningSpan {
+    pub(crate) fn of(ran: Time) -> Option<RunningSpan> {
+        (ran > Time::ZERO).then_some(RunningSpan(ran))
+    }
+
+    pub(crate) fn seconds(self) -> f64 {
+        self.0.seconds()
+    }
+
+    pub(crate) fn ends_at(self, started: Time) -> Time {
+        started.after(self.0)
     }
 }
 
@@ -136,6 +157,16 @@ mod tests {
             Time::ZERO,
             "a tick before the one the clock started at has run no time"
         );
+    }
+
+    #[test]
+    fn a_step_the_clock_did_not_run_over_has_no_running_span() {
+        assert_eq!(RunningSpan::of(Time::ZERO), None, "the draft runs no time");
+
+        let ran = RunningSpan::of(Time(1)).expect("the clock ran a tick");
+
+        assert_eq!(ran.ends_at(Time(7)), Time(8));
+        assert_eq!(ran.seconds(), 1.0 / f64::from(TICKS_PER_SECOND));
     }
 
     #[test]

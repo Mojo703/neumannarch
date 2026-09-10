@@ -30,6 +30,16 @@ const WALKING_METERS: f64 = 1.5;
 
 const SETTLING_SECONDS: u64 = 40;
 
+fn steering(world: &World) -> Steering {
+    Holding::of(
+        &world.state,
+        &Rolls::called(&world.state),
+        &Shots::default(),
+        world.running(),
+    )
+    .run()
+}
+
 fn seconds(count: u64) -> u64 {
     count * u64::from(TICKS_PER_SECOND)
 }
@@ -598,12 +608,7 @@ fn a_thrust_never_exceeds_the_rows_manoeuvring_limit() {
     }
 
     for _ in 0..seconds(5) {
-        let steering = Holding::of(
-            &world.state,
-            &Rolls::called(&world.state),
-            &Shots::default(),
-        )
-        .run();
+        let steering = steering(&world);
         for entity in world.state.entities() {
             let limit = world.state[entity.row()].manoeuvring.0;
             let asked = steering.thrusts.of(entity.id()).length();
@@ -622,18 +627,8 @@ fn the_rule_reads_only_the_tick_it_is_given() {
     }
     world.steers(seconds(3));
 
-    let once = Holding::of(
-        &world.state,
-        &Rolls::called(&world.state),
-        &Shots::default(),
-    )
-    .run();
-    let twice = Holding::of(
-        &world.state,
-        &Rolls::called(&world.state),
-        &Shots::default(),
-    )
-    .run();
+    let once = steering(&world);
+    let twice = steering(&world);
 
     assert_eq!(once, twice);
     assert_ne!(once, Steering::default());
@@ -645,12 +640,7 @@ fn a_structure_is_never_given_a_thrust() {
     let fixed = world.fix(0, FRIGATE, HOME);
     let steered = world.hold(0, FRIGATE, HOME, 0.2);
 
-    let steering = Holding::of(
-        &world.state,
-        &Rolls::called(&world.state),
-        &Shots::default(),
-    )
-    .run();
+    let steering = steering(&world);
 
     assert_eq!(steering.thrusts.of(fixed), Vec3::ZERO);
     assert_ne!(
@@ -752,15 +742,7 @@ fn no_thrust_of_a_flier_exceeds_the_movement_limit() {
         if !world.state.entity(unit).is_flying() {
             break;
         }
-        let asked = Holding::of(
-            &world.state,
-            &Rolls::called(&world.state),
-            &Shots::default(),
-        )
-        .run()
-        .thrusts
-        .of(unit)
-        .length();
+        let asked = steering(&world).thrusts.of(unit).length();
         assert!(asked <= limit + 1e-12, "{asked} against {limit}");
         world.steers(1);
     }

@@ -89,11 +89,6 @@ adds it here in the same change; a unit that deletes one removes it.
   the refusals of a rule, and carrying only the second to the view, would
   delete the four arms; it was left because the split ripples through
   every crate that reads an `Outcome`.
-- `State::apply` reads a want of one as a pick only while the seat still
-  holds that row in reserve, since a stage stays unplaced when the
-  reserve is spent through an ordinary want and a seat must still be
-  able to want one of that row where something stands. A pick command
-  distinct from a want of one would delete the rule.
 - `Play::previewed` takes a `Rejected` from `State::preview` as an empty
   preview. No hover can raise one: `Wheel::button_at` never answers with a
   button the sim refuses, so no refused want is ever previewed, and a
@@ -149,8 +144,8 @@ adds it here in the same change; a unit that deletes one removes it.
 - A machine expects its own controller's command to be one the tick it
   stamps can still take, and the bot meets the thirty-two command cap
   exactly, since its plan ends in a take of that many. A second source of
-  commands on one seat at one tick, a draft pick beside a funded plan,
-  refuses the thirty-third and panics the process. A controller handing
+  commands on one seat at one tick, a draft placement beside a funded
+  plan, refuses the thirty-third and panics the process. A controller handing
   over a type that cannot hold more than one tick's commands would delete
   it, since the refusal would have no arm left to reach.
 - A relayed command a machine refuses as late or as early is dropped

@@ -255,6 +255,26 @@ mod tests {
     }
 
     #[test]
+    fn a_want_of_a_reserve_row_at_a_taken_asteroid_is_refused_whatever_its_count() {
+        let mut world = drafting(2);
+        world.tick(&[placing(&world, AsteroidId(0))]);
+        let waiting = running(&world);
+
+        for count in [1, 2] {
+            assert_eq!(
+                world.refusal(Issued::want(
+                    waiting.seat.0,
+                    AsteroidId(0),
+                    waiting.row,
+                    count
+                )),
+                Some(Rejected::AsteroidTaken),
+                "a want of {count} reached an asteroid another seat holds"
+            );
+        }
+    }
+
+    #[test]
     fn a_seat_whose_reserve_is_spent_wants_one_row_where_something_stands() {
         let stock = Materials::new(1e4, 1e4, 1e4);
         let mut world = World::stocked(stock, BTreeMap::from([(STORAGE, 2)]));
@@ -345,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pick_places_the_reserve_structure_at_once_and_any_other_want_waits_for_the_clock() {
+    fn the_reserve_fills_a_want_at_once_and_any_other_want_waits_for_the_clock() {
         let mut world = drafting(1);
         let stage = running(&world);
         let seat = stage.seat.0;
@@ -358,7 +378,11 @@ mod tests {
         world.run(STAGE_SPAN.0 - 1);
 
         let standing: Vec<RowId> = world.state.entities().map(Entity::row).collect();
-        assert_eq!(standing, vec![stage.row], "the pick stands, complete");
+        assert_eq!(
+            standing,
+            vec![stage.row],
+            "the reserve row stands, complete"
+        );
         assert_eq!(world.state[SeatId(seat)].reserved(stage.row), 0);
         assert!(world.state.is_taken(AsteroidId(0)));
         assert_eq!(world.state.frames().len(), 0, "nothing builds");
@@ -377,7 +401,19 @@ mod tests {
         )]);
 
         assert_eq!(world.state.entities().count(), 2, "the reserve stands");
-        assert_eq!(world.state.frames().len(), 1, "the storage builds");
+        assert_eq!(
+            world.state.frames().len(),
+            0,
+            "the clock starts on this tick and has run none of it"
+        );
+
+        world.tick(&[]);
+
+        assert_eq!(
+            world.state.frames().len(),
+            1,
+            "the storage waited for the first tick of match time"
+        );
     }
 
     #[test]

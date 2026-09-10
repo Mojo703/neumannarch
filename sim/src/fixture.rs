@@ -14,7 +14,7 @@ use crate::state::{Asteroid, Batch, Command, Issued, Motion, Rejected, Rolls, Se
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
-use crate::time::Time;
+use crate::time::{RunningSpan, Time};
 use crate::vec3::Vec3;
 
 pub const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
@@ -78,6 +78,7 @@ impl World {
         while !self.state.draft().over(self.state.tick()) {
             self.tick(&[]);
         }
+        self.state.close_draft();
     }
 
     pub fn stocked(stock: Materials, reserve: BTreeMap<RowId, u32>) -> World {
@@ -121,9 +122,10 @@ impl World {
 
     pub(crate) fn steers(&mut self, ticks: u64) {
         for _ in 0..ticks {
+            let over = self.running();
             let rolls = Rolls::called(&self.state);
-            let steering = Holding::of(&self.state, &rolls, &Shots::default()).run();
-            let moved = Propagation::of(&self.state, &steering.thrusts).run();
+            let steering = Holding::of(&self.state, &rolls, &Shots::default(), over).run();
+            let moved = Propagation::of(&self.state, &steering.thrusts, over).run();
             drop(rolls);
             steering.set_passes(&mut self.state);
             for step in moved.iter() {
@@ -201,8 +203,12 @@ impl World {
             .distance(self.state.asteroid_body(asteroid).pos)
     }
 
+    pub(crate) fn running(&self) -> RunningSpan {
+        RunningSpan::of(self.state.ran()).expect("the clock runs")
+    }
+
     pub(crate) fn shots(&self) -> Shots {
-        Fire::of(&self.state, &Rolls::called(&self.state)).run()
+        Fire::of(&self.state, &Rolls::called(&self.state), self.running()).run()
     }
 
     pub fn shot_at(&self, target: EntityId, ticks: u64) -> Option<Hit> {

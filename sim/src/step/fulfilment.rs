@@ -4,7 +4,9 @@ use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
 use crate::materials::Materials;
 use crate::posting::Posting;
 use crate::roster::Kind;
-use crate::state::{Rolls, State};
+use crate::state::{Frame, Rolls, State};
+use crate::step::reserve::Placements;
+use crate::time::{RunningSpan, Time};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Cancellation {
@@ -26,10 +28,10 @@ impl Cancellation {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Assigned {
-    pub(crate) placements: Vec<Posting>,
+    pub(crate) placements: Placements,
     pub(crate) sent_to: BTreeMap<EntityId, AsteroidId>,
     pub(crate) still_short: BTreeMap<Posting, u32>,
-    pub(crate) openings: Vec<Posting>,
+    pub(crate) openings: Vec<Frame>,
     pub(crate) cancellations: Vec<Cancellation>,
 }
 
@@ -48,18 +50,27 @@ impl Assigned {
 pub(crate) struct Fulfilment<'a> {
     state: &'a State,
     rolls: &'a Rolls<'a>,
-    posted: BTreeMap<Posting, u32>,
+    shortfalls: &'a BTreeMap<Posting, u32>,
+    filled: &'a Placements,
+    opened: Time,
+    homed: BTreeMap<Posting, u32>,
     frames: BTreeMap<Posting, Vec<usize>>,
     surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>>,
 }
 
 impl<'a> Fulfilment<'a> {
-    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Fulfilment<'a> {
-        let posted = posted(state);
+    pub(crate) fn of(
+        state: &'a State,
+        rolls: &'a Rolls<'a>,
+        shortfalls: &'a BTreeMap<Posting, u32>,
+        filled: &'a Placements,
+        over: RunningSpan,
+    ) -> Fulfilment<'a> {
+        let homed = state.homed();
         let frames = framed(state);
         let mut surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>> =
             BTreeMap::new();
-        for (posting, mut over) in surpluses(state, &posted, &frames) {
+        for (posting, mut over) in surpluses(state, &homed, &frames) {
             if state[posting.row()].kind() == Kind::Unit {
                 over.reverse();
                 surplus
@@ -73,7 +84,10 @@ impl<'a> Fulfilment<'a> {
         Fulfilment {
             state,
             rolls,
-            posted,
+            shortfalls,
+            filled,
+            opened: over.ends_at(state.time()),
+            homed,
             frames,
             surplus,
         }
@@ -82,17 +96,13 @@ impl<'a> Fulfilment<'a> {
     pub(crate) fn run(mut self) -> Assigned {
         let mut assigned = Assigned::default();
         let mut still_short: BTreeMap<Posting, u32> = BTreeMap::new();
-        let mut reserved: BTreeMap<SeatId, BTreeMap<RowId, u32>> = BTreeMap::new();
-        for (posting, shortfall) in shortfalls(self.state, &self.posted) {
-            let from_reserve = self.take_reserved(posting, shortfall, &mut reserved);
-            for _ in 0..from_reserve {
-                assigned.placements.push(posting);
-            }
-            let sent = self.nearest_surplus(posting, shortfall - from_reserve);
+        for (posting, shortfall) in self.shortfalls {
+            let short = shortfall - self.filled.filling(*posting);
+            let sent = self.nearest_surplus(*posting, short);
             for entity in &sent {
                 assigned.sent_to.insert(*entity, posting.asteroid());
             }
-            still_short.insert(posting, shortfall - from_reserve - sent.len() as u32);
+            still_short.insert(*posting, short - sent.len() as u32);
         }
         for (posting, short) in &still_short {
             self.reconcile(&mut assigned, *posting, *short);
@@ -107,24 +117,7 @@ impl<'a> Fulfilment<'a> {
     }
 
     fn count(&self, posting: Posting) -> u32 {
-        self.posted.get(&posting).copied().unwrap_or_default()
-    }
-
-    fn take_reserved(
-        &self,
-        posting: Posting,
-        shortfall: u32,
-        taken: &mut BTreeMap<SeatId, BTreeMap<RowId, u32>>,
-    ) -> u32 {
-        let held = self.state[posting.seat()].reserved(posting.row());
-        let spent = taken
-            .entry(posting.seat())
-            .or_default()
-            .entry(posting.row())
-            .or_default();
-        let giving = shortfall.min(held.saturating_sub(*spent));
-        *spent += giving;
-        giving
+        self.homed.get(&posting).copied().unwrap_or_default()
     }
 
     fn nearest_surplus(&mut self, posting: Posting, asked: u32) -> Vec<EntityId> {
@@ -166,7 +159,11 @@ impl<'a> Fulfilment<'a> {
         let open = self.open_frames(posting).len();
         match asked {
             0 => self.cancel(assigned, posting, open as u32),
-            _ if open == 0 => assigned.openings.push(posting),
+            _ if open == 0 => {
+                assigned
+                    .openings
+                    .push(Frame::new(posting.post(), posting.row(), 0.0, self.opened))
+            }
             _ => {}
         }
     }
@@ -214,30 +211,6 @@ impl<'a> Fulfilment<'a> {
     }
 }
 
-fn shortfalls(state: &State, posted: &BTreeMap<Posting, u32>) -> BTreeMap<Posting, u32> {
-    state
-        .posts()
-        .flat_map(|(post, wants)| {
-            wants.iter().filter_map(move |(row, want)| {
-                let posting = Posting::new(post, row);
-                want.checked_sub(posted.get(&posting).copied().unwrap_or_default())
-                    .filter(|missing| *missing > 0)
-                    .map(|missing| (posting, missing))
-            })
-        })
-        .collect()
-}
-
-fn posted(state: &State) -> BTreeMap<Posting, u32> {
-    let mut posted: BTreeMap<Posting, u32> = BTreeMap::new();
-    for entity in state.entities() {
-        *posted
-            .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
-            .or_default() += 1;
-    }
-    posted
-}
-
 fn framed(state: &State) -> BTreeMap<Posting, Vec<usize>> {
     let mut framed: BTreeMap<Posting, Vec<usize>> = BTreeMap::new();
     for (at, frame) in state.frames().iter().enumerate() {
@@ -251,7 +224,7 @@ fn framed(state: &State) -> BTreeMap<Posting, Vec<usize>> {
 
 fn surpluses(
     state: &State,
-    posted: &BTreeMap<Posting, u32>,
+    homed: &BTreeMap<Posting, u32>,
     frames: &BTreeMap<Posting, Vec<usize>>,
 ) -> BTreeMap<Posting, Vec<EntityId>> {
     let mut standing: BTreeMap<Posting, Vec<EntityId>> = BTreeMap::new();
@@ -270,7 +243,7 @@ fn surpluses(
             .wants(posting.post())
             .map_or(0, |wants| wants.get(posting.row()))
             .saturating_sub(open);
-        let over = posted
+        let over = homed
             .get(posting)
             .copied()
             .unwrap_or_default()

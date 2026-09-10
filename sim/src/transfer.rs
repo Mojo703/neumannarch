@@ -1,6 +1,6 @@
 use crate::belt::Belt;
 use crate::orbit::body::Body;
-use crate::time::Time;
+use crate::time::RunningSpan;
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,15 +27,15 @@ impl Transfer {
         }
     }
 
-    pub(crate) fn thrust(self) -> Vec3 {
-        let tick = Time(1).seconds();
+    pub(crate) fn thrust(self, over: RunningSpan) -> Vec3 {
+        let seconds = over.seconds();
         let correction = self.wanted_velocity() - self.relative.vel;
         match correction
             .normalized()
-            .filter(|_| correction.length() > self.limit * tick)
+            .filter(|_| correction.length() > self.limit * seconds)
         {
             Some(along) => along * self.limit,
-            None => correction * (1.0 / tick),
+            None => correction * (1.0 / seconds),
         }
     }
 
@@ -56,6 +56,7 @@ impl Transfer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::Time;
 
     const LIMIT: f64 = 80.0;
 
@@ -81,6 +82,10 @@ mod tests {
         got.distance(wanted) < 1e-9
     }
 
+    fn a_tick() -> RunningSpan {
+        RunningSpan::of(Time(1)).expect("a tick of match time")
+    }
+
     #[test]
     fn a_flier_aims_at_the_rim_of_the_zone_on_its_own_side_and_arrives_there() {
         let aiming = from_rest(APART);
@@ -99,7 +104,7 @@ mod tests {
 
     #[test]
     fn a_flier_at_rest_a_hop_away_thrusts_straight_at_its_destination_at_the_limit() {
-        let thrust = from_rest(APART).thrust();
+        let thrust = from_rest(APART).thrust(a_tick());
 
         assert!(close(thrust, Vec3::new(-LIMIT, 0.0, 0.0)), "{thrust:?}");
     }
@@ -135,7 +140,7 @@ mod tests {
             LIMIT,
         );
 
-        let thrust = racing.thrust();
+        let thrust = racing.thrust(a_tick());
 
         assert!(close(thrust, Vec3::new(LIMIT, 0.0, 0.0)), "{thrust:?}");
     }
@@ -144,7 +149,7 @@ mod tests {
     fn a_thrust_that_would_carry_it_past_the_velocity_it_wants_is_exactly_the_difference() {
         let creeping = drifting(0.0, LIMIT * Time(1).seconds() / 2.0);
 
-        let reached = creeping.relative.vel + creeping.thrust() * Time(1).seconds();
+        let reached = creeping.relative.vel + creeping.thrust(a_tick()) * Time(1).seconds();
 
         assert!(
             close(reached, creeping.wanted_velocity()),
@@ -152,7 +157,7 @@ mod tests {
             creeping.wanted_velocity()
         );
         assert!(
-            creeping.thrust().length() < LIMIT,
+            creeping.thrust(a_tick()).length() < LIMIT,
             "a thrust that cannot overshoot is below the limit"
         );
     }
@@ -168,7 +173,7 @@ mod tests {
         ];
 
         for transfer in states {
-            let asked = transfer.thrust().length();
+            let asked = transfer.thrust(a_tick()).length();
             assert!(asked <= LIMIT + 1e-12, "{asked} against {LIMIT}");
         }
     }
@@ -177,7 +182,7 @@ mod tests {
     fn a_flier_at_rest_on_its_destination_asks_for_nothing_and_has_arrived() {
         let landed = from_rest(0.0);
 
-        assert_eq!(landed.thrust(), Vec3::ZERO);
+        assert_eq!(landed.thrust(a_tick()), Vec3::ZERO);
         assert!(landed.arrived());
         assert!(!from_rest(APART).arrived(), "a whole hop away");
         assert!(

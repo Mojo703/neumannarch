@@ -9,27 +9,28 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Next, ruled 2026-09-09, a red-state refactor that stops at full red for
-the owner's review of the demolition: the time split. Every phase owns
-its own clock today, `extraction.rs` and `construction.rs` both opening
-with `let dt = Tick(1).seconds()`, so no phase can be handed a shorter
-span and none can be handed a zero one. That is why the step returns
-early while the draft runs, and that early return is why a placement
-needed a second path into `place_from_reserve` beside the reserve rule's
-own. The shape: every phase takes the step's match-time span, zero
-during the draft, and there is no early return. Deleted first: the
-drafting early return, `pick()`, the `PICK` constant and the reading of
-a want of one as a placement, both `Tick(1).seconds()` literals, and the
-second caller of `place_from_reserve`. Rebuilt: the step hands each
-phase its span, and the draft gates wants and places nothing, so
-reserve placement is what DESIGN already calls it, a shortfall filled
-from reserve at once. A zero span is made unrepresentable to the phases
-that are not span-based rather than stated as a rule they observe
-(owner, 2026-09-09), so fire and the sends cannot act at zero because
-they are never handed a span they could act on. One verb survives
-untouched. Found with it, and closed by the same change: while the
-draft runs, a want of any count but one is admitted at a taken asteroid
-and silently places nothing, so wanting two is a way past the draft.
+Queued behind the time split, ruled 2026-09-09: a match a test plays
+does not run in the ordinary test run. Measured, the whole test phase is
+132 seconds and 103 of them are three targets playing bot matches in an
+unoptimised build: `agents/tests/contracts.rs` 69.2 s for one test,
+`agents`'s own unit tests 34.0 s for forty-two. Against those, `sim`'s
+261 tests cost 9.8 seconds, so the test set is not too large by count.
+The three guarantees `contracts.rs` asserts are the same three
+`harness verify` asserts, on the same `Guarantees::over`, over longer
+clocks, in release: the gate proves them twice and once slowly. Nothing
+is deleted (owner, 2026-09-09): a test that plays a match is marked so
+it does not run in an ordinary `cargo test`, and the gate runs those in
+release, where the same work costs a twentieth of the time. Expected:
+the ordinary test run falls from 132 seconds to about 30, and the gate
+loses about a minute and a half a run. The inner loop is the point.
+
+Also measured, for whoever next reads `check.sh`: the gate is nine cargo
+invocations over five build configurations, debug, debug with `look`,
+release, debug with `look` again for the headless bin, and wasm32, and
+the target directory carries 20G of debug against 5G of release and 2.4G
+of wasm32. `cargo clippy --workspace --all-targets` type-checks every
+target and `cargo build --workspace --all-targets` type-checks them all
+again before codegen. Whether the bare build earns its pass is open.
 
 Landed 2026-09-09: the holes in the tests. Six guarantees the
 documents state and nothing pins. In `sim`: a falloff reduces damage
@@ -133,8 +134,9 @@ Rulings of 2026-09-09, so they are not re-raised:
   so nothing outside the crate can build a state the sim would not
   produce. About 400 lines out of `look.rs`.
 
-Read at 820a036 and written to the session scratchpad, each a durable
-list rather than a warm agent: the overhaul's impact map over 682 lines
+Read at 820a036 and b2ff0a3 and kept in `research/`, untracked until
+the owner has reviewed them (ruled 2026-09-09), each a durable list
+rather than a warm agent: the overhaul's impact map over 682 lines
 in 75 files, with nothing in the repo to re-baseline; a roster tree
 study from OpenRA, Zero-K, Warzone 2100 and Beyond All Reason read as
 real files; the circle arithmetic with its scripts; the relayed-command

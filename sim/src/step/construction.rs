@@ -5,7 +5,7 @@ use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::post::Post;
 use crate::state::{Entity, Roll, Rolls, State};
-use crate::time::Tick;
+use crate::time::Time;
 
 pub(crate) struct Construction<'a> {
     state: &'a State,
@@ -38,16 +38,15 @@ impl<'a> Construction<'a> {
         }
     }
 
-    pub(crate) fn run(self) -> Progress {
+    pub(crate) fn run(self, ran: Time) -> Progress {
         let mut progress = Progress::default();
-        let dt = Tick(1).seconds();
         for (seat, asteroids) in self.building() {
             let mut stockpile = *self.state[seat].stockpile();
             for asteroid in asteroids {
                 let roll = &self.rolls[asteroid];
                 let post = Post { asteroid, seat };
                 let rates = self.builders(roll, seat);
-                let left = self.build(&mut progress, post, &rates, dt, &mut stockpile);
+                let left = self.build(&mut progress, post, &rates, ran.seconds(), &mut stockpile);
                 self.repair(&mut progress, roll, seat, left);
             }
         }
@@ -80,7 +79,7 @@ impl<'a> Construction<'a> {
         progress: &mut Progress,
         post: Post,
         rates: &[f64],
-        dt: f64,
+        seconds: f64,
         stockpile: &mut Stockpile,
     ) -> f64 {
         let frames = self.frames.get(&post).map_or(&[][..], Vec::as_slice);
@@ -94,13 +93,14 @@ impl<'a> Construction<'a> {
                 }
             })
             .collect();
-        let efforts = assign(rates, works.len(), dt);
+        let efforts = assign(rates, works.len(), seconds);
         let unused = efforts
             .iter()
             .zip(&works)
             .map(|(effort, work)| effort.amount - effort.amount.min(work.left()))
             .sum::<f64>();
-        let spare = rates.iter().sum::<f64>() * dt - efforts.iter().map(|e| e.amount).sum::<f64>();
+        let spare =
+            rates.iter().sum::<f64>() * seconds - efforts.iter().map(|e| e.amount).sum::<f64>();
         progress.spends.extend(
             spend(&works, &efforts, stockpile)
                 .into_iter()
@@ -198,8 +198,8 @@ impl Want {
     }
 }
 
-pub(crate) fn assign(rates: &[f64], frames: usize, dt: f64) -> Vec<Effort> {
-    let combined = rates.iter().sum::<f64>() * dt;
+pub(crate) fn assign(rates: &[f64], frames: usize, seconds: f64) -> Vec<Effort> {
+    let combined = rates.iter().sum::<f64>() * seconds;
     if frames == 0 || combined <= 0.0 {
         return Vec::new();
     }
@@ -235,18 +235,18 @@ mod tests {
 
     #[test]
     fn builders_combine_and_split_evenly_across_frames() {
-        let dt = 0.5;
-        let efforts = assign(&[1.0, 2.0, 3.0], 2, dt);
+        let seconds = 0.5;
+        let efforts = assign(&[1.0, 2.0, 3.0], 2, seconds);
         assert_eq!(
             efforts,
             vec![
                 Effort {
                     frame: 0,
-                    amount: 3.0 * dt
+                    amount: 3.0 * seconds
                 },
                 Effort {
                     frame: 1,
-                    amount: 3.0 * dt
+                    amount: 3.0 * seconds
                 },
             ]
         );

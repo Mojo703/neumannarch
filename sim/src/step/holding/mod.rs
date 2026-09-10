@@ -5,6 +5,7 @@ use crate::orbit::body::Body;
 use crate::roster::Row;
 use crate::state::{Entity, Pass, Roll, Rolls, State};
 use crate::step::fire::Shots;
+use crate::time::RunningSpan;
 use crate::transfer::Transfer;
 use crate::vec3::Vec3;
 
@@ -12,6 +13,7 @@ pub(crate) struct Holding<'a> {
     state: &'a State,
     rolls: &'a Rolls<'a>,
     shots: &'a Shots,
+    over: RunningSpan,
 }
 
 pub(crate) struct HeldUnit<'a> {
@@ -34,11 +36,17 @@ pub(crate) struct Steering {
 }
 
 impl<'a> Holding<'a> {
-    pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>, shots: &'a Shots) -> Holding<'a> {
+    pub(crate) fn of(
+        state: &'a State,
+        rolls: &'a Rolls<'a>,
+        shots: &'a Shots,
+        over: RunningSpan,
+    ) -> Holding<'a> {
         Holding {
             state,
             rolls,
             shots,
+            over,
         }
     }
 
@@ -68,7 +76,7 @@ impl<'a> Holding<'a> {
         let body = entity.steered()?;
         let destination = self.state.asteroid_body(entity.home());
         let limit = self.state.roster().movement_limit().0;
-        Some(Transfer::of(body, destination, limit).thrust())
+        Some(Transfer::of(body, destination, limit).thrust(self.over))
     }
 }
 

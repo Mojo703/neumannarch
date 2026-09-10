@@ -1,11 +1,13 @@
 use crate::ids::SeatId;
-use crate::state::{Batch, Frame, Issued, Rejected, Rolls, State};
+use crate::state::{Batch, Issued, Rejected, Rolls, State};
 use crate::step::construction::{Construction, Progress};
 use crate::step::extraction::Income;
 use crate::step::fire::{Fire, Shots};
 use crate::step::fulfilment::{Assigned, Fulfilment};
 use crate::step::holding::{Holding, Steering};
 use crate::step::propagation::{Moved, Propagation};
+use crate::step::reserve::Reserve;
+use crate::time::RunningSpan;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
@@ -21,24 +23,27 @@ impl State {
             .filter_map(|issued| applied.apply(issued).err().map(|why| (issued, why)))
             .collect();
         applied.close_draft();
-        if applied.drafting() {
-            applied.advance();
-            return (
-                applied,
-                Outcome {
-                    rejected,
-                    shots: Shots::default(),
-                },
-            );
-        }
         let snap = &applied;
+        let ran = snap.ran();
+        let running = RunningSpan::of(ran);
         let rolls = Rolls::called(snap);
-        let shots = Fire::of(snap, &rolls).run();
-        let steering = Holding::of(snap, &rolls, &shots).run();
-        let moved = Propagation::of(snap, &steering.thrusts).run();
-        let filled = Fulfilment::of(snap, &rolls).run();
-        let income = Income::extracted(snap, &rolls);
-        let work = Construction::of(snap, &rolls).run();
+        let shortfalls = snap.shortfalls();
+        let placed = Reserve::of(snap, &shortfalls).run();
+        let shots = running
+            .map(|over| Fire::of(snap, &rolls, over).run())
+            .unwrap_or_default();
+        let steering = running
+            .map(|over| Holding::of(snap, &rolls, &shots, over).run())
+            .unwrap_or_default();
+        let moved = running
+            .map(|over| Propagation::of(snap, &steering.thrusts, over).run())
+            .unwrap_or_default();
+        let mut filled = running
+            .map(|over| Fulfilment::of(snap, &rolls, &shortfalls, &placed, over).run())
+            .unwrap_or_default();
+        filled.placements = placed;
+        let income = Income::extracted(snap, &rolls, ran);
+        let work = Construction::of(snap, &rolls).run(ran);
         let next = State::next(snap, &moved, &steering, &filled, &income, &work, &shots);
         (next, Outcome { rejected, shots })
     }
@@ -77,12 +82,12 @@ fn move_bodies(next: &mut State, moved: &Moved) {
 }
 
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
-    for placement in &filled.placements {
-        next.place_from_reserve(placement.post(), placement.row());
+    for posting in filled.placements.iter() {
+        next.place_from_reserve(posting.post(), posting.row(), snap.ran());
     }
     next.re_home(&filled.sent_to);
     for opening in &filled.openings {
-        next.add_frame(Frame::new(opening.post(), opening.row(), 0.0, snap.time()));
+        next.add_frame(opening.clone());
     }
     for cancellation in &filled.cancellations {
         next[cancellation.posting.seat()].refund(cancellation.refund(snap));
@@ -103,7 +108,7 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
             }
         }
         if spend.completed {
-            next.spawn_at(frame.post(), frame.row());
+            next.spawn_at(frame.post(), frame.row(), snap.ran());
             closing.push(spend.frame);
         }
     }
@@ -156,6 +161,7 @@ pub mod fire;
 pub(crate) mod fulfilment;
 pub(crate) mod holding;
 pub(crate) mod propagation;
+pub(crate) mod reserve;
 
 #[cfg(test)]
 mod tests {
@@ -553,7 +559,7 @@ mod tests {
             "it died faster than a frigate fires"
         );
 
-        for _ in 0..firing {
+        for _ in 0..(2 * interval) {
             if !world.still_holds(prey) {
                 break;
             }
@@ -562,8 +568,8 @@ mod tests {
 
         assert!(
             !world.still_holds(prey),
-            "it outlived its hit points: the kill took more than twice the {firing} ticks \
-             a frigate's rate alone needs for {shots} shots"
+            "it outlived its hit points: the kill landed more than a second after the \
+             {firing} ticks a frigate's rate alone needs for {shots} shots"
         );
         assert!(
             !world.state.ready().any(|ready| ready.entity() == prey),

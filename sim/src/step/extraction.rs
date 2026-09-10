@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::ids::{AsteroidId, SeatId};
 use crate::materials::{Material, Materials};
 use crate::state::{Roll, Rolls, State};
-use crate::time::Tick;
+use crate::time::Time;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Income(BTreeMap<(AsteroidId, SeatId), Materials>);
@@ -16,15 +16,14 @@ struct Extractor {
 }
 
 impl Income {
-    pub(crate) fn extracted(state: &State, rolls: &Rolls) -> Income {
-        let dt = Tick(1).seconds();
+    pub(crate) fn extracted(state: &State, rolls: &Rolls, ran: Time) -> Income {
         let mut taken = Income::default();
         for roll in rolls.iter() {
             let caps = state[roll.asteroid()].caps();
             let pulling = Extractor::pulling(state, roll);
             taken
                 .0
-                .extend(extract(roll.asteroid(), caps, &pulling, dt).0);
+                .extend(extract(roll.asteroid(), caps, &pulling, ran.seconds()).0);
         }
         taken
     }
@@ -53,7 +52,12 @@ impl Extractor {
     }
 }
 
-fn extract(asteroid: AsteroidId, caps: Materials, extractors: &[Extractor], dt: f64) -> Income {
+fn extract(
+    asteroid: AsteroidId,
+    caps: Materials,
+    extractors: &[Extractor],
+    seconds: f64,
+) -> Income {
     let mut income: BTreeMap<SeatId, Materials> = BTreeMap::new();
     for (material, cap) in caps.amounts() {
         let pulling: Vec<&Extractor> = extractors
@@ -62,7 +66,7 @@ fn extract(asteroid: AsteroidId, caps: Materials, extractors: &[Extractor], dt: 
             .collect();
         let rates: Vec<f64> = pulling.iter().map(|extractor| extractor.rate).collect();
         for (extractor, share) in pulling.iter().zip(split(cap, &rates)) {
-            income.entry(extractor.seat).or_default()[material] += share * dt;
+            income.entry(extractor.seat).or_default()[material] += share * seconds;
         }
     }
     Income(

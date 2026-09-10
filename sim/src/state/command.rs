@@ -10,8 +10,6 @@ pub const MAX_WANT: u32 = 200;
 
 pub const MAX_COMMANDS_PER_TICK: usize = 32;
 
-const PICK: u32 = 1;
-
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize)]
 pub enum Command {
     Want {
@@ -127,9 +125,6 @@ impl State {
         } = issued.command;
         let posting = Posting::of(asteroid, issued.seat, row);
         self.admits_want(posting, count)?;
-        if count == PICK {
-            self.pick(posting);
-        }
         self.set_want(posting.post(), row, count);
         Ok(())
     }
@@ -150,7 +145,7 @@ impl State {
         if count > MAX_WANT {
             return Err(Rejected::TooMany);
         }
-        if count != PICK || seated.reserved(posting.row()) == 0 {
+        if !self.draws_reserve(posting, count) {
             return Ok(());
         }
         match self.draft.awaits(posting.seat(), posting.row()) {
@@ -160,12 +155,10 @@ impl State {
         }
     }
 
-    fn pick(&mut self, posting: Posting) {
-        if self.draft.awaits(posting.seat(), posting.row()) == Some(true) {
-            self.draft
-                .place(posting.asteroid(), posting.seat(), posting.row(), self.tick);
-            self.place_from_reserve(posting.post(), posting.row());
-        }
+    fn draws_reserve(&self, posting: Posting, count: u32) -> bool {
+        self.seat(posting.seat())
+            .is_some_and(|seated| seated.reserved(posting.row()) > 0)
+            && count > self.count(posting.post(), posting.row())
     }
 
     fn set_want(&mut self, post: Post, row: RowId, count: u32) {

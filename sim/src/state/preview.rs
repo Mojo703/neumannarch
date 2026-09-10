@@ -6,6 +6,8 @@ use crate::posting::Posting;
 use crate::roster::Roster;
 use crate::state::{Command, Issued, Rejected, Rolls, State};
 use crate::step::fulfilment::Fulfilment;
+use crate::step::reserve::Reserve;
+use crate::time::RunningSpan;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Preview {
@@ -44,14 +46,19 @@ impl Preview {
     }
 
     fn of(state: &State, seat: SeatId) -> Preview {
-        let assigned = Fulfilment::of(state, &Rolls::called(state)).run();
+        let short = state.shortfalls();
+        let placed = Reserve::of(state, &short).run();
+        let mut assigned = RunningSpan::of(state.ran())
+            .map(|over| Fulfilment::of(state, &Rolls::called(state), &short, &placed, over).run())
+            .unwrap_or_default();
+        assigned.placements = placed;
         let mut shortfalls: BTreeMap<Posting, ShortfallFilling> = BTreeMap::new();
         for posting in assigned
             .placements
             .iter()
             .filter(|posting| posting.seat() == seat)
         {
-            shortfalls.entry(*posting).or_default().from_reserve += 1;
+            shortfalls.entry(posting).or_default().from_reserve += 1;
         }
         for (id, destination) in &assigned.sent_to {
             let entity = state.entity(*id);
