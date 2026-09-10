@@ -148,6 +148,12 @@ adds it here in the same change; a unit that deletes one removes it.
   plan, refuses the thirty-third and panics the process. A controller handing
   over a type that cannot hold more than one tick's commands would delete
   it, since the refusal would have no arm left to reach.
+- A ready damage place carries a hitscan copied out of a row, and the
+  store cannot say it is the row of the entity that holds the place, so
+  a place minted from another row is representable and nothing checks
+  it. Only `State::spawn` mints places, from the entity's own row. The
+  entity refactor would delete it: a hitscan becomes a constant of the
+  pattern the entity carries and the place stops copying it.
 - A relayed command a machine refuses as late or as early is dropped
   without a word, so that machine's history lacks it for good and its
   next hash disagrees, which ends the match. Nothing reads the refusal. A

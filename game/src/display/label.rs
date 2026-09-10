@@ -65,19 +65,17 @@ mod tests {
         ALREADY_READY, CLOCKS, LobbyScreen, NO_SEAT, clock_name, player_name, refusal_phrase,
         seat_names, team_name,
     };
-    use crate::screens::pause::NO_SURRENDER;
-    use crate::screens::title::{NO_QUIT, NO_SETTINGS, Outcome, TAGLINE, TITLE};
+    use crate::screens::title::{NO_QUIT, Outcome, TAGLINE, TITLE};
     use crate::screens::{held, loading};
 
     const IMPERATIVES: [&str; 10] = [
         "Click", "Press", "Drag", "Choose", "Select", "Pick", "Tap", "Hold", "Try", "Use",
     ];
 
-    const WORDS: [&str; 24] = [
+    const WORDS: [&str; 22] = [
         "Skirmish",
         "Host",
         "Join",
-        "Settings",
         "Quit",
         "Start",
         "Ready",
@@ -86,7 +84,6 @@ mod tests {
         "Kick",
         "Rematch",
         "Resume",
-        "Surrender",
         "Random",
         "Seat",
         "Holder",
@@ -199,9 +196,7 @@ mod tests {
             .chain([
                 TITLE.to_string(),
                 TAGLINE.to_string(),
-                NO_SETTINGS.to_string(),
                 NO_QUIT.to_string(),
-                NO_SURRENDER.to_string(),
                 NO_SEAT.to_string(),
                 ALREADY_READY.to_string(),
                 HOST_ONLY.to_string(),

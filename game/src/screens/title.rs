@@ -12,8 +12,6 @@ pub(crate) const TITLE: &str = "Probe";
 
 pub(crate) const TAGLINE: &str = "Two to four players in a belt";
 
-pub(crate) const NO_SETTINGS: &str = "Cannot open settings here";
-
 pub(crate) const NO_QUIT: &str = "Cannot quit here";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +39,6 @@ pub struct Places {
     pub skirmish: Rect,
     pub host: Rect,
     pub join: Rect,
-    pub settings: Rect,
     pub quit: Rect,
 }
 
@@ -75,7 +72,7 @@ impl Places {
             window.center().x - WIDTH / 2.0,
             window.center().y - WIDTH / 4.0,
         );
-        let [skirmish, host, field, settings, quit] = panel::rows(top, WIDTH);
+        let [skirmish, host, field, quit] = panel::rows(top, WIDTH);
 
         let join = Rect::from_min_size(field.min, Vec2::new(WIDTH, panel::ROW_HEIGHT * 2.0));
         let below = Vec2::new(0.0, panel::ROW_HEIGHT);
@@ -83,7 +80,6 @@ impl Places {
             skirmish,
             host,
             join,
-            settings: settings.translate(below),
             quit: quit.translate(below),
         }
     }
@@ -140,7 +136,6 @@ impl Title {
         if typing.entered || typing.acted {
             picked = Some(Action::Join(self.address.text().to_string()));
         }
-        controls.action(places.settings, "Settings", &Rule::refuses(NO_SETTINGS));
         controls.action(places.quit, "Quit", &Rule::refuses(NO_QUIT));
         controls.finish();
         picked

@@ -142,16 +142,16 @@ HP, and its home asteroid.
 | field | notes |
 |---|---|
 | role | what the row is for; it decides the glyph, and short-range fire runs passes where every other role holds its station; nothing else reads it |
-| manoeuvring | the manoeuvring limit, below the movement limit; zero for structures and asteroids |
+| manoeuvring | the manoeuvring limit, below the movement limit; zero for structures |
 | holding weights | one weight per term of the holding rule; every weight is zero for a structure, which never moves, and above zero for every unit |
 | HP | |
 | plating | flat damage reduction per hit |
 | effects | see Effects |
 | cost | a material triple |
 | capacity | stockpile capacity contributed, per material |
-| orbit, caps | asteroids only |
 
-- **Asteroids** are entities: huge mass, no manoeuvring, indestructible, a
+- An asteroid is not an entity: it belongs to no seat, takes no damage
+  and is never built. It is a body of the belt with an orbit and a
   per-material extraction cap.
 - **Structures** have no manoeuvring. A structure is built at its asteroid's
   position and velocity, and since neither ever thrusts, it stays with the
@@ -170,7 +170,7 @@ Every effect has a kind, and each kind carries its own fields.
   states a range, a rate, a damage, and a falloff that reduces damage
   with distance. Plating is subtracted per hit.
 - **Build.** Spends stockpile at `rate` toward frames at its home asteroid and
-  repairs damaged friendlies there. Its reach is the asteroid's zone: a
+  repairs its team's damaged ships there, any seat's. Its reach is the asteroid's zone: a
   builder reaches everything inside it and nothing elsewhere.
 - **Extract.** Pulls up to `rate` of one material, the effect's, from
   its home asteroid. The asteroid's cap for that material is the
@@ -227,8 +227,7 @@ sets one count.
   units stay. Shortfalls are filled in order of asteroid then player.
   Each is filled from the nearest surplus, asteroid to asteroid as of
   that tick, ties by lowest asteroid. A surplus unit sent to a shortfall
-  cancels that place's least-progressed frame of the same row and
-  refunds it. Surplus with no shortfall anywhere stays where it is,
+  cancels that place's frame of the same row and refunds it. Surplus with no shortfall anywhere stays where it is,
   complete, until a shortfall wants it. Nothing complete is ever
   scrapped or refunded; a structure stays until it is destroyed.
 - **Shortfall.** When a place wants more of a row than it has, counting

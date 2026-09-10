@@ -346,6 +346,30 @@ mod tests {
     }
 
     #[test]
+    fn a_builder_repairs_a_teammates_structure_and_never_an_enemys() {
+        let mut world = World::started(&[TeamId(0), TeamId(0), TeamId(1)]);
+        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        let teammates = world.fix(1, STORAGE, asteroid(0));
+        let enemys = world.fix(2, STORAGE, asteroid(0));
+        let whole = world.state[STORAGE].hp.0;
+        world.state.entities.hurt(teammates, 20.0);
+        world.state.entities.hurt(enemys, 20.0);
+
+        world.run(2 * u64::from(TICKS_PER_SECOND));
+
+        assert_eq!(
+            world.state.entity(teammates).hp(),
+            whole,
+            "a shipyard left its teammate's storage hurt"
+        );
+        assert_eq!(
+            world.state.entity(enemys).hp(),
+            whole - 20.0,
+            "a shipyard repaired an enemy's storage"
+        );
+    }
+
+    #[test]
     fn a_builder_repairs_at_its_own_asteroid_and_nowhere_else() {
         let (mut world, near) = a_shipyard_and_a_raider_hurt_by(20.0);
         let far = world.hold(0, RAIDER, asteroid(5), 5.0);

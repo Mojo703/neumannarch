@@ -5,8 +5,6 @@ use crate::screens::panel::{self, Panel};
 
 const WIDTH: f32 = 220.0;
 
-pub(crate) const NO_SURRENDER: &str = "Cannot surrender here";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Picked {
     Resume,
@@ -33,11 +31,10 @@ impl Pause {
         );
         let mut controls = Controls::over(panel);
         let mut picked = None;
-        let [resume, surrender, leave] = panel::rows(top, WIDTH);
+        let [resume, leave] = panel::rows(top, WIDTH);
         if controls.action(resume, "Resume", &Rule::Allows) {
             picked = Some(Picked::Resume);
         }
-        controls.action(surrender, "Surrender", &Rule::refuses(NO_SURRENDER));
         if controls.action(leave, "Leave", &Rule::Allows) {
             picked = Some(Picked::Leave);
         }

@@ -374,10 +374,8 @@ full stop, no semicolon, no dash. A comma in a string is a sign the
 screen says too much and is brought to the owner before it is drawn.
 The screen never tells the player what to do: no hint, no prompt, no
 tutorial phrase, ever. A string that opens with an imperative verb is
-a defect.
-The screen never tells the player what to do: no hint, no prompt, no
-tutorial phrase, ever. A control shows what it is; the belt shows what
-is; nothing invites.
+a defect. A control shows what it is; the belt shows what is; nothing
+invites.
 
 ## Controls
 

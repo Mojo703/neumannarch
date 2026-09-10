@@ -134,16 +134,143 @@ Rulings of 2026-09-09, so they are not re-raised:
   so nothing outside the crate can build a state the sim would not
   produce. About 400 lines out of `look.rs`.
 
-Read at 820a036 and b2ff0a3 and kept in `research/`, untracked until
-the owner has reviewed them (ruled 2026-09-09), each a durable list
-rather than a warm agent: the overhaul's impact map over 682 lines
-in 75 files, with nothing in the repo to re-baseline; a roster tree
-study from OpenRA, Zero-K, Warzone 2100 and Beyond All Reason read as
-real files; the circle arithmetic with its scripts; the relayed-command
-comparison; a contraction audit of 16 findings, about 230 lines falling
-out mechanically; an audit of the sim's 252 tests against the sentences
-they pin; and a survey of the three crates whose public surfaces hide
-dead code from the gate.
+Lifted from the twelve research files on 2026-09-09, the overseer
+having read all of them; nine are deleted and three stay untracked in
+`research/` until their units dispatch. Ordered by the owner's
+priority (2026-09-09): the content refactor, then the art refactor,
+before any code fix. Line numbers in the survivors are b2ff0a3's and
+are re-derived from `cargo check`, never trusted.
+
+For the art refactor: DISPLAY.md states the asteroid bars carry a
+wanted extractor as a segment past the pull, a frame filling and a
+want hollow; `Bar` has no such field and `Bars::over` reads no plans.
+Not implemented.
+
+Code hygiene, deferred behind both refactors since each shrinks the
+surface it would touch (the entity refactor alone deletes 38 `Roster`
+positions, 83 `Roster::shipped()` calls and the harness sweep):
+- One owner per fact, still open: the surplus rule in
+  `State::surplus_at` and `fulfilment.rs`'s `surpluses`; each
+  asteroid's line-up in `manned` and `Line::standing_at`; the belt
+  constants relayed through `View` and `Scene`; "the view a session
+  answers with" written five times; `held.present + held.arriving`
+  spelled out ten times. About 230 lines of `game` and `sim` fall out.
+- 253 of `game`'s 410 public items are reachable from nowhere;
+  `Unpaired` and `Reason` are unnameable types in public signatures;
+  `Scripted::personality` and `Record::setup` are dead.
+- Thirty tests earn nothing, nineteen name a guarantee they cannot
+  fail (the nearest-surplus test has one surplus asteroid; two
+  "rewind" tests clone and run rather than replay; the contracts
+  test's detectors could return `None` unconditionally), and
+  twenty-five duplicate groups stand. Two
+  `#[expect(clippy::disallowed_types)]` in the ignored cost reports,
+  which the bar forbids; the reports belong in the harness. The
+  standings test still says "army value". A deletion pass, one Sonnet
+  agent per crate, the guarantee named for each test it keeps.
+- Guarantees no test pins: the surplus and shortfall ordering rules
+  (nearest, asteroid then seat, highest-indexed), a structure is never
+  sent, the refund that lands, a unit destroyed this tick still acts,
+  a flying unit is not a shooter, capacity falling with its carrier,
+  an eliminated seat's frames close; in `game` the yield mark, the
+  fade, the stockpile bar's readings, the Desynced state, `control.rs`
+  and `results.rs` whole; in `multiplayer.rs` no desync is ever
+  produced.
+
+The dead arc, mechanism: `FightStage::stations_each_way` caps a line's
+half-width at its stand-off over the station spacing, which subtends 45
+degrees, exactly a side's half-share at four teams, so two sides' lines
+touch. The fix is one constant on `Belt`, an arc between sides of 25
+degrees, and the cap becomes stand-off times the tangent of half of
+(the side's share less the arc) over the spacing, `libm::tan`, in the
+arm for more than two sides only. The admissible window is 18.19 to
+34.58 degrees (below it three teams change; above it they change the
+other way), and 25 is the roomiest whole degree in it. Check
+afterwards: two and three teams bit-identical station for station;
+four teams' nearest enemy pair 0.7071 m to 1.4142 m; the frigate's
+four-team line 18 stations to 6, the lancer's 42 to 30. The test to
+write, from the guarantee: the nearest pair of two teams' stations is
+the pair standing at the centres of their lines; it fails unfixed at
+four teams. The INVARIANTS.md entry for two rows of one team holding
+the same stations, and the two DESIGN.md corrections, are drafted in
+`research/circle-division.md` §5 and are the one part of that file a
+brief should carry verbatim.
+
+The relayed command, mechanism, ruled: `Session::oldest()` becomes
+`settled()`, since the retention span is a rewind-cost budget standing
+in for a validity bound the sim already holds; `Pace::shipped` derives
+its window from the retention span with a stated margin so a rewind to
+settled always finds a snapshot; `Machine::apply` reads the `Err` and
+sets `desynced` at that tick, and every screen for it already exists.
+The room must accept a member's `Relayed::Desync` and rebroadcast it,
+or the peers of a desynced machine wait forever. `Refused::Ahead`
+splits into the session's `BeyondTheWindow` and the room's
+`PastTheEnd`; `Late` becomes the protocol violation the desync arm
+answers. `FOREVER` is a value standing for a state and wants a variant
+or a recorded reason. Four tests: a refused relayed command ends the
+match, a member's desync reaches everyone, only a tick below settled is
+refused and an honest peer never sends one (a `Delaying` transport
+that parts an acknowledgement from the command after it by 133 ms),
+and the pace's window stays inside the retention ring.
+
+The entity refactor, sequenced: 2a `Row::effects` becomes
+`&'static [Effect]` (a `const fn` cannot build a `Vec`), with the
+effect folds on `[Effect]` rather than on the enum so `in_row` stays
+testable above zero; 2b the movement limit leaves the roster for
+`Belt`; 3 the enum, atomic and red-state: deletes `RowId`, `Roster`,
+the nine constants, both `Index` impls, `units_by`,
+`Rejected::NoSuchRow`, the roster's place in `State` and its hash, and
+`harness sweep` whole (about 200 lines); no wildcard arm at the root of
+any stat's match; `#[repr(u8)]` with `serde(into, try_from)` as `u8`
+so the wire stays three bytes and the hash's discriminant width is
+pinned; an unknown row byte then fails a whole `Record` at decode,
+which wants an INVARIANTS.md entry; `Roster::check` becomes a
+`const { assert! }` over `EntityPattern::EVERY`; 38 `Roster` positions
+and 83 `Roster::shipped()` calls go; 4 the three relations empty; 5
+the tree. Variant names: `Constructor`, `MetalsExtractor`,
+`VolatilesExtractor`, `EnergyExtractor`, `Storage`, `Shipyard`,
+`Raider`, `Frigate`, `Lancer`; the alternative `Extractor(Material)`
+is the owner's to weigh. Lessons from the effect rename: price the
+shape before the rename; the hash moves on any shape change while
+behaviour does not, and a baseline is `git archive HEAD` into a scratch
+tree with the engine symlinked two directories up, then
+`harness replay` on both; a sub-agent gets only leaf renames, never a
+file whose type changes shape, and is told the tree is red and not to
+run cargo; take leaf sites from `cargo check`, not grep.
+
+The tree, design input for unit 5: no shipped game read (OpenRA,
+Zero-K, Warzone 2100, Beyond All Reason) gates tech per place, and all
+four make expansion cheap, so the risk to measure is fortressing, not
+sprawl: per seat over a matrix, spread (asteroids with an entity
+homed), trees paid for (asteroids with a shipyard, a lab), spend
+concentration at the busiest asteroid, contact (ticks two seats share
+a zone), and what decided the win; run every seed once with the tree
+and once with every `requires` emptied, and the difference is the
+tree's effect. A candidate of eighteen rows with requires, excludes and
+replaces stands in `research/roster-tree-study.md` §3; under the
+const-stat ruling eight of them are another row with bigger numbers
+and must own a fact or be cut (the three sinks collapse to one). Worth
+stealing: an alias row nobody builds for "any of these"; recompute the
+allowed set from standing entities every tick, store nothing; cancel
+and refund in full what lost its gate on the tick; put the tier on a
+unit that can be killed and sent away; price tier two far above tier
+one. Refuse: nodes that only change a number, a tree deeper than the
+match, a fourth resource. A retrofit at full cost has no precedent
+(Zero-K charges the difference), so the harness must show a seat ever
+retrofits.
+
+For register reviews, the checklist a brief carries: when a concrete noun becomes an abstract one, read every sentence where
+the old noun was the subject of a physical verb; grep the whole
+document for a second phrasing of the renamed thing; diff grammatical
+number, since a plural possessive collapsed to a singular changes what
+the sentence claims; watch for a measurement made the subject of the
+verb its thing used to take.
+
+Three research files stay untracked in `research/` until their units
+dispatch, each read at b2ff0a3: `circle-division.md`, whose §5 drafts
+the INVARIANTS.md entry and the two DESIGN.md corrections the dead arc
+owes and whose §6 script re-derives every figure; `relayed-command.md`,
+the brief for that unit; and `roster-tree-study.md`, whose §3 table is
+the eighteen-row candidate and whose §4 is the fortressing measurement.
 
 Everything below this line is the history of units already committed;
 prune it in the next session that has the budget.

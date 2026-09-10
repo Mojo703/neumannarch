@@ -190,8 +190,7 @@ impl<'a> Fulfilment<'a> {
     }
 
     fn open_frames(&self, posting: Posting) -> Vec<Cancellation> {
-        let mut open: Vec<Cancellation> = self
-            .frames
+        self.frames
             .get(&posting)
             .into_iter()
             .flatten()
@@ -200,14 +199,7 @@ impl<'a> Fulfilment<'a> {
                 frame: *at,
                 progress: self.state.frames()[*at].progress(),
             })
-            .collect();
-        open.sort_by(|first, second| {
-            first
-                .progress
-                .total_cmp(&second.progress)
-                .then(first.frame.cmp(&second.frame))
-        });
-        open
+            .collect()
     }
 }
 

@@ -113,8 +113,10 @@ impl<'a> Construction<'a> {
     }
 
     fn repair(&self, progress: &mut Progress, roll: &Roll, seat: SeatId, effort: f64) {
+        let team = self.state[seat].team();
         let damaged: Vec<Entity> = roll
-            .of_seat(seat)
+            .standing()
+            .filter(|entity| self.state[entity.seat()].team() == team)
             .filter(|entity| entity.hp() < self.state[entity.row()].hp.0)
             .collect();
         if damaged.is_empty() || effort <= 0.0 {
