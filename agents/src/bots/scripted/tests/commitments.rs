@@ -5,6 +5,7 @@ use crate::bots::scripted::personality::Personality;
 use crate::harness::fixture::{Fixture, surveyed};
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn an_army_counts_as_ahead_only_once_it_passes_the_saving_ratio_and_stays_ahead_to_the_lower_one() {
     let roster = Roster::shipped();
     let ratio = |fixture: &Fixture| {

@@ -7,6 +7,7 @@ use crate::bots::scripted::personality::Personality;
 use crate::harness::fixture::{Fixture, surveyed};
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn an_extractor_is_asked_for_where_the_asteroid_has_cap_to_spare_and_not_where_it_has_none() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
@@ -63,6 +64,7 @@ fn an_extractor_is_asked_for_where_the_asteroid_has_cap_to_spare_and_not_where_i
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn no_second_row_that_pays_on_completion_is_asked_for_where_one_is_still_unbuilt() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
@@ -108,6 +110,7 @@ fn no_second_row_that_pays_on_completion_is_asked_for_where_one_is_still_unbuilt
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn one_more_constructor_stands_at_home_only_while_a_claim_is_meant_and_none_is_spare() {
     let roster = Roster::shipped();
     let personality = Personality::expand();

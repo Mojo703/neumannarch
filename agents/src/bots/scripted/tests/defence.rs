@@ -20,6 +20,7 @@ fn worth(proposals: &[Proposal], at: AsteroidId) -> f64 {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_garrison_is_asked_for_where_an_enemy_force_stands_and_nowhere_else() {
     let roster = Roster::shipped();
     let personality = Personality::turtle();

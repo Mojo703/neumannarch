@@ -9,6 +9,7 @@ use crate::bots::scripted::personality::Personality;
 use crate::harness::fixture::{Fixture, surveyed};
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_free_asteroid_is_claimed_where_the_held_ones_run_short_of_cap_and_only_up_to_the_claims() {
     let roster = Roster::shipped();
     let personality = Personality::expand();

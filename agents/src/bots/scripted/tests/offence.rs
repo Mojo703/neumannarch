@@ -42,6 +42,7 @@ fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
@@ -81,6 +82,7 @@ fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_completion()
  {
     let roster = Roster::shipped();
@@ -114,6 +116,7 @@ fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_tha
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
@@ -156,6 +159,7 @@ fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_target_standing_under_its_want_is_still_reinforced() {
     let roster = Roster::shipped();
     let personality = Personality::expand();
@@ -182,6 +186,7 @@ fn a_target_standing_under_its_want_is_still_reinforced() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_wave_still_in_the_air_is_not_sent_a_second_time() {
     let roster = Roster::shipped();
     let personality = Personality::expand();

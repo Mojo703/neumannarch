@@ -13,6 +13,10 @@ cargo build -p neumannarch-game --features look --all-targets
 # Hosting is on by default and its dependencies are native-only, so the
 # browser build below is what proves the game builds without the server.
 cargo test --workspace
+# The tests that play a match are ignored, so a debug run of the workspace stays
+# quick; the gate plays them in release. Only this crate's: the sim's ignored
+# tests print cost reports and are run by hand.
+cargo test -p neumannarch-agents --release -- --ignored
 # The bot's guarantees play an eleven-minute match, the shortest clock a bot
 # can reach its stockpile's capacity and sit there a minute on, plus the
 # fifteen-minute growth match; two minutes in release.

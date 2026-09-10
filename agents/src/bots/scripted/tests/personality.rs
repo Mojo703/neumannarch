@@ -112,6 +112,7 @@ fn defence_and_offence_stand_above_the_economy_while_an_enemy_stands_and_the_arm
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn the_shares_a_pick_is_weighed_by_discount_what_the_asteroids_already_drafted_supply() {
     let personality = Personality::expand();
     let roster = Roster::shipped();

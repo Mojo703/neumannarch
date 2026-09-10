@@ -9,22 +9,16 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-Queued behind the time split, ruled 2026-09-09: a match a test plays
-does not run in the ordinary test run. Measured, the whole test phase is
-132 seconds and 103 of them are three targets playing bot matches in an
-unoptimised build: `agents/tests/contracts.rs` 69.2 s for one test,
-`agents`'s own unit tests 34.0 s for forty-two. Against those, `sim`'s
-261 tests cost 9.8 seconds, so the test set is not too large by count.
-The three guarantees `contracts.rs` asserts are the same three
-`harness verify` asserts, on the same `Guarantees::over`, over longer
-clocks, in release: the gate proves them twice and once slowly. Nothing
-is deleted (owner, 2026-09-09): a test that plays a match is marked so
-it does not run in an ordinary `cargo test`, and the gate runs those in
-release, where the same work costs a twentieth of the time. Expected:
-the ordinary test run falls from 132 seconds to about 30, and the gate
-loses about a minute and a half a run. The inner loop is the point.
+The next unit is 2a of the construction overhaul (below), the split
+of match-playing tests having landed: `cargo test --workspace` is 43
+seconds, the ignored tests play in release in the gate. Rulings with
+it (owner, 2026-09-09): the two tests in `agents/src/tests.rs` that
+advance a hand-rolled session through the draft stay in the ordinary
+run, and the gate keeps proving the three contract guarantees twice,
+in `contracts.rs` at four minutes and in `harness verify 11`; the
+duplicate is a hygiene item for the deletion pass below.
 
-Also measured, for whoever next reads `check.sh`: the gate is nine cargo
+Measured, for whoever next reads `check.sh`: the gate is nine cargo
 invocations over five build configurations, debug, debug with `look`,
 release, debug with `look` again for the headless bin, and wasm32, and
 the target directory carries 20G of debug against 5G of release and 2.4G
@@ -227,9 +221,10 @@ which wants an INVARIANTS.md entry; `Roster::check` becomes a
 `const { assert! }` over `EntityPattern::EVERY`; 38 `Roster` positions
 and 83 `Roster::shipped()` calls go; 4 the three relations empty; 5
 the tree. Variant names: `Constructor`, `MetalsExtractor`,
-`VolatilesExtractor`, `EnergyExtractor`, `Storage`, `Shipyard`,
-`Raider`, `Frigate`, `Lancer`; the alternative `Extractor(Material)`
-is the owner's to weigh. Lessons from the effect rename: price the
+`Storage`, `Shipyard`, `Raider`, `Frigate`, `Lancer`, and one
+`Extractor(Material)` in place of three extractor variants (owner,
+2026-09-09: the wire conversion is hand-written either way, so keep
+the variants few). Lessons from the effect rename: price the
 shape before the rename; the hash moves on any shape change while
 behaviour does not, and a baseline is `git archive HEAD` into a scratch
 tree with the engine symlinked two directories up, then

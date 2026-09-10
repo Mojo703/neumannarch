@@ -55,6 +55,7 @@ fn an_agent_asks_for_one_reserve_row_at_a_free_asteroid_only_once_its_window_is_
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn two_agents_draft_four_asteroids_and_no_seat_takes_a_asteroid_another_took() {
     let fixture = Fixture::drafted([Some(Personality::turtle()), Some(Personality::expand())]);
 
@@ -74,6 +75,7 @@ fn two_agents_draft_four_asteroids_and_no_seat_takes_a_asteroid_another_took() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
     let mut fixture = Fixture::drafted([Some(Personality::expand()), None]);
     fixture.run(OPENING_SECONDS);
@@ -101,6 +103,7 @@ fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn an_agent_holds_more_than_the_asteroid_it_opened_on_by_mid_match() {
     let mut fixture = Fixture::drafted([Some(Personality::turtle()), None]);
     fixture.run(SETTLED_SECONDS);
@@ -124,6 +127,7 @@ fn an_agent_holds_more_than_the_asteroid_it_opened_on_by_mid_match() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn an_agent_with_nothing_of_its_own_on_the_map_asks_for_nothing() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
 

@@ -21,6 +21,7 @@ fn damage_rows(count: usize) -> Vec<RowId> {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
@@ -41,6 +42,7 @@ fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
@@ -65,6 +67,7 @@ fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at()
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_decision_over_the_tick_s_cap_keeps_every_lowering_and_loses_only_its_lowest_raises() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];

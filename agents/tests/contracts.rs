@@ -3,6 +3,7 @@ use neumannarch_agents::{Guarantees, minutes, shipped};
 const CONTRACT_MINUTES: u64 = 4;
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn every_shipped_bot_builds_where_a_builder_stands_arms_early_and_spends_what_it_pulls() {
     for bot in shipped() {
         let watched = Guarantees::over(&[bot.bot, bot.bot], minutes(CONTRACT_MINUTES));

@@ -40,6 +40,7 @@ fn a_frigate_flown_where_no_builder_of_its_seat_stands() -> (Fixture, AsteroidId
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_proposal_is_funded_whole_or_not_at_all_until_the_budget_is_spent() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
@@ -68,6 +69,7 @@ fn a_proposal_is_funded_whole_or_not_at_all_until_the_budget_is_spent() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_proposal_is_refused_where_no_builder_of_the_seat_stands() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
@@ -92,6 +94,7 @@ fn a_proposal_is_refused_where_no_builder_of_the_seat_stands() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_want_nothing_stands_behind_and_no_proposal_asks_for_is_lowered_to_what_it_can_justify() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
@@ -115,6 +118,7 @@ fn a_want_nothing_stands_behind_and_no_proposal_asks_for_is_lowered_to_what_it_c
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
@@ -147,6 +151,7 @@ fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
 }
 
 #[test]
+#[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
     let roster = Roster::shipped();
     let (fixture, home, away) = a_frigate_flown_where_no_builder_of_its_seat_stands();
