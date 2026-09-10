@@ -8,7 +8,7 @@ const KEPT_MATCHES: usize = 16;
 
 pub(crate) struct Log {
     ticks: BTreeMap<Tick, Batch>,
-    clock: Tick,
+    ends_by: Tick,
 }
 
 #[derive(Default)]
@@ -17,10 +17,10 @@ pub struct Records {
 }
 
 impl Log {
-    pub(crate) fn of(clock: Tick) -> Log {
+    pub(crate) fn of(ends_by: Tick) -> Log {
         Log {
             ticks: BTreeMap::new(),
-            clock,
+            ends_by,
         }
     }
 
@@ -29,7 +29,7 @@ impl Log {
     }
 
     pub(crate) fn take(&mut self, stamped: Stamped) -> Result<(), Refused> {
-        if stamped.tick > self.clock {
+        if stamped.tick > self.ends_by {
             return Err(Refused::Ahead);
         }
         self.ticks

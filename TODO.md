@@ -10,32 +10,34 @@ is the record. Agents see this file only through their briefs.
 ## In flight
 
 Uncommitted and verified green by the overseer's own gate, replay and
-rollback (2026-09-09): the row's effects. `Weapon` is `Effect`, since
-build and extract are not weapons, and the damage stats are lifted into
-`Hitscan`, which the row answers with rather than with an option, so a
-`Ready` carries its own stats and the two arms `Fire` tolerated are
-unrepresentable instead of merely unwritten. The words weapon, armed and
-unarmed are gone from the code, the tests and all three documents; a row
-that fights does damage. Ruled with it: the state hash value moves, and
-`Hitscan` is defined where it stands, since the shot landing the instant
-it is fired is a rule no other sentence states. Measured against a
-scratch build of the last commit over the same fifteen-minute match:
-entity counts identical at every minute, p50 within 0.01 ms at every
-count, worst tick 4.24 ms against 8.33 available. Budgets: code +7,
-tests +92, docs -8.
+rollback (2026-09-09): the match clock is a duration. `Setup::clock` was
+a `Tick` while meaning a span of running match time, so the room could
+compare it against an absolute tick and did, in two places, dropping
+every relayed command and ignoring every hash report over the final
+stretch of every multiplayer match. It is a `Time` now, so both
+comparisons are type errors rather than plausible lines; `Tick::since`
+and `Tick::after` are the only named crossings between a moment and a
+duration, and the two puns elsewhere in `sim` are gone with them. The
+room bounds against `Setup::ends_by()`, the draft's certain end after
+the clock, and a sim test plays a match out at one, two, three and four
+seats and asserts the final tick equals it, so the bound cannot drift
+from the draft's stage count in silence. Shown failing first at the
+room, at tick 15,600 of a 7,200-tick clock, for the command and for the
+hash report separately. `Forwarding::commanded` no longer folds the
+ledger's refusal into the ownership check, so the two refusals are
+tellable apart and the test discriminates rather than merely passes.
+The hash did not move. Budgets: code +64/-50, tests +120/-18, docs +10.
 
-The next two units, ruled 2026-09-09 and briefed in this order: the
-match clock, then the four holes in the tests below.
+The next unit, ruled 2026-09-09: the four holes in the tests below,
+widened to carry two `game` tests that assert the opposite of their
+names, at `display/scene.rs` — a surplus test that passes for a client
+doing `present - want` because present is zero in its scene, and a cost
+test that asserts exactly what client arithmetic gives, leaving
+DISPLAY.md's own discriminator, that what the reserve or a surplus fills
+is free and the bar marks nothing, untested. After it, the relayed
+command below.
 
-Three holes open, none of them fixed:
-- The match clock is a duration compared against an absolute tick, at
-  `server/src/records.rs` in `Records::take` and at
-  `server/src/forwarding.rs` in `Forwarding::reported`. A match ends at
-  the draft's end plus the clock, so for the final stretch of every
-  multiplayer match, as long as the draft took, every relayed command is
-  refused by the room while its issuer applied it, and hash reports are
-  ignored over the same span. The deciding minute is played blind and
-  undetected: 12 seconds at two seats, up to 110 at four. The next unit.
+Two holes open, neither fixed:
 - `game/src/net/machine.rs` expects its own controller's command to be
   taken, and the bot clears the thirty-two command cap with no margin,
   since `Plan::commands` ends in `take(MAX_COMMANDS_PER_TICK)` and emits
@@ -90,6 +92,25 @@ Rulings of 2026-09-09, so they are not re-raised:
 - Factions are built on top of the entity refactor, not before it, and
   the refactor's const stats are not reopened for them.
 - The refactor's type is `EntityPattern` as ruled.
+- One lane: a unit lands and commits before the next begins, and no
+  second working tree is opened to run two at once.
+- `agents` stays undocumented until rating settles the bot, so its
+  thirty-eight tests pinning rules stated nowhere else are deliberate.
+- Every cut-out in a glyph is filled in pure black: the role pictogram,
+  the tier notches, the tier-three corners and the tier-two inner
+  border. A glyph is one opaque shape, so a pile of ships cannot show
+  one glyph through another and invent a third. A DISPLAY.md change.
+- A hollow glyph is a dim solid one, so DISPLAY.md loses the three
+  sentences calling it the frame's outline alone, `Fill` collapses to
+  one arm, and the wheel's halved alpha becomes the stated way a hollow
+  row reads. The deletion, not the implementation. Lands with the
+  cut-outs above.
+- The scenes a judge reads are one seeded two-bot skirmish at three
+  named ticks, not hand-typed `Scene` literals: `display/local.rs` is
+  promoted out from behind `#[cfg(test)]`, `Watched` and
+  `skirmish_where_you_go_first` are deleted, and `Scene` becomes opaque
+  so nothing outside the crate can build a state the sim would not
+  produce. About 400 lines out of `look.rs`.
 
 Read at 820a036 and written to the session scratchpad, each a durable
 list rather than a warm agent: the overhaul's impact map over 682 lines

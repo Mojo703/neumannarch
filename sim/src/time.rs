@@ -10,7 +10,9 @@ use crate::TICKS_PER_SECOND;
 )]
 pub struct Tick(pub u64);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize,
+)]
 pub struct Time(pub u64);
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -35,6 +37,14 @@ impl Tick {
         Tick(self.0 + u64::from(ticks))
     }
 
+    pub fn since(self, then: Tick) -> Time {
+        Time(self.0.saturating_sub(then.0))
+    }
+
+    pub fn after(self, ran: Time) -> Tick {
+        Tick(self.0 + ran.0)
+    }
+
     pub fn seconds(self) -> f64 {
         self.0 as f64 / f64::from(TICKS_PER_SECOND)
     }
@@ -45,10 +55,6 @@ impl Time {
 
     pub fn next(self) -> Time {
         Time(self.0 + 1)
-    }
-
-    pub fn ahead(self, ticks: u64) -> Time {
-        Time(self.0 + ticks)
     }
 
     pub fn since(self, then: Time) -> Time {
@@ -117,6 +123,19 @@ mod tests {
             Time(8)
         );
         assert!(start < start.after(1.0));
+    }
+
+    #[test]
+    fn the_tick_a_match_time_runs_to_is_the_tick_it_ran_from_plus_that_time() {
+        let started = Tick(8_400);
+
+        assert_eq!(started.after(Time(7_200)), Tick(15_600));
+        assert_eq!(Tick(15_600).since(started), Time(7_200));
+        assert_eq!(
+            started.since(Tick(15_600)),
+            Time::ZERO,
+            "a tick before the one the clock started at has run no time"
+        );
     }
 
     #[test]

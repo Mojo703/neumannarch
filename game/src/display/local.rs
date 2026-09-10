@@ -4,14 +4,14 @@ use neumannarch_sim::state::Command;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Tick,
+    AsteroidId, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Time,
 };
 
 pub(crate) const PLAYER: SeatId = SeatId(0);
 
 pub(crate) const RIVAL: SeatId = SeatId(1);
 
-const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
 pub(crate) struct Local {
     session: Session,

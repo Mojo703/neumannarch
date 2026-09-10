@@ -266,10 +266,12 @@ impl Outbound {
 
 #[cfg(test)]
 mod tests {
-    use neumannarch_protocol::{Bot, Holder, Lobby};
+    use neumannarch_protocol::{Bot, CLOCK_RANGE, Holder, Lobby};
     use neumannarch_sim::roster::SHIPYARD;
-    use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{AsteroidId, SeatId, Stamped, TeamId, Tick};
+    use neumannarch_sim::state::{Command, Issued, State};
+    use neumannarch_sim::{
+        AsteroidId, Batch, SeatId, Setup, Stamped, TICKS_PER_SECOND, TeamId, Tick,
+    };
 
     use super::*;
 
@@ -326,6 +328,16 @@ mod tests {
         assert_eq!(posts[0].to, Recipient::Everyone);
         assert_eq!(posts[0].message, Message::Notice(Notice::Started(started)));
         room
+    }
+
+    fn played_to_the_clock(setup: &Setup) -> State {
+        let mut state = State::start(setup);
+        let nothing = Batch::new();
+        while !state.standings().over() {
+            let (next, _) = state.step(&nothing);
+            state = next;
+        }
+        state
     }
 
     fn to(posts: &[Outbound], to: Recipient) -> Vec<Message> {
@@ -399,6 +411,10 @@ mod tests {
             }),
         );
         let forged = room.receive(GUEST, Message::Relayed(Relayed::Command(command(0, 4))));
+        let owned = room.receive(
+            PlayerId::HOST,
+            Message::Relayed(Relayed::Command(command(0, 4))),
+        );
 
         assert_eq!(
             to(&commanded, Recipient::EveryoneElse),
@@ -414,6 +430,104 @@ mod tests {
         assert!(
             forged.is_empty(),
             "a command of a seat the sender does not own goes nowhere"
+        );
+        assert_eq!(
+            to(&owned, Recipient::EveryoneElse),
+            vec![Message::Relayed(Relayed::Command(command(0, 4)))],
+            "the same command from the machine holding that seat reaches everyone else, so the sender is what the room turned away"
+        );
+    }
+
+    #[test]
+    fn a_command_and_a_hash_from_the_closing_seconds_of_a_match_still_reach_the_other_machines() {
+        let mut room = joined();
+        room.receive(
+            PlayerId::HOST,
+            Message::Request(Request::Edit(LobbyEdit::SetClock(*CLOCK_RANGE.start()))),
+        );
+        let setup = lobby(&room)
+            .freeze()
+            .expect("both machines are seated")
+            .setup()
+            .clone();
+        room.receive(PlayerId::HOST, Message::Request(Request::Start));
+        let ended = played_to_the_clock(&setup);
+        let last = ended.tick();
+        let closing = last.back(30 * TICKS_PER_SECOND);
+
+        let in_the_closing = room.receive(
+            GUEST,
+            Message::Relayed(Relayed::Command(command(1, closing.0))),
+        );
+        let at_the_last = room.receive(
+            GUEST,
+            Message::Relayed(Relayed::Command(command(1, last.0))),
+        );
+        let past_the_last = room.receive(
+            GUEST,
+            Message::Relayed(Relayed::Command(command(1, last.next().0))),
+        );
+        let alone = room.receive(
+            PlayerId::HOST,
+            Message::Relayed(Relayed::Hash {
+                tick: closing,
+                hash: 7,
+            }),
+        );
+        let agreed = room.receive(
+            GUEST,
+            Message::Relayed(Relayed::Hash {
+                tick: closing,
+                hash: 7,
+            }),
+        );
+        let first = room.receive(
+            PlayerId::HOST,
+            Message::Relayed(Relayed::Hash {
+                tick: last,
+                hash: 8,
+            }),
+        );
+        let differed = room.receive(
+            GUEST,
+            Message::Relayed(Relayed::Hash {
+                tick: last,
+                hash: 9,
+            }),
+        );
+
+        assert!(
+            Some(closing) > ended.draft().ended(),
+            "the closing seconds are match play, and a draft costing no ticks would leave none"
+        );
+        assert_eq!(
+            to(&in_the_closing, Recipient::EveryoneElse),
+            vec![Message::Relayed(Relayed::Command(command(1, closing.0)))],
+            "a command of the closing seconds reaches the other machines"
+        );
+        assert_eq!(
+            to(&at_the_last, Recipient::EveryoneElse),
+            vec![Message::Relayed(Relayed::Command(command(1, last.0)))],
+            "and so does one of the match's last tick"
+        );
+        assert!(
+            past_the_last.is_empty(),
+            "a tick past the last the match can reach goes nowhere, and its seat is the sender's own"
+        );
+        assert!(alone.is_empty(), "one report agrees with nothing yet");
+        assert_eq!(
+            to(&agreed, Recipient::Everyone),
+            vec![Message::Relayed(Relayed::Hash {
+                tick: closing,
+                hash: 7
+            })],
+            "hashes of the closing seconds are still compared"
+        );
+        assert!(first.is_empty(), "one report has nothing to differ from");
+        assert_eq!(
+            to(&differed, Recipient::Everyone),
+            vec![Message::Relayed(Relayed::Desync { tick: last })],
+            "and a disagreement there is still declared"
         );
     }
 

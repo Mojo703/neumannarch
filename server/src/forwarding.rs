@@ -23,7 +23,7 @@ impl Forwarding {
     pub(crate) fn started(started: Started) -> Forwarding {
         let (setup, seating) = started.parts();
         Forwarding {
-            ledger: Log::of(setup.clock()),
+            ledger: Log::of(setup.ends_by()),
             setup,
             seating,
             reports: BTreeMap::new(),
@@ -43,14 +43,15 @@ impl Forwarding {
     }
 
     pub(crate) fn commanded(&mut self, from: PlayerId, stamped: Stamped) -> Vec<Outbound> {
-        match self.seating.owner(stamped.issued.seat) == Some(from)
-            && self.ledger.take(stamped).is_ok()
-        {
-            true => vec![Outbound::to(
+        if self.seating.owner(stamped.issued.seat) != Some(from) {
+            return Vec::new();
+        }
+        match self.ledger.take(stamped) {
+            Ok(()) => vec![Outbound::to(
                 Recipient::EveryoneElse,
                 Message::Relayed(Relayed::Command(stamped)),
             )],
-            false => Vec::new(),
+            Err(_) => Vec::new(),
         }
     }
 
@@ -77,7 +78,7 @@ impl Forwarding {
     }
 
     pub(crate) fn reported(&mut self, from: PlayerId, tick: Tick, hash: u64) -> Vec<Outbound> {
-        if self.desynced.is_some() || tick > self.setup.clock() {
+        if self.desynced.is_some() || tick > self.setup.ends_by() {
             return Vec::new();
         }
         let machines = self.members().len();

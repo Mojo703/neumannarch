@@ -81,9 +81,10 @@ mod tests {
     use super::*;
     use crate::ids::TeamId;
     use crate::setup::Setup;
+    use crate::time::Time;
 
     fn state(tick: Tick) -> State {
-        let setup = Setup::new(vec![TeamId(0)], 0, Tick(10_000)).expect("one seat is a match");
+        let setup = Setup::new(vec![TeamId(0)], 0, Time(10_000)).expect("one seat is a match");
         let mut state = State::start(&setup);
         while state.tick() < tick {
             state.advance();

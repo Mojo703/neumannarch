@@ -71,6 +71,10 @@ impl Draft {
         }
     }
 
+    pub(crate) fn ends_by(seats: usize) -> Tick {
+        Tick(STAGE_SPAN.0 * (seats * STAGES_PER_SEAT) as u64 + GRACE.0)
+    }
+
     pub fn stages(&self) -> &[PlacementStage] {
         &self.stages
     }

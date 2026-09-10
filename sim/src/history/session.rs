@@ -195,7 +195,7 @@ mod tests {
     };
     use crate::time::Time;
 
-    const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+    const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
     const BOTH: [SeatId; 2] = [SeatId(0), SeatId(1)];
 

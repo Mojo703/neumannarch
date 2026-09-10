@@ -14,13 +14,13 @@ use neumannarch_sim::{
     TICKS_PER_SECOND, TeamId, Tick, Time, WINDOW_SECONDS,
 };
 
-const CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
-const GROWTH_CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+const GROWTH_CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
-const MATRIX_CLOCK: Tick = Tick(5 * 60 * TICKS_PER_SECOND as u64);
+const MATRIX_CLOCK: Time = Time(5 * 60 * TICKS_PER_SECOND as u64);
 
-const CHECK_CLOCK: Tick = Tick(60 * TICKS_PER_SECOND as u64);
+const CHECK_CLOCK: Time = Time(60 * TICKS_PER_SECOND as u64);
 
 const TRACE_INTERVAL: u64 = 60;
 
@@ -138,7 +138,7 @@ fn played(named: &[&str]) {
     report(run.state());
 }
 
-fn timed(clock: Tick) {
+fn timed(clock: Time) {
     let seated = seats(&["expand", "expand"]).expect("both personalities ship");
     let mut run = PlayedMatch::new(setup(clock, SEED, SEATS.len()), seated);
     println!(
@@ -174,7 +174,7 @@ fn at_percentile(sorted: &[f64], share: f64) -> f64 {
     sorted.get(at).copied().unwrap_or_default()
 }
 
-fn verified(clock: Tick) -> bool {
+fn verified(clock: Time) -> bool {
     println!(
         "guarantees over {} minutes, expand against expand",
         clock.seconds() / 60.0
@@ -480,11 +480,11 @@ fn compositions() -> Vec<(&'static str, Personality)> {
     ]
 }
 
-fn setup(clock: Tick, seed: u64, seats: usize) -> Setup {
+fn setup(clock: Time, seed: u64, seats: usize) -> Setup {
     Setup::new(free_for_all(seats), seed, clock).expect("one seat per team is a match")
 }
 
-fn played_over(clock: Tick, seated: Vec<Seated>) -> PlayedMatch {
+fn played_over(clock: Time, seated: Vec<Seated>) -> PlayedMatch {
     PlayedMatch::new(setup(clock, SEED, SEATS.len()), seated)
 }
 

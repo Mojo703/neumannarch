@@ -2,7 +2,7 @@ use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::State;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
-use neumannarch_sim::{Retention, SeatId, Session, Setup, Stamped, TICKS_PER_SECOND, TeamId, Tick};
+use neumannarch_sim::{Retention, SeatId, Session, Setup, Stamped, TICKS_PER_SECOND, TeamId, Time};
 
 use neumannarch_protocol::Bot;
 
@@ -11,8 +11,8 @@ use crate::bots::Shipped;
 
 pub const BELT_SEED: u64 = 1;
 
-pub fn minutes(count: u64) -> Tick {
-    Tick(count * 60 * u64::from(TICKS_PER_SECOND))
+pub fn minutes(count: u64) -> Time {
+    Time(count * 60 * u64::from(TICKS_PER_SECOND))
 }
 
 pub fn free_for_all(seats: usize) -> Vec<TeamId> {
@@ -40,7 +40,7 @@ impl PlayedMatch {
         }
     }
 
-    pub fn of(seated: &[Bot], clock: Tick) -> PlayedMatch {
+    pub fn of(seated: &[Bot], clock: Time) -> PlayedMatch {
         let teams = free_for_all(seated.len());
         let setup = Setup::new(teams, BELT_SEED, clock).expect("a match of these teams");
         let roster = Roster::shipped();

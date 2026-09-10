@@ -109,12 +109,14 @@ fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
 mod tests {
     use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{AsteroidId, Retention, RowId, SeatId, TeamId};
+    use neumannarch_sim::{AsteroidId, Retention, RowId, SeatId, TeamId, Time};
 
     use super::*;
     use crate::wire::Codec;
 
-    const CLOCK: Tick = Tick(10_000);
+    const CLOCK: Time = Time(10_000);
+
+    const UNTIL: Tick = Tick(10_000);
 
     fn setup() -> Setup {
         Setup::new(vec![TeamId(0), TeamId(1)], 11, CLOCK).expect("two seats are a match")
@@ -175,7 +177,7 @@ mod tests {
         let read = Record::decode(&record.encoded()).expect("its own bytes are a record");
 
         assert_eq!(read, record);
-        assert_eq!(read.replay(CLOCK).hash(), record.replay(CLOCK).hash());
+        assert_eq!(read.replay(UNTIL).hash(), record.replay(UNTIL).hash());
     }
 
     #[test]

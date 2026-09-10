@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId, Tick, Time};
+use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId, Time};
 
 use neumannarch_protocol::Bot;
 
@@ -56,12 +56,12 @@ impl Extraction {
 }
 
 impl Guarantees {
-    pub fn over(seated: &[Bot], clock: Tick) -> Guarantees {
+    pub fn over(seated: &[Bot], clock: Time) -> Guarantees {
         let roster = Roster::shipped();
         let army = Roles::of(&roster).army;
         let mut played = PlayedMatch::of(seated, clock);
         let mut watched = Guarantees {
-            clock: Time(clock.0),
+            clock,
             seated: seated.to_vec(),
             unbuilt_frame: None,
             unbuilt: BTreeMap::new(),

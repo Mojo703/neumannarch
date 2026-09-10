@@ -63,6 +63,16 @@ adds it here in the same change; a unit that deletes one removes it.
   delete the arm; one tagged union cannot express it.
 - A room drops a notice or a desync sent by a member, since only the room
   produces them. The same direction-typed wire would delete both arms.
+- A room drops a command stamped past the tick its match ends by, and a
+  hash reported there, without a word; the cap is what keeps its ledger of
+  a match from growing on a tick no match will ever hold. No machine
+  playing the match can name such a tick: a match ends at its clock counted
+  from the draft's end, the draft ends by the tick `Setup::ends_by` reads
+  off the seats and the spans a placement stage and the grace state, and a
+  machine issues nothing once the standings say the clock has run. A ledger
+  bounded by the last tick the machines themselves have settled, rather
+  than by the setup, would delete it, at the price of taking the bound from
+  the senders it is there to bound.
 - `Flow::frame` replaces the screen with a placeholder while the old
   screen's room moves into the next. Only an `Option` every reader unwraps
   would delete it, which is worse.

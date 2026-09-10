@@ -393,7 +393,7 @@ mod tests {
     use neumannarch_sim::state::view::View;
     use neumannarch_sim::state::{Command, Rejected};
     use neumannarch_sim::step::fire::Shots;
-    use neumannarch_sim::{Materials, Retention, Sequence, Session, Setup, TeamId, Tick, Vec3};
+    use neumannarch_sim::{Materials, Retention, Sequence, Session, Setup, TeamId, Time, Vec3};
 
     use super::*;
     use crate::display::camera::BeltCamera;
@@ -540,7 +540,7 @@ mod tests {
 
     #[test]
     fn a_wheels_buttons_carry_the_refusals_the_view_reports_for_its_own_asteroid() {
-        let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(600)).expect("two teams");
+        let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Time(600)).expect("two teams");
         let mut session =
             Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)]).expect("seated");
         let first = session.state().draft().stages()[0];

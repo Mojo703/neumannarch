@@ -1,15 +1,15 @@
 use core::ops::RangeInclusive;
 
-use neumannarch_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Tick};
+use neumannarch_sim::{MAX_SEATS, SeatId, Setup, TICKS_PER_SECOND, TeamId, Time};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::PlayerId;
 use crate::seating::{Occupant, Seating, Started};
 
-pub const CLOCK_RANGE: RangeInclusive<Tick> =
-    Tick(60 * TICKS_PER_SECOND as u64)..=Tick(30 * 60 * TICKS_PER_SECOND as u64);
+pub const CLOCK_RANGE: RangeInclusive<Time> =
+    Time(60 * TICKS_PER_SECOND as u64)..=Time(30 * 60 * TICKS_PER_SECOND as u64);
 
-pub const DEFAULT_CLOCK: Tick = Tick(15 * 60 * TICKS_PER_SECOND as u64);
+pub const DEFAULT_CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
 
 pub const DEFAULT_SEED: u64 = 1;
 
@@ -60,7 +60,7 @@ pub enum LobbyEdit {
     Kick(PlayerId),
     SetTeam { slot: usize, team: TeamId },
     SetSeed(u64),
-    SetClock(Tick),
+    SetClock(Time),
     SetReady { ready: bool },
 }
 
@@ -74,7 +74,7 @@ pub struct SeatSlot {
 pub struct Lobby {
     slots: Vec<SeatSlot>,
     seed: u64,
-    clock: Tick,
+    clock: Time,
     host: PlayerId,
 }
 
@@ -108,7 +108,7 @@ impl Lobby {
         self.seed
     }
 
-    pub fn clock(&self) -> Tick {
+    pub fn clock(&self) -> Time {
         self.clock
     }
 

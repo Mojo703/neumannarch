@@ -6,7 +6,7 @@ use neumannarch_protocol::{
     Bot, Holder, Lobby, LobbyEdit, MAX_SLOTS, Occupant, PlayerId, Refused, Seating,
 };
 use neumannarch_sim::belt::Belt;
-use neumannarch_sim::{SeatId, TICKS_PER_SECOND, TeamId, Tick, Time};
+use neumannarch_sim::{SeatId, TICKS_PER_SECOND, TeamId, Time};
 
 use crate::controls::Button;
 use crate::display::camera::BeltCamera;
@@ -26,11 +26,11 @@ pub(crate) const NO_SEAT: &str = "No seat";
 
 pub(crate) const ALREADY_READY: &str = "Already ready";
 
-pub(crate) const CLOCKS: [Tick; 4] = [
-    Tick(60 * TICKS_PER_SECOND as u64),
-    Tick(5 * 60 * TICKS_PER_SECOND as u64),
-    Tick(15 * 60 * TICKS_PER_SECOND as u64),
-    Tick(30 * 60 * TICKS_PER_SECOND as u64),
+pub(crate) const CLOCKS: [Time; 4] = [
+    Time(60 * TICKS_PER_SECOND as u64),
+    Time(5 * 60 * TICKS_PER_SECOND as u64),
+    Time(15 * 60 * TICKS_PER_SECOND as u64),
+    Time(30 * 60 * TICKS_PER_SECOND as u64),
 ];
 
 const BOTS: [Bot; 2] = [Bot::Turtle, Bot::Expand];
@@ -436,7 +436,7 @@ impl LobbyScreen {
             .collect()
     }
 
-    fn clock_choices(&self) -> Vec<Value<Tick>> {
+    fn clock_choices(&self) -> Vec<Value<Time>> {
         CLOCKS
             .map(|clock| Value {
                 value: clock,
@@ -556,7 +556,7 @@ pub fn seat_names(seating: &Seating, me: PlayerId, seed: u64) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn clock_name(clock: Tick) -> String {
+pub(crate) fn clock_name(clock: Time) -> String {
     match clock.seconds() as u64 / 60 {
         1 => "1 minute".to_string(),
         minutes => format!("{minutes} minutes"),

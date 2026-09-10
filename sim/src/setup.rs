@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::TeamId;
-use crate::time::Tick;
+use crate::state::Draft;
+use crate::time::{Tick, Time};
 
 pub const MAX_SEATS: usize = 4;
 
@@ -10,7 +11,7 @@ pub const MAX_SEATS: usize = 4;
 pub struct Setup {
     teams: Vec<TeamId>,
     seed: u64,
-    clock: Tick,
+    clock: Time,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -23,11 +24,11 @@ pub enum BadSetup {
 struct Fields {
     teams: Vec<TeamId>,
     seed: u64,
-    clock: Tick,
+    clock: Time,
 }
 
 impl Setup {
-    pub fn new(teams: Vec<TeamId>, seed: u64, clock: Tick) -> Result<Setup, BadSetup> {
+    pub fn new(teams: Vec<TeamId>, seed: u64, clock: Time) -> Result<Setup, BadSetup> {
         match teams.len() {
             0 => Err(BadSetup::NoSeats),
             count if count > MAX_SEATS => Err(BadSetup::TooManySeats),
@@ -43,8 +44,12 @@ impl Setup {
         self.seed
     }
 
-    pub fn clock(&self) -> Tick {
+    pub fn clock(&self) -> Time {
         self.clock
+    }
+
+    pub fn ends_by(&self) -> Tick {
+        Draft::ends_by(self.teams.len()).after(self.clock)
     }
 }
 
@@ -68,6 +73,8 @@ impl TryFrom<Fields> for Setup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TICKS_PER_SECOND;
+    use crate::state::{Batch, State};
 
     fn teams(count: usize) -> Vec<TeamId> {
         (0..count).map(|at| TeamId(at as u8)).collect()
@@ -75,17 +82,38 @@ mod tests {
 
     #[test]
     fn a_setup_seats_one_to_four_teams_and_refuses_any_other_count_by_name() {
-        assert_eq!(Setup::new(Vec::new(), 0, Tick(1)), Err(BadSetup::NoSeats));
+        assert_eq!(Setup::new(Vec::new(), 0, Time(1)), Err(BadSetup::NoSeats));
         assert_eq!(
-            Setup::new(teams(MAX_SEATS), 0, Tick(1))
+            Setup::new(teams(MAX_SEATS), 0, Time(1))
                 .expect("four seats are a match")
                 .teams()
                 .len(),
             MAX_SEATS
         );
         assert_eq!(
-            Setup::new(teams(MAX_SEATS + 1), 0, Tick(1)),
+            Setup::new(teams(MAX_SEATS + 1), 0, Time(1)),
             Err(BadSetup::TooManySeats)
         );
+    }
+
+    #[test]
+    fn a_match_nobody_places_in_runs_to_the_tick_its_setup_ends_by_and_no_further() {
+        let clock = Time(2 * u64::from(TICKS_PER_SECOND));
+        for seats in 1..=MAX_SEATS {
+            let setup = Setup::new(teams(seats), 0, clock).expect("one to four seats are a match");
+            let nothing = Batch::new();
+            let mut state = State::start(&setup);
+            while !state.standings().over() {
+                let (next, _) = state.step(&nothing);
+                state = next;
+            }
+
+            assert_eq!(
+                state.draft().ended(),
+                Some(Draft::ends_by(seats)),
+                "a draft no seat places in runs its longest at {seats} seats"
+            );
+            assert_eq!(state.tick(), setup.ends_by());
+        }
     }
 }

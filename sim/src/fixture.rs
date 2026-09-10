@@ -14,7 +14,7 @@ use crate::state::{Asteroid, Batch, Command, Issued, Motion, Rejected, Rolls, Se
 use crate::step::fire::{Fire, Hit, Shots};
 use crate::step::holding::Holding;
 use crate::step::propagation::Propagation;
-use crate::time::{Tick, Time};
+use crate::time::Time;
 use crate::vec3::Vec3;
 
 pub const CLOCK: Time = Time(15 * 60 * TICKS_PER_SECOND as u64);
@@ -43,7 +43,7 @@ impl World {
     }
 
     pub fn drafting(teams: &[TeamId], clock: Time) -> World {
-        let setup = Setup::new(teams.to_vec(), 0, Tick(clock.0)).expect("a match of these teams");
+        let setup = Setup::new(teams.to_vec(), 0, clock).expect("a match of these teams");
         World {
             state: State::start(&setup),
         }

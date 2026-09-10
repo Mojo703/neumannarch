@@ -82,7 +82,7 @@ impl State {
     }
 
     pub fn time(&self) -> Time {
-        Time(self.tick.0).since(Time(self.draft.ended().unwrap_or(self.tick).0))
+        self.tick.since(self.draft.ended().unwrap_or(self.tick))
     }
 
     pub fn length(&self) -> Time {

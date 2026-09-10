@@ -142,7 +142,7 @@ mod tests {
     }
 
     fn placed() -> Present {
-        let setup = Setup::new(vec![TeamId(0)], 0, neumannarch_sim::Tick(1)).expect("one seat");
+        let setup = Setup::new(vec![TeamId(0)], 0, neumannarch_sim::Time(1)).expect("one seat");
         let state = State::start(&setup);
         let stage = state.draft().stages()[0];
         let mut batch = Batch::new();

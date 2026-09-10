@@ -179,7 +179,7 @@ impl State {
             .map(|team| Seat::new(*team, STARTING_STOCK, reserve.clone()))
             .collect();
         State::new(
-            Time(setup.clock().0),
+            setup.clock(),
             setup.seed(),
             Belt::GRAVITY,
             Roster::shipped(),

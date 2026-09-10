@@ -1,11 +1,11 @@
 use neumannarch_protocol::Bot;
 use neumannarch_sim::roster::{RAIDER, Roster};
-use neumannarch_sim::{AsteroidId, Retention, Setup, TeamId};
+use neumannarch_sim::{AsteroidId, Retention, Setup, TeamId, Time};
 
 use super::*;
 
 fn session() -> Session {
-    let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Tick(1_000)).expect("two seats");
+    let setup = Setup::new(vec![TeamId(0), TeamId(1)], 0, Time(1_000)).expect("two seats");
     Session::new(setup, Retention::shipped(), &[SeatId(0), SeatId(1)])
         .expect("both seats are seated")
 }
