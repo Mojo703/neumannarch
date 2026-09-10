@@ -74,9 +74,9 @@ impl Funding {
             Kind::Structure => 0,
             Kind::Unit => short.min(self.spare(pattern)),
         };
-        let framed = u32::from(survey.frame_open(asteroid, pattern) && survey.builds_at(asteroid));
+        let framed = u32::from(survey.frame_a_builder_fills(proposal.posting));
         let building = short.saturating_sub(sent + framed);
-        if building > 0 && !survey.builds_at(asteroid) {
+        if building > 0 && !survey.builder_fills(proposal.posting) {
             return false;
         }
         let cost = pattern.cost() * f64::from(building);

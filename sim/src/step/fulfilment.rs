@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use crate::belt::Belt;
 use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::Materials;
 use crate::pattern::{EntityPattern, Kind};
@@ -33,6 +34,7 @@ pub(crate) struct Assigned {
     pub(crate) still_short: BTreeMap<Posting, u32>,
     pub(crate) openings: Vec<Frame>,
     pub(crate) cancellations: Vec<Cancellation>,
+    pub(crate) rebuilt_at: Vec<(usize, AsteroidId)>,
 }
 
 impl Assigned {
@@ -112,10 +114,34 @@ impl<'a> Fulfilment<'a> {
         for (posting, over) in self.unwanted_frames(&assigned.sent_away(self.state)) {
             self.cancel(&mut assigned, posting, over);
         }
+        self.rebuild_stranded(&mut assigned);
         Assigned {
             still_short,
             ..assigned
         }
+    }
+
+    fn rebuild_stranded(&self, assigned: &mut Assigned) {
+        let stranded: Vec<(usize, Posting)> = self
+            .state
+            .frames()
+            .iter()
+            .enumerate()
+            .filter(|(_, frame)| frame.pattern().kind() == Kind::Unit)
+            .filter(|(_, frame)| !self.builds_for(frame.built_at(), frame.post().seat))
+            .map(|(at, frame)| (at, Posting::new(frame.post(), frame.pattern())))
+            .collect();
+        for (at, posting) in stranded {
+            if let Some(yard) = self.soonest_yard(assigned, posting) {
+                assigned.rebuilt_at.push((at, yard));
+            }
+        }
+    }
+
+    fn builds_for(&self, asteroid: AsteroidId, seat: SeatId) -> bool {
+        self.rolls[asteroid]
+            .of_seat(seat)
+            .any(|entity| entity.pattern().build_rate() > 0.0)
     }
 
     fn count(&self, posting: Posting) -> u32 {
@@ -161,14 +187,66 @@ impl<'a> Fulfilment<'a> {
         let open = self.open_frames(posting).len();
         match asked {
             0 => self.cancel(assigned, posting, open as u32),
-            _ if open == 0 => assigned.openings.push(Frame::new(
-                posting.post(),
-                posting.pattern(),
-                0.0,
-                self.opened,
-            )),
+            _ if open == 0 => {
+                let built_at = self.built_at(assigned, posting);
+                assigned.openings.push(Frame::new(
+                    posting.post(),
+                    built_at,
+                    posting.pattern(),
+                    0.0,
+                    self.opened,
+                ))
+            }
             _ => {}
         }
+    }
+
+    fn built_at(&self, assigned: &Assigned, posting: Posting) -> AsteroidId {
+        match posting.pattern().kind() {
+            Kind::Structure => posting.asteroid(),
+            Kind::Unit => self
+                .soonest_yard(assigned, posting)
+                .unwrap_or(posting.asteroid()),
+        }
+    }
+
+    fn soonest_yard(&self, assigned: &Assigned, posting: Posting) -> Option<AsteroidId> {
+        let seat = posting.seat();
+        let wanted_at = self.rolls[posting.asteroid()].body().pos;
+        let cost = posting.pattern().cost().total();
+        self.rolls
+            .iter()
+            .filter_map(|roll| {
+                let rate: f64 = roll
+                    .of_seat(seat)
+                    .map(|entity| entity.pattern().build_rate())
+                    .sum();
+                if rate <= 0.0 {
+                    return None;
+                }
+                let frames = self.frames_built_at(assigned, roll.asteroid(), seat) as f64;
+                let building = cost * (frames + 1.0) / rate;
+                let distance = roll.body().pos.distance(wanted_at);
+                let flying =
+                    2.0 * (distance / Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED).sqrt();
+                Some((building + flying, roll.asteroid()))
+            })
+            .min_by(|(sooner, one), (later, other)| sooner.total_cmp(later).then(one.cmp(other)))
+            .map(|(_, asteroid)| asteroid)
+    }
+
+    fn frames_built_at(&self, assigned: &Assigned, asteroid: AsteroidId, seat: SeatId) -> usize {
+        let built_here = |frame: &Frame| frame.built_at() == asteroid && frame.post().seat == seat;
+        self.state
+            .frames()
+            .iter()
+            .filter(|frame| built_here(frame))
+            .count()
+            + assigned
+                .openings
+                .iter()
+                .filter(|frame| built_here(frame))
+                .count()
     }
 
     fn cancel(&self, assigned: &mut Assigned, posting: Posting, count: u32) {

@@ -137,16 +137,6 @@ adds it here in the same change; a unit that deletes one removes it.
   there that does damage ever asks, so the arm cannot be reached. A
   ranking read by the asking entity rather than by a pair of values
   would delete it, at one ranking per unit rather than one per pair.
-- A bot's frame stands for one decision at an asteroid where no builder
-  of its seat stands or arrives. The funding pass justifies a want once
-  a decision, a second apart, while `Fulfilment` opens frames every tick
-  off the tick-start snapshot, so a builder killed or sent away between
-  two decisions leaves the want standing and a frame opens behind it.
-  The frame spends nothing, since no builder reaches it, and at the next
-  decision `Survey::frame_no_builder_fills` answers yes, `justified`
-  reads the want at zero and the frame is cancelled. A bot that surveyed
-  and funded every tick would delete it, at a survey and a funding pass
-  per seat per tick rather than one a second.
 - A machine expects its own controller's command to be one the tick it
   stamps can still take, and the bot meets the thirty-two command cap
   exactly, since its plan ends in a take of that many. A second source of

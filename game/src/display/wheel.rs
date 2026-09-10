@@ -34,6 +34,10 @@ pub(crate) const CHARACTER_WIDTH: f32 = LINE_HEIGHT * 0.6;
 
 pub(crate) const MARK: f32 = 10.0;
 
+const AWAY_ARROW: f32 = 6.0;
+
+const FRAME_GAP: f32 = 3.0;
+
 pub(crate) const GAP: f32 = 4.0;
 
 pub(crate) const CELL_GAP: f32 = 6.0;
@@ -168,6 +172,16 @@ enum Mark {
     Surplus,
     Arriving,
     Wanted,
+    BuildingFor,
+}
+
+impl Mark {
+    fn span(self, entries: &[Shown]) -> f32 {
+        match self {
+            Mark::BuildingFor => entries.len() as f32 * (MARK + AWAY_ARROW + FRAME_GAP) - FRAME_GAP,
+            _ => MARK,
+        }
+    }
 }
 
 impl Footprint {
@@ -277,7 +291,7 @@ impl Wheel {
                         line.cell.center(),
                         Spoken::Pattern {
                             pattern: slot.pattern,
-                            shown: line.speaks(),
+                            shown: line.speaks_at(at, self.scale),
                         },
                     )),
                     None => slot.glyph_rect(self.scale).contains(at).then(|| {
@@ -430,7 +444,7 @@ impl Wheel {
         self.paint_mark(painter, line, colour);
         painter.text(
             egui::pos2(
-                line.cell.left() + (MARK + GAP) * self.scale,
+                line.cell.left() + (line.mark.span(&line.entries) + GAP) * self.scale,
                 line.cell.center().y,
             ),
             Align2::LEFT_CENTER,
@@ -454,42 +468,87 @@ impl Wheel {
             }
             Mark::Arriving => {
                 painter.add(Shape::convex_polygon(
-                    vec![
-                        egui::pos2(at.x - half, at.y),
-                        egui::pos2(at.x + half, at.y - half),
-                        egui::pos2(at.x + half, at.y + half),
-                    ],
+                    arrow(at, half, Side::Left),
                     colour,
                     Stroke::NONE,
                 ));
             }
             Mark::Wanted => {
-                let square = Rect::from_center_size(at, Vec2::splat(2.0 * half));
-                if let Some(building) = line.building() {
+                self.paint_wanted(
+                    painter,
+                    line,
+                    Rect::from_center_size(at, Vec2::splat(2.0 * half)),
+                    colour,
+                );
+            }
+            Mark::BuildingFor => {
+                for (at, building) in line.built_for_elsewhere(scale) {
+                    let square = Rect::from_center_size(at, Vec2::splat(2.0 * half));
                     self.paint_frame(painter, square, building, colour);
-                }
-                match line.dashed() {
-                    true => {
-                        let corners = [
-                            square.left_top(),
-                            square.right_top(),
-                            square.right_bottom(),
-                            square.left_bottom(),
-                            square.left_top(),
-                        ];
-                        painter.extend(Shape::dashed_line(
-                            &corners,
-                            stroke,
-                            DASH_LENGTH * scale,
-                            DASH_GAP * scale,
-                        ));
-                    }
-                    false => {
-                        painter.rect_stroke(square, 0.0, stroke, egui::StrokeKind::Middle);
-                    }
+                    painter.rect_stroke(square, 0.0, stroke, egui::StrokeKind::Middle);
+                    let away = AWAY_ARROW * scale / 2.0;
+                    painter.add(Shape::convex_polygon(
+                        arrow(egui::pos2(square.right() + away, at.y), away, Side::Right),
+                        colour,
+                        Stroke::NONE,
+                    ));
                 }
             }
         }
+    }
+
+    fn paint_wanted(&self, painter: &egui::Painter, line: &Line, square: Rect, colour: Color32) {
+        let stroke = Stroke::new(MARK_STROKE * self.scale, colour);
+        if let Some(building) = line.building_elsewhere() {
+            let pointing = arrow(square.center(), square.width() / 2.0, Side::Left);
+            self.paint_filling(painter, &pointing, square, building.progress, colour);
+            painter.add(Shape::convex_polygon(
+                pointing,
+                Color32::TRANSPARENT,
+                stroke,
+            ));
+            return;
+        }
+        if let Some(building) = line.building() {
+            self.paint_frame(painter, square, building, colour);
+        }
+        match line.dashed() {
+            true => {
+                let corners = [
+                    square.left_top(),
+                    square.right_top(),
+                    square.right_bottom(),
+                    square.left_bottom(),
+                    square.left_top(),
+                ];
+                painter.extend(Shape::dashed_line(
+                    &corners,
+                    stroke,
+                    DASH_LENGTH * self.scale,
+                    DASH_GAP * self.scale,
+                ));
+            }
+            false => {
+                painter.rect_stroke(square, 0.0, stroke, egui::StrokeKind::Middle);
+            }
+        }
+    }
+
+    fn paint_filling(
+        &self,
+        painter: &egui::Painter,
+        points: &[Pos2],
+        bounds: Rect,
+        progress: f64,
+        colour: Color32,
+    ) {
+        let cutoff = bounds.bottom() - bounds.height() * progress as f32;
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                egui::pos2(f32::NEG_INFINITY, cutoff),
+                egui::pos2(f32::INFINITY, f32::INFINITY),
+            ))
+            .add(Shape::convex_polygon(points.to_vec(), colour, Stroke::NONE));
     }
 
     fn paint_frame(
@@ -607,6 +666,30 @@ impl Line {
         })
     }
 
+    fn building_elsewhere(&self) -> Option<Building> {
+        self.entries.iter().find_map(|shown| match shown.entry {
+            Entry::BuildingElsewhere(building) => Some(building),
+            _ => None,
+        })
+    }
+
+    fn built_for_elsewhere(&self, scale: f32) -> impl Iterator<Item = (Pos2, Building)> {
+        let half = MARK * scale / 2.0;
+        self.entries
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, shown)| match shown.entry {
+                Entry::BuildingFor { building, .. } => Some((
+                    egui::pos2(
+                        self.cell.left() + index as f32 * frame_step(scale) + half,
+                        self.cell.center().y,
+                    ),
+                    building,
+                )),
+                _ => None,
+            })
+    }
+
     fn dashed(&self) -> bool {
         self.entries
             .iter()
@@ -616,6 +699,35 @@ impl Line {
     fn speaks(&self) -> Option<Shown> {
         self.entries.iter().copied().max_by_key(says)
     }
+
+    fn speaks_at(&self, at: Pos2, scale: f32) -> Option<Shown> {
+        match self.mark {
+            Mark::BuildingFor => {
+                let over = ((at.x - self.cell.left()) / frame_step(scale)).floor();
+                self.entries
+                    .get(over.max(0.0) as usize)
+                    .copied()
+                    .or_else(|| self.speaks())
+            }
+            _ => self.speaks(),
+        }
+    }
+}
+
+fn frame_step(scale: f32) -> f32 {
+    (MARK + AWAY_ARROW + FRAME_GAP) * scale
+}
+
+fn arrow(at: Pos2, half: f32, pointing: Side) -> Vec<Pos2> {
+    let (tip, base) = match pointing {
+        Side::Left => (at.x - half, at.x + half),
+        Side::Right => (at.x + half, at.x - half),
+    };
+    vec![
+        egui::pos2(tip, at.y),
+        egui::pos2(base, at.y - half),
+        egui::pos2(base, at.y + half),
+    ]
 }
 
 impl WheelButton {
@@ -633,7 +745,7 @@ fn says(shown: &Shown) -> u8 {
             starved_of: Some(_),
             ..
         }) => 3,
-        Entry::Wanted { dashed: true, .. } => 2,
+        Entry::Wanted { dashed: true, .. } | Entry::BuildingElsewhere(_) => 2,
         Entry::Arriving { .. } => 1,
         _ => 0,
     }
@@ -641,7 +753,7 @@ fn says(shown: &Shown) -> u8 {
 
 fn to_come(entry: Entry) -> u32 {
     match entry {
-        Entry::Building(_) => 1,
+        Entry::Building(_) | Entry::BuildingElsewhere(_) | Entry::BuildingFor { .. } => 1,
         other => other.count().unwrap_or(0),
     }
 }
@@ -778,7 +890,7 @@ impl Unlaid {
     fn cells(&self) -> impl Iterator<Item = (Mark, &[Shown], u32, f32)> {
         self.lines.iter().map(|(mark, entries)| {
             let count = entries.iter().map(|shown| to_come(shown.entry)).sum();
-            let width = MARK + GAP + digits(count) * CHARACTER_WIDTH + CELL_GAP;
+            let width = mark.span(entries) + GAP + digits(count) * CHARACTER_WIDTH + CELL_GAP;
             (*mark, entries.as_slice(), count, width)
         })
     }
@@ -878,20 +990,22 @@ fn patterns_of(view: &SectorView, edits: bool) -> Vec<Unlaid> {
         .collect()
 }
 
-fn lines(entries: &[Shown]) -> [(Mark, Vec<Shown>); 4] {
-    let of = |wanted: &[Mark]| -> Vec<Shown> {
+fn lines(entries: &[Shown]) -> [(Mark, Vec<Shown>); 5] {
+    let of = |wanted: Mark| -> Vec<Shown> {
         entries
             .iter()
-            .filter(|shown| wanted.contains(&marked(shown.entry)))
+            .filter(|shown| marked(shown.entry) == wanted)
             .copied()
             .collect()
     };
     [
-        (Mark::Here, of(&[Mark::Here])),
-        (Mark::Surplus, of(&[Mark::Surplus])),
-        (Mark::Arriving, of(&[Mark::Arriving])),
-        (Mark::Wanted, of(&[Mark::Wanted])),
+        Mark::Here,
+        Mark::Surplus,
+        Mark::Arriving,
+        Mark::Wanted,
+        Mark::BuildingFor,
     ]
+    .map(|mark| (mark, of(mark)))
 }
 
 fn marked(entry: Entry) -> Mark {
@@ -899,7 +1013,8 @@ fn marked(entry: Entry) -> Mark {
         Entry::Present(_) => Mark::Here,
         Entry::Surplus(_) => Mark::Surplus,
         Entry::Arriving { .. } => Mark::Arriving,
-        Entry::Building(_) | Entry::Wanted { .. } => Mark::Wanted,
+        Entry::Building(_) | Entry::BuildingElsewhere(_) | Entry::Wanted { .. } => Mark::Wanted,
+        Entry::BuildingFor { .. } => Mark::BuildingFor,
     }
 }
 
@@ -1418,6 +1533,7 @@ mod tests {
         let starved = Building {
             progress: 0.5,
             starved_of: Some(neumannarch_sim::Material::Metals),
+            built_at: ASTEROID,
         };
         let wheel = wheel(
             vec![sector(
@@ -1443,6 +1559,99 @@ mod tests {
         assert_eq!(
             line.speaks().map(|shown| shown.entry.phrase("Frigate")),
             Some("Frigate short of metals".to_string())
+        );
+    }
+
+    #[test]
+    fn a_frame_that_builds_elsewhere_marks_the_want_with_the_arrow_that_points_at_the_asteroid() {
+        let elsewhere = Building {
+            progress: 0.5,
+            starved_of: None,
+            built_at: AsteroidId(3),
+        };
+        let wheel = wheel(
+            vec![sector(
+                MINE,
+                vec![strip(
+                    P::Raider,
+                    vec![
+                        Entry::BuildingElsewhere(elsewhere),
+                        Entry::Wanted {
+                            count: 1,
+                            dashed: false,
+                        },
+                    ],
+                )],
+            )],
+            None,
+        );
+        let line = &slot_of(&wheel, P::Raider).lines[0];
+
+        assert_eq!(line.mark, Mark::Wanted);
+        assert_eq!(line.count, 2, "the frame counts among what is to come");
+        assert_eq!(line.building(), None, "nothing builds at this asteroid");
+        assert_eq!(line.building_elsewhere(), Some(elsewhere));
+        assert_eq!(
+            line.speaks().map(|shown| shown.entry.phrase("Raider")),
+            Some("Raider building at Asteroid 4".to_string())
+        );
+    }
+
+    #[test]
+    fn a_yard_carries_a_box_a_frame_it_builds_for_elsewhere_after_its_own_wanted_line() {
+        let building = Building {
+            progress: 0.5,
+            starved_of: None,
+            built_at: ASTEROID,
+        };
+        let wheel = wheel(
+            vec![sector(
+                MINE,
+                vec![strip(
+                    P::Raider,
+                    vec![
+                        Entry::Wanted {
+                            count: 1,
+                            dashed: false,
+                        },
+                        Entry::BuildingFor {
+                            building,
+                            wanted_at: AsteroidId(3),
+                        },
+                        Entry::BuildingFor {
+                            building,
+                            wanted_at: AsteroidId(6),
+                        },
+                    ],
+                )],
+            )],
+            None,
+        );
+        let slot = slot_of(&wheel, P::Raider);
+
+        assert_eq!(slot.lines.len(), 2);
+        assert_eq!(slot.lines[0].mark, Mark::Wanted);
+        let line = &slot.lines[1];
+        assert_eq!(line.mark, Mark::BuildingFor);
+        assert!(
+            slot.lines[0].cell.right() <= line.cell.left(),
+            "the frames it builds for elsewhere stand after its own want"
+        );
+        assert_eq!(line.count, 2, "one box a frame");
+        let boxes: Vec<Pos2> = line.built_for_elsewhere(1.0).map(|(at, _)| at).collect();
+        assert_eq!(boxes.len(), 2);
+        assert!(boxes[0].x < boxes[1].x, "the boxes stand side by side");
+        assert!(
+            slot.frame.contains_rect(line.cell),
+            "and the strip holds them both"
+        );
+
+        let said = |at: Pos2| wheel.spoken_at(at).map(|(_, spoken)| spoken.phrase());
+        assert_eq!(said(boxes[0]), Some("Raider for Asteroid 4".to_string()));
+        assert_eq!(
+            said(boxes[1]),
+            Some("Raider for Asteroid 7".to_string()),
+            "each box says where its own unit is for"
         );
     }
 

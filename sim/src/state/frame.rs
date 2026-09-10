@@ -1,4 +1,5 @@
 use crate::TICKS_PER_SECOND;
+use crate::ids::AsteroidId;
 use crate::materials::Material;
 use crate::pattern::EntityPattern;
 use crate::post::Post;
@@ -8,6 +9,7 @@ use crate::time::Time;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Frame {
     post: Post,
+    built_at: AsteroidId,
     pattern: EntityPattern,
     progress: Real,
     fed: Time,
@@ -15,9 +17,16 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(post: Post, pattern: EntityPattern, progress: f64, at: Time) -> Frame {
+    pub fn new(
+        post: Post,
+        built_at: AsteroidId,
+        pattern: EntityPattern,
+        progress: f64,
+        at: Time,
+    ) -> Frame {
         Frame {
             post,
+            built_at,
             pattern,
             progress: Real(progress),
             fed: at,
@@ -34,6 +43,14 @@ impl Frame {
         self.post
     }
 
+    pub fn built_at(&self) -> AsteroidId {
+        self.built_at
+    }
+
+    pub fn built_elsewhere(&self) -> bool {
+        self.built_at != self.post.asteroid
+    }
+
     pub(crate) fn pattern(&self) -> EntityPattern {
         self.pattern
     }
@@ -48,6 +65,10 @@ impl Frame {
             true => (self.progress.0 / cost).clamp(0.0, 1.0),
             false => 1.0,
         }
+    }
+
+    pub(crate) fn rebuild_at(&mut self, asteroid: AsteroidId) {
+        self.built_at = asteroid;
     }
 
     pub fn build(&mut self, units: f64, at: Time) {

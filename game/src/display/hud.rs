@@ -4,7 +4,7 @@ use neumannarch_sim::Vec3;
 use crate::display::glyph;
 use crate::display::glyph_quad::seat_color32;
 use crate::display::hue;
-use crate::display::scene::{Arc, AsteroidView, Scene};
+use crate::display::scene::{Arc, AsteroidView, Flight, Scene};
 use crate::display::viewport::Viewport;
 use crate::display::wheel::{self, Side};
 use crate::display::zoom;
@@ -105,7 +105,7 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
         else {
             continue;
         };
-        paint_flight_line(painter, from, to, flight.previewed);
+        paint_flight_line(painter, from, to, flight.flight);
     }
 
     for (asteroid, arcs) in &scene.fights {
@@ -256,10 +256,10 @@ fn paint_circle(
     }
 }
 
-fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2, previewed: bool) {
-    let preview = match previewed {
-        true => wheel::PREVIEW_ALPHA,
-        false => 1.0,
+fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2, flight: Flight) {
+    let coming = match flight {
+        Flight::UnderWay => 1.0,
+        Flight::Building | Flight::Previewed => wheel::PREVIEW_ALPHA,
     };
     let delta = to - from;
     let length = delta.length();
@@ -281,7 +281,7 @@ fn paint_flight_line(painter: &egui::Painter, from: Pos2, to: Pos2, previewed: b
                 FLIGHT_FAINT_ALPHA + (FLIGHT_FULL_ALPHA - FLIGHT_FAINT_ALPHA) * (mid / length);
             painter.line_segment(
                 [from + direction * clipped_start, from + direction * end],
-                Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR.gamma_multiply(alpha * preview)),
+                Stroke::new(FLIGHT_WIDTH, FLIGHT_COLOUR.gamma_multiply(alpha * coming)),
             );
         }
         start += cycle;

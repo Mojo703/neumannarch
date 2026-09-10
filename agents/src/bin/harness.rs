@@ -152,8 +152,8 @@ fn verified(clock: Time) -> bool {
     let guarantees = Guarantees::over(&[Bot::Expand, Bot::Expand], clock);
     let trading = guarantees.both_sides_arm_and_trade_shots();
     held(
-        "no frame of a bot outlives a decision at an asteroid where no builder of its seat stands or arrives",
-        guarantees.no_frame_outlives_a_decision_without_a_builder(),
+        "no unit a bot wants outlives a decision building at an asteroid where no builder of its seat stands",
+        guarantees.every_unit_builds_where_a_builder_of_its_seat_stands(),
     ) & held(
         "two bots field units that do damage early and trade shots by the middle of the clock",
         trading.as_deref(),

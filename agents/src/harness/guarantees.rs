@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use neumannarch_sim::pattern::EntityPattern;
+use neumannarch_sim::pattern::{EntityPattern, Kind};
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, Posting, SeatId, Time};
+use neumannarch_sim::{AsteroidId, Post, Posting, SeatId, Time};
 
 use neumannarch_protocol::Bot;
 
@@ -102,7 +102,7 @@ impl Guarantees {
         self.income_fell.as_deref().or(self.growth.as_deref())
     }
 
-    pub fn no_frame_outlives_a_decision_without_a_builder(&self) -> Option<&str> {
+    pub fn every_unit_builds_where_a_builder_of_its_seat_stands(&self) -> Option<&str> {
         self.unbuilt_frame.as_deref()
     }
 
@@ -187,36 +187,25 @@ impl Guarantees {
     }
 
     fn read_frames(&mut self, view: &View) {
-        if self.unbuilt_frame.is_some() {
+        if self.unbuilt_frame.is_some() || !builds_anywhere(view) {
             return;
         }
         let before = self.unbuilt.remove(&view.seat).unwrap_or_default();
-        let building = view
+        let units = view
             .plans
             .iter()
-            .filter(|(_, plan)| plan.building.is_some())
-            .map(|(posting, _)| *posting);
-        for posting in building {
-            let want = view.want_of(posting);
-            let composition = view.compositions.get(&posting.post());
-            let arriving = composition.is_some_and(|composition| {
-                composition
-                    .patterns
-                    .iter()
-                    .any(|(pattern, held)| held.arriving > 0 && pattern.build_rate() > 0.0)
-            });
-            if composition.is_some_and(|composition| composition.builder) || arriving {
+            .filter(|(posting, _)| posting.pattern().kind() == Kind::Unit)
+            .filter_map(|(posting, plan)| Some((*posting, plan.building?.built_at)));
+        for (posting, yard) in units {
+            if builds_at(view, yard, view.seat) {
                 continue;
             }
             self.unbuilt.entry(view.seat).or_default().insert(posting);
             if !before.contains(&posting) {
                 continue;
             }
-            let homed = composition
-                .and_then(|composition| composition.patterns.get(&posting.pattern()))
-                .map_or(0, |held| held.present + held.arriving);
             self.unbuilt_frame = Some(format!(
-                "at {:.0}s seat {} still wants {want} {} at {:?} a decision on, where {homed} are homed and no builder of its own stands or arrives",
+                "at {:.0}s seat {} builds the {} it wants at {:?} at {yard:?}, where no builder of its own stands, though it builds elsewhere",
                 view.time.seconds(),
                 view.seat.0,
                 posting.pattern().name(),
@@ -260,6 +249,18 @@ impl Guarantees {
             ));
         }
     }
+}
+
+fn builds_at(view: &View, asteroid: AsteroidId, seat: SeatId) -> bool {
+    view.compositions
+        .get(&Post { asteroid, seat })
+        .is_some_and(|composition| composition.builder)
+}
+
+fn builds_anywhere(view: &View) -> bool {
+    view.compositions
+        .iter()
+        .any(|(post, composition)| post.seat == view.seat && composition.builder)
 }
 
 fn within_reach(view: &View) -> Vec<AsteroidId> {

@@ -9,10 +9,21 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The construction overhaul's unit 2, the pattern enum, is committed
-(a0cc88a). Next is the design conversation on the rulings unit 3 waits
-on (listed under the overhaul below), then unit 3's brief; before
-either, the crash measurement below. The split of match-playing tests
+Build-and-fly is built and verified in the working tree, awaiting the
+owner's word to commit: the sim core, the display's two marks and the
+faint building line (look scene `yard`, game/look/yard.png), the bot
+and its replaced guarantee, the documents. Decisions the builder made
+that the owner may reverse: the bot's arming pass now runs over the
+asteroids it holds or has a builder at (`developed()`) rather than
+being deleted, so a drafted rock with a constructor and no structure
+keeps growing; the contracts clock rose from four to five minutes
+because the rule adds a flight leg before a turtle's first landed
+shot, proved not to be the bot's change; and the display marks cost
+about six hundred lines of code in game, accepted since the wheel is
+to be replaced by the overhaul. The stranded frame the builder found
+is closed in the sim: a unit's frame whose asteroid loses the seat's
+last builder moves to the yard that now delivers soonest, progress
+kept, pinned by a test. Next after the commit: slots, then relations. The split of match-playing tests
 landed before the enum: `cargo test --workspace` is 43 seconds, the
 ignored tests play in release in the gate. Rulings with the split
 (owner, 2026-09-09): the two tests in `agents/src/tests.rs` that
@@ -704,11 +715,23 @@ conversation on the owner's questions before a brief:
    owner noted the torn-down tally wheel and BAR's no-overlap footprint
    and asked whether grouping is needed at all. No ruling yet; the
    belt's size may change first.
-2. The camera's focus as an orbit, the sim's own type: clicking an
-   asteroid sets the focus to that asteroid's orbit exactly, a pan or a
-   zoom into empty space makes a circular orbit through the panned
-   point, the hand-rolled turn in `advance` and its rate cap are
-   deleted, the soft floor on the pan stays (agreed 2026-09-08).
+2. The camera, ruled 2026-09-10 from the owner's play (a battle at a
+   rock is hard to view, and the focus drifts off an asteroid because
+   orbits are not circular): the focus is a body, a point with a
+   velocity, and its orbit follows from it through the sim's own
+   `Orbit`. Focusing an asteroid sets the body to the asteroid's, so
+   the focus rides its exact orbit. A pan of length s moves the point
+   by s and turns the velocity toward the circular velocity at the new
+   point by s over one release distance, a belt constant of about a
+   kilometre to tune by play, so a short drag stays with the rock and
+   a long one, or a held key, ends circular; the same rule for the
+   drag and for WASD, no transition, no reference to the selection,
+   no state but the body. Zoom leaves the body alone. Double-click on
+   an asteroid focuses it and eases the zoom to the fight zoom over
+   the slow span. The hand-rolled turn in `advance` and its rate cap
+   are deleted; the soft floor on the pan stays. Needs `Orbit` to
+   answer the circular velocity through a point, and wants the engine
+   queue's `zoomed_about`; until it lands the game's own zoom serves.
 3. The spectator: a host who holds no seat watches read-only and can
    change which seat, through a panel like the draft's.
 4. Bodies as 3D models with the glyph as a screen icon over them, and
@@ -878,7 +901,33 @@ slots since the filled tree needs them, then the relations.
 Open inside it: what the construction turret is, since builder and
 constructor are both taken; and which visual channel carries the mark,
 since the glyph already spends its silhouette on the role and its base
-on the tier.
+on the tier. Put to the owner 2026-09-10 and not yet ruled: where a
+pattern's requirements are read is a fact the pattern states, one
+const method `gate_site()` answering where it stands or where it is
+built, read by the tree's gate and by fulfilment's choice of yard, so
+nothing matches on structure or ship; units are read at the yard that
+builds them (the tree gates production sites and units flow, which is
+BAR's), structures at the rock; `soonest_yard` then considers only
+yards that allow the pattern and a unit no yard can build stands
+dashed with the missing pattern named. And whether the wheel carries
+the tree as dimmed strips with the missing pattern in the button's
+phrase, or a seat-level production view is added; the owner's answer
+is that the visuals are to be overhauled, so the question is argued
+on the new display, not the wheel.
+
+The visual overhaul (owner, 2026-09-10), a design conversation of its
+own after the construction units, argued from the reference images in
+`game/look/visual design/`: Highfleet for the material only, gritty
+metal bezels, glowing phosphor text and lines on dark glass, worn
+labels, instruments that look built, and never for its map grammar or
+mechanics; Factorio for cohesion, one icon language at one size in one
+style and every panel from one kit, which is the bar the overhaul is
+judged by; EVE for ships in a 3D scene, a bracket or icon at screen
+scale over every model at world scale, which is what bodies-as-meshes
+already plans. The owner's target is Highfleet's feel with more room.
+Sound is missing entirely and the game feels flat for it: an engine
+question first, whether Mirage has an audio path, verified from the
+engine tree before any sound unit is briefed.
 
 ## Measured this session, each needing a unit or a ruling
 
@@ -1436,3 +1485,8 @@ works around a gap.
   rings them about the asteroid; no orbit, offset or frame for a
   structure, ever (owner, 2026-09-08).
 - A draft pick places the reserve structure at once (owner, 2026-09-08).
+- Everything rebuilds on death (owner, 2026-09-10): a want is a standing
+  order, the sim never edits it, and no pattern is "once". The drain
+  into a losing fight is made visible by build-and-fly's marks and
+  stopped by one edit at the front; if play still hides it, the fix is
+  a reading that names the rock eating the stock, never a rule.

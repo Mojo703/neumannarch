@@ -56,11 +56,18 @@ pub struct EntityView {
     pub standing: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Flight {
+    UnderWay,
+    Building,
+    Previewed,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlightLine {
     pub from: Vec3,
     pub to: Vec3,
-    pub previewed: bool,
+    pub flight: Flight,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,8 +106,19 @@ pub enum Entry {
     Present(u32),
     Surplus(u32),
     Building(Building),
-    Arriving { count: u32, from: AsteroidId },
-    Wanted { count: u32, dashed: bool },
+    BuildingElsewhere(Building),
+    BuildingFor {
+        building: Building,
+        wanted_at: AsteroidId,
+    },
+    Arriving {
+        count: u32,
+        from: AsteroidId,
+    },
+    Wanted {
+        count: u32,
+        dashed: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -282,7 +300,9 @@ impl Entry {
     pub fn fill(self) -> Fill {
         match self {
             Entry::Present(_) => Fill::Solid,
-            Entry::Building(building) => Fill::Filling(building.progress as f32),
+            Entry::Building(building)
+            | Entry::BuildingElsewhere(building)
+            | Entry::BuildingFor { building, .. } => Fill::Filling(building.progress as f32),
             Entry::Surplus(_) | Entry::Arriving { .. } => Fill::Hollow,
             Entry::Wanted { dashed: false, .. } => Fill::Hollow,
             Entry::Wanted { dashed: true, .. } => Fill::Dashed,
@@ -300,7 +320,7 @@ impl Entry {
             | Entry::Surplus(count)
             | Entry::Arriving { count, .. }
             | Entry::Wanted { count, .. } => Some(count),
-            Entry::Building(_) => None,
+            Entry::Building(_) | Entry::BuildingElsewhere(_) | Entry::BuildingFor { .. } => None,
         }
     }
 
@@ -316,6 +336,12 @@ impl Entry {
                 label::material(material).to_ascii_lowercase()
             ),
             Entry::Building(_) => format!("{name} building"),
+            Entry::BuildingElsewhere(building) => {
+                format!("{name} building at {}", asteroid_name(building.built_at))
+            }
+            Entry::BuildingFor { wanted_at, .. } => {
+                format!("{name} for {}", asteroid_name(wanted_at))
+            }
             Entry::Arriving { from, .. } => format!("{name} arriving from {}", asteroid_name(from)),
             Entry::Wanted { dashed: true, .. } => format!("No builder for {name}"),
             Entry::Wanted { dashed: false, .. } => format!("{name} wanted"),
@@ -399,7 +425,10 @@ impl Sectors {
                 .entry(posting.pattern())
                 .or_default();
             if let Some(building) = plan.building {
-                entries.push(shown(Entry::Building(building)));
+                entries.push(shown(match building.built_at == posting.asteroid() {
+                    true => Entry::Building(building),
+                    false => Entry::BuildingElsewhere(building),
+                }));
             }
             let short = plan
                 .want
@@ -407,10 +436,28 @@ impl Sectors {
             if short > 0 {
                 entries.push(shown(Entry::Wanted {
                     count: short,
-                    dashed: !builds_at(view, posting.post()),
+                    dashed: dashed(view, *posting),
                 }));
             }
             entries.sort_by_key(order);
+        }
+        for (posting, building) in built_elsewhere(view) {
+            if !asked.contains(&building.built_at) {
+                continue;
+            }
+            let yard = patterns
+                .entry(Post {
+                    asteroid: building.built_at,
+                    seat: posting.seat(),
+                })
+                .or_default()
+                .entry(posting.pattern())
+                .or_default();
+            yard.push(shown(Entry::BuildingFor {
+                building,
+                wanted_at: posting.asteroid(),
+            }));
+            yard.sort_by_key(order);
         }
         let arcs: BTreeMap<Post, Arc> = fights
             .iter()
@@ -460,7 +507,7 @@ impl Sectors {
                 arriving.push(Shown {
                     entry: Entry::Wanted {
                         count: filling.to_build,
-                        dashed: !builds_at(view, posting.post()),
+                        dashed: dashed(view, *posting),
                     },
                     previewed: true,
                 });
@@ -515,9 +562,10 @@ fn order(shown: &Shown) -> u8 {
     match shown.entry {
         Entry::Present(_) => 0,
         Entry::Surplus(_) => 1,
-        Entry::Building(_) => 2,
+        Entry::Building(_) | Entry::BuildingElsewhere(_) => 2,
         Entry::Arriving { .. } => 3,
         Entry::Wanted { .. } => 4,
+        Entry::BuildingFor { .. } => 5,
     }
 }
 
@@ -570,10 +618,23 @@ fn covered(view: &View, posting: Posting) -> u32 {
         .map_or(0, |held| held.present + held.arriving)
 }
 
+fn dashed(view: &View, posting: Posting) -> bool {
+    match posting.pattern().kind() {
+        Kind::Structure => !builds_at(view, posting.post()),
+        Kind::Unit => !builds_anywhere(view, posting.seat()),
+    }
+}
+
 fn builds_at(view: &View, post: Post) -> bool {
     view.compositions
         .get(&post)
         .is_some_and(|composition| composition.builder)
+}
+
+fn builds_anywhere(view: &View, seat: SeatId) -> bool {
+    view.compositions
+        .iter()
+        .any(|(post, composition)| post.seat == seat && composition.builder)
 }
 
 fn flight_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> {
@@ -585,10 +646,27 @@ fn flight_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> 
             Some(FlightLine {
                 from: present.body.pos,
                 to: view.asteroid_body(present.home)?.pos,
-                previewed: false,
+                flight: Flight::UnderWay,
             })
         });
-    flying.chain(previewed_lines(view, gesture)).collect()
+    flying
+        .chain(building_lines(view))
+        .chain(previewed_lines(view, gesture))
+        .collect()
+}
+
+fn building_lines(view: &View) -> Vec<FlightLine> {
+    let apart: BTreeSet<(AsteroidId, AsteroidId)> = built_elsewhere(view)
+        .map(|(posting, building)| (building.built_at, posting.asteroid()))
+        .collect();
+    lines_between(view, apart, Flight::Building)
+}
+
+fn built_elsewhere(view: &View) -> impl Iterator<Item = (Posting, Building)> {
+    view.plans.iter().filter_map(|(posting, plan)| {
+        let building = plan.building?;
+        (building.built_at != posting.asteroid()).then_some((*posting, building))
+    })
 }
 
 fn previewed_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLine> {
@@ -605,13 +683,21 @@ fn previewed_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLin
                 .map(move |source| (*source, posting.asteroid()))
         })
         .collect();
+    lines_between(view, apart, Flight::Previewed)
+}
+
+fn lines_between(
+    view: &View,
+    apart: BTreeSet<(AsteroidId, AsteroidId)>,
+    flight: Flight,
+) -> Vec<FlightLine> {
     apart
         .into_iter()
         .filter_map(|(source, destination)| {
             Some(FlightLine {
                 from: view.asteroid_body(source)?.pos,
                 to: view.asteroid_body(destination)?.pos,
-                previewed: true,
+                flight,
             })
         })
         .collect()
@@ -803,10 +889,10 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_fills_where_a_builder_stands_and_a_want_is_dashed_where_none_does() {
+    fn a_frame_fills_where_a_builder_stands_and_a_structure_is_dashed_where_none_does() {
         let mut local = Local::start(2);
         local.want(&[(at(0), P::Shipyard, 1)]);
-        local.want(&[(at(0), P::Storage, 1), (at(5), P::Frigate, 2)]);
+        local.want(&[(at(0), P::Storage, 1), (at(5), P::Storage, 2)]);
         local.run(60);
         let scene = scene(&local);
 
@@ -816,17 +902,88 @@ mod tests {
         assert!(matches!(built[0].entry.fill(), Fill::Filling(progress) if progress > 0.0));
         assert_eq!(built[0].entry.count(), None, "a frame carries no count");
 
-        let unbuilt = entries(&scene, at(5), PLAYER, P::Frigate);
+        let unbuilt = entries(&scene, at(5), PLAYER, P::Storage);
         assert_eq!(
             unbuilt[1].entry,
             Entry::Wanted {
                 count: 1,
                 dashed: true
             },
-            "no builder stands at the far asteroid"
+            "a structure is built where it is posted, and no builder stands there"
         );
         assert_eq!(unbuilt[1].entry.fill(), Fill::Dashed);
-        assert_eq!(unbuilt[1].entry.phrase("Frigate"), "No builder for Frigate");
+        assert_eq!(unbuilt[1].entry.phrase("Storage"), "No builder for Storage");
+    }
+
+    #[test]
+    fn a_unit_wanted_where_no_builder_stands_builds_at_the_yard_and_both_wheels_say_so() {
+        let mut local = Local::start(2);
+        local.want(&[(at(0), P::Shipyard, 1)]);
+        local.want(&[(at(5), P::Frigate, 1)]);
+        local.run(60);
+        let scene = scene(&local);
+
+        let wanting = entries(&scene, at(5), PLAYER, P::Frigate);
+        assert_eq!(wanting.len(), 1, "the frame covers the want");
+        let Entry::BuildingElsewhere(building) = wanting[0].entry else {
+            panic!("the frame for {:?} builds at the yard: {wanting:?}", at(5));
+        };
+        assert_eq!(building.built_at, at(0));
+        assert!(matches!(wanting[0].entry.fill(), Fill::Filling(progress) if progress > 0.0));
+        assert_eq!(
+            wanting[0].entry.phrase("Frigate"),
+            "Frigate building at Asteroid 1"
+        );
+
+        let coming = scene
+            .flights
+            .iter()
+            .find(|flight| flight.flight == Flight::Building)
+            .expect("the flight the frame is building draws its own line");
+        assert_eq!(
+            (coming.from, coming.to),
+            (
+                local.view().asteroid_body(at(0)).expect("the yard").pos,
+                local.view().asteroid_body(at(5)).expect("the front").pos
+            ),
+            "the line runs from the yard to the asteroid that wants the unit"
+        );
+
+        let yard = entries(&scene, at(0), PLAYER, P::Frigate);
+        assert_eq!(
+            yard,
+            vec![shown(Entry::BuildingFor {
+                building,
+                wanted_at: at(5)
+            })],
+            "the yard carries the frame it builds for the far asteroid"
+        );
+        assert_eq!(yard[0].entry.phrase("Frigate"), "Frigate for Asteroid 6");
+        assert_eq!(yard[0].entry.count(), None, "a frame carries no count");
+    }
+
+    #[test]
+    fn a_unit_wanted_where_the_seat_builds_nowhere_waits_dashed() {
+        let mut local = Local::start(2);
+        local.want(&[(at(5), P::Frigate, 2)]);
+        local.run(60);
+
+        let waiting = entries(&scene(&local), at(5), PLAYER, P::Frigate);
+
+        let Entry::Building(building) = waiting[0].entry else {
+            panic!("the frame waits at the asteroid that wants it: {waiting:?}");
+        };
+        assert_eq!(building.built_at, at(5));
+        assert_eq!(building.progress, 0.0, "nothing builds it");
+        assert_eq!(
+            waiting[1].entry,
+            Entry::Wanted {
+                count: 1,
+                dashed: true
+            },
+            "no builder of the seat stands anywhere"
+        );
+        assert_eq!(waiting[1].entry.phrase("Frigate"), "No builder for Frigate");
     }
 
     #[test]
@@ -1074,7 +1231,7 @@ mod tests {
         let line = scene
             .flights
             .iter()
-            .find(|flight| flight.previewed)
+            .find(|flight| flight.flight == Flight::Previewed)
             .expect("the drag draws its own flight line");
         assert_eq!(
             line.to,

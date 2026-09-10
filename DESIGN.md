@@ -234,9 +234,15 @@ sets one count.
   scrapped or refunded; a structure stays until it is destroyed.
 - **Shortfall.** When a place wants more of a pattern than it has, counting
   units there and in transit and never frames, and neither the reserve nor
-  a surplus of that pattern anywhere can fill it, frames open at that place for
-  builders at that asteroid to fill, one frame of a pattern at a time; patterns build
-  in parallel.
+  a surplus of that pattern anywhere can fill it, a frame opens, one frame of
+  a pattern at a time with patterns building in parallel: for a structure, at
+  that place, for its builders to fill; for a unit, at the asteroid of the seat
+  where it would arrive soonest, counting the flight and how long its builders
+  take with the frames they already build, the asteroid chosen once, when the
+  frame opens, and the finished unit flies to the place that wants it. Where
+  the seat has no builder anywhere the frame opens at the place and waits. A
+  unit's frame whose asteroid loses the seat's last builder moves to the
+  asteroid where it would now arrive soonest and keeps its progress.
 - A unit's home changes only by the surplus rule.
 - A composition with no want, no units, and no frames does not exist.
 

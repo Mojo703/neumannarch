@@ -209,10 +209,27 @@ impl<'a> Survey<'a> {
         self.threats.get(&asteroid).copied().unwrap_or_default()
     }
 
+    pub fn builds_anywhere(&self) -> bool {
+        self.mine.keys().any(|asteroid| self.builds_at(*asteroid))
+    }
+
+    pub fn builder_fills(&self, posting: Posting) -> bool {
+        match posting.pattern().kind() {
+            Kind::Structure => self.builds_at(posting.asteroid()),
+            Kind::Unit => self.builds_anywhere(),
+        }
+    }
+
     pub fn frame_open(&self, asteroid: AsteroidId, pattern: EntityPattern) -> bool {
+        self.frame_built_at(self.posting(asteroid, pattern))
+            .is_some()
+    }
+
+    pub fn frame_built_at(&self, posting: Posting) -> Option<AsteroidId> {
         self.view
-            .plan_of(self.posting(asteroid, pattern))
-            .is_some_and(|plan| plan.building.is_some())
+            .plan_of(posting)
+            .and_then(|plan| plan.building)
+            .map(|building| building.built_at)
     }
 
     pub fn short_of(&self, asteroid: AsteroidId, patterns: &[EntityPattern]) -> bool {
@@ -221,9 +238,14 @@ impl<'a> Survey<'a> {
             .any(|pattern| self.want(asteroid, *pattern) > self.count(asteroid, *pattern))
     }
 
+    pub fn frame_a_builder_fills(&self, posting: Posting) -> bool {
+        self.frame_built_at(posting)
+            .is_some_and(|yard| self.builds_at(yard))
+    }
+
     pub fn frame_no_builder_fills(&self, posting: Posting) -> bool {
-        self.frame_open(posting.asteroid(), posting.pattern())
-            && !self.builds_at(posting.asteroid())
+        self.frame_built_at(posting)
+            .is_some_and(|yard| !self.builds_at(yard))
     }
 
     pub fn spare_cap_at(&self, asteroid: AsteroidId, material: Material) -> f64 {

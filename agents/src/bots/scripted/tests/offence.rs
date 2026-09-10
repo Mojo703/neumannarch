@@ -52,20 +52,24 @@ fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32
 
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
-fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds() {
+fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_it_holds_or_builds_at() {
     let personality = Personality::expand();
     let fixture = Fixture::drafted([Some(personality.clone()), None]);
     let view = fixture.view(0);
     let survey = surveyed(&view);
-    let building = survey.building();
+    let force = survey.developed();
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
 
     assert!(
-        building.len() > 1,
-        "the fixture builds at one asteroid, so nothing tells a spread ask from a single one"
+        force.len() > 1,
+        "the fixture holds one asteroid, so nothing tells a spread ask from a single one"
     );
-    for asteroid in &building {
+    assert!(
+        force.contains(&survey.staging().expect("the seat stages somewhere")),
+        "the force it musters stands away from where it stages"
+    );
+    for asteroid in &force {
         assert_eq!(
             survey.damage_value(*asteroid),
             0.0,
@@ -84,8 +88,8 @@ fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds
     assert!(
         proposals
             .iter()
-            .all(|proposal| building.contains(&proposal.posting.asteroid())),
-        "it asked for a unit at an asteroid no builder of its own stands at"
+            .all(|proposal| force.contains(&proposal.posting.asteroid())),
+        "it asked for a unit at an asteroid it neither holds nor builds at"
     );
 }
 

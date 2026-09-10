@@ -29,7 +29,11 @@ impl<'a> Construction<'a> {
     pub(crate) fn of(state: &'a State, rolls: &'a Rolls<'a>) -> Construction<'a> {
         let mut frames: BTreeMap<Post, Vec<usize>> = BTreeMap::new();
         for (at, frame) in state.frames().iter().enumerate() {
-            frames.entry(frame.post()).or_default().push(at);
+            let built_at = Post {
+                asteroid: frame.built_at(),
+                seat: frame.post().seat,
+            };
+            frames.entry(built_at).or_default().push(at);
         }
         Construction {
             state,

@@ -67,25 +67,33 @@ fn a_proposal_is_funded_whole_or_not_at_all_until_the_budget_is_spent() {
 
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
-fn a_proposal_is_refused_where_no_builder_of_the_seat_stands() {
+fn a_structure_is_refused_where_no_builder_of_the_seat_stands_and_a_unit_is_not() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
     let survey = surveyed(&view);
     let free = fixture.free(1)[0];
-
-    let wants = Funding::over(
-        &survey,
-        &[Proposal {
-            posting: survey.posting(free, P::Frigate),
-            count: 1,
-            reason: Reason::Offence,
-        }],
+    assert!(
+        !survey.builds_at(free),
+        "a builder of the seat reached {free:?}"
     );
+    assert!(survey.builds_anywhere(), "the seat builds nowhere at all");
+
+    let asking = |pattern| Proposal {
+        posting: survey.posting(free, pattern),
+        count: 1,
+        reason: Reason::Offence,
+    };
+    let wants = Funding::over(&survey, &[asking(P::Storage), asking(P::Frigate)]);
 
     assert_eq!(
-        wants.get(&survey.posting(free, P::Frigate)),
+        wants.get(&survey.posting(free, P::Storage)),
         None,
-        "nothing is built at an asteroid the seat does not build at"
+        "a structure stands where it is posted, so nothing builds it there"
+    );
+    assert_eq!(
+        wants.get(&survey.posting(free, P::Frigate)),
+        Some(&1),
+        "a yard of the seat builds the unit and it flies to {free:?}"
     );
 }
 
@@ -122,9 +130,10 @@ fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
     let view = fixture.view(0);
     let survey = surveyed(&view);
     let posting = survey.posting(free, P::Frigate);
-    assert!(
-        survey.frame_open(free, P::Frigate),
-        "no frame stands at {free:?} to fund"
+    assert_eq!(
+        survey.frame_built_at(posting),
+        Some(free),
+        "the frame waits at the asteroid that wants it, the seat building nowhere"
     );
     assert!(!survey.builds_at(free), "a builder reached {free:?}");
 
@@ -146,14 +155,15 @@ fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
 
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
-fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
+fn a_frame_the_yard_fills_keeps_the_want_at_the_asteroid_that_wants_it() {
     let (fixture, home, away) = a_frigate_flown_where_no_builder_of_its_seat_stands();
     let view = fixture.view(0);
     let survey = surveyed(&view);
     let posting = survey.posting(away, P::Frigate);
-    assert!(
-        survey.frame_open(away, P::Frigate),
-        "no frame stands at {away:?} to leave anything behind"
+    assert_eq!(
+        survey.frame_built_at(posting),
+        Some(home),
+        "the frame for {away:?} does not build at the seat's yard"
     );
     assert!(
         !survey.builds_at(away),
@@ -183,7 +193,7 @@ fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
 
     assert_eq!(
         wants.get(&posting),
-        None,
-        "it kept wanting at {away:?}, where nothing of its own can build"
+        Some(&2),
+        "it dropped the want at {away:?}, which its yard at {home:?} is filling"
     );
 }

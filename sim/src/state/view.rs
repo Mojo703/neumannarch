@@ -42,6 +42,7 @@ pub struct Terrain {
 pub struct Building {
     pub progress: f64,
     pub starved_of: Option<Material>,
+    pub built_at: AsteroidId,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -200,6 +201,7 @@ fn building(state: &State, frame: &Frame) -> Building {
     Building {
         progress: frame.fraction(),
         starved_of: frame.starved_material(state.time()),
+        built_at: frame.built_at(),
     }
 }
 

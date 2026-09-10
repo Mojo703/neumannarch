@@ -140,7 +140,7 @@ impl Offence {
     fn arming(survey: &Survey, weights: &[(EntityPattern, f64)]) -> Vec<Proposal> {
         let yielding = yields_on_completion();
         survey
-            .building()
+            .developed()
             .into_iter()
             .flat_map(|asteroid| match survey.short_of(asteroid, &yielding) {
                 true => Offence::keeping_at(survey, weights, asteroid),

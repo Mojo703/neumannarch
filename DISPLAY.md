@@ -87,7 +87,14 @@ lines, left to right:
   progress, and a frame that spent nothing this second for want of a
   material carries a belt along the box's base in that material's hue:
   metals, volatiles or energy, three fixed hues named in the game crate.
-  A dashed mark when no builder is at the asteroid.
+  A dashed mark when no builder is at the asteroid. A frame building
+  elsewhere for here is the arriving arrow drawn hollow and filling from
+  its base with the frame's progress, so one unit reads hollow mark,
+  filling arrow, full arrow in flight, dot; hovering it says where it
+  builds. A section at the asteroid that builds for elsewhere carries one
+  more line after its wanted line, a box per frame filling with progress
+  and bearing the arrow pointing away from the asteroid; hovering a box
+  says which asteroid its unit is for.
 
 Sections stand in a fixed order down the column, structures first and
 then units, each by cost. A section is drawn only where the pattern can be
@@ -276,7 +283,9 @@ ahead running to its destination where it is now, so the line and the
 asteroid it points at move together and never come apart. The line is
 faint at the ship and full at the destination, and
 its dashes roll toward the destination, so its direction reads from a
-still frame and from motion alike. Arrival moves the glyph
+still frame and from motion alike. A unit building at one asteroid for
+another carries the same line, fainter, from the asteroid it builds at
+to the asteroid that wants it, until it flies. Arrival moves the glyph
 from the ship into the wheel's present count.
 
 ## Editing: the wheel's buttons

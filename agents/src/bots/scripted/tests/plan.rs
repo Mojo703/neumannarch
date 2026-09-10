@@ -42,7 +42,7 @@ fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
 
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
-fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at() {
+fn a_decision_asks_for_nothing_no_builder_of_the_seat_can_build() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
     let survey = surveyed(&view);
@@ -56,10 +56,10 @@ fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at()
 
     assert!(
         plan.wants
-            .keys()
-            .all(|posting| survey.builds_at(posting.asteroid())
-                || survey.count(posting.asteroid(), posting.pattern()) > 0),
-        "it wants {:?} where nothing of its own stands or builds",
+            .iter()
+            .all(|(posting, count)| survey.builder_fills(*posting)
+                || *count <= survey.count(posting.asteroid(), posting.pattern())),
+        "it wants {:?} above what stands there, where no builder of its own can build it",
         plan.wants
     );
 }

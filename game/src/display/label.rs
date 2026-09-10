@@ -99,25 +99,23 @@ mod tests {
     fn every_string() -> Vec<String> {
         let name = titled(EntityPattern::Frigate.name());
         let screen = LobbyScreen::of(Lobby::skirmish(PlayerId::HOST), PlayerId::HOST);
+        let building = |starved_of| Building {
+            progress: 0.5,
+            starved_of,
+            built_at: AsteroidId(2),
+        };
         let entries = [
             Entry::Present(2),
             Entry::Surplus(1),
-            Entry::Building(Building {
-                progress: 0.5,
-                starved_of: None,
-            }),
-            Entry::Building(Building {
-                progress: 0.5,
-                starved_of: Some(Material::Metals),
-            }),
-            Entry::Building(Building {
-                progress: 0.5,
-                starved_of: Some(Material::Volatiles),
-            }),
-            Entry::Building(Building {
-                progress: 0.5,
-                starved_of: Some(Material::Energy),
-            }),
+            Entry::Building(building(None)),
+            Entry::Building(building(Some(Material::Metals))),
+            Entry::Building(building(Some(Material::Volatiles))),
+            Entry::Building(building(Some(Material::Energy))),
+            Entry::BuildingElsewhere(building(None)),
+            Entry::BuildingFor {
+                building: building(None),
+                wanted_at: AsteroidId(7),
+            },
             Entry::Arriving {
                 count: 3,
                 from: AsteroidId(2),

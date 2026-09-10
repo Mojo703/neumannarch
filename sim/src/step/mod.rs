@@ -93,6 +93,11 @@ fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<u
         next[cancellation.posting.seat()].refund(cancellation.refund());
         closing.push(cancellation.frame);
     }
+    for (at, yard) in &filled.rebuilt_at {
+        if let Some(frame) = next.frame_mut(*at) {
+            frame.rebuild_at(*yard);
+        }
+    }
 }
 
 fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usize>) {
@@ -108,7 +113,7 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
             }
         }
         if spend.completed {
-            next.spawn_at(frame.post(), frame.pattern(), snap.ran());
+            next.spawn_built(frame, snap.ran());
             closing.push(spend.frame);
         }
     }
@@ -176,7 +181,7 @@ mod tests {
     use crate::pattern::EntityPattern as P;
     use crate::post::Post;
     use crate::posting::Posting;
-    use crate::state::{Entity, MAX_WANT, Ready, Seat};
+    use crate::state::{Entity, Frame, MAX_WANT, Ready, Seat};
     use crate::time::Time;
     use crate::transfer::Transfer;
     use crate::{Materials, TICKS_PER_SECOND};
@@ -278,6 +283,113 @@ mod tests {
             world.progress(0, asteroid(5)),
             0.0,
             "a builder reached a frame an asteroid away"
+        );
+    }
+
+    #[test]
+    fn a_unit_wanted_where_it_arrives_later_than_a_far_yard_delivers_is_built_at_the_yard_and_flies()
+     {
+        let mut world = World::ring(Gravity::new(4.0e13), 3, &[TeamId(0)]);
+        world.fix(0, P::Shipyard, asteroid(0));
+        world.fix(0, P::Constructor, asteroid(1));
+        world.run(1);
+        world.state[SeatId(0)]
+            .stockpile_mut()
+            .add(Materials::new(400.0, 400.0, 400.0));
+
+        world.tick(&[Issued::want(0, asteroid(1), P::Raider, 1)]);
+        world.tick(&[Issued::want(0, asteroid(2), P::Storage, 1)]);
+
+        let built_at = |post: AsteroidId| {
+            world
+                .state
+                .frames()
+                .iter()
+                .find(|frame| frame.post().asteroid == post)
+                .map(Frame::built_at)
+        };
+        assert_eq!(
+            built_at(asteroid(1)),
+            Some(asteroid(0)),
+            "the raider builds at the constructor beside it, not at the yard that delivers sooner"
+        );
+        assert_eq!(
+            built_at(asteroid(2)),
+            Some(asteroid(2)),
+            "a structure is built anywhere but where it stands"
+        );
+
+        for _ in 0..60 * TICKS_PER_SECOND {
+            if world.count(0, asteroid(1), P::Raider) == 1 {
+                break;
+            }
+            world.run(1);
+        }
+        let raider = world
+            .state
+            .entities()
+            .find(|entity| entity.pattern() == P::Raider)
+            .expect("the raider was built");
+        assert_eq!(
+            raider.home(),
+            asteroid(1),
+            "it is homed where it was wanted"
+        );
+        assert!(
+            raider.is_flying(),
+            "it stands at the yard instead of flying"
+        );
+        assert!(
+            world.off_asteroid(raider.id(), asteroid(0)) < Belt::ZONE_RADIUS_METERS,
+            "it was not built at the yard"
+        );
+
+        let id = raider.id();
+        for _ in 0..120 * TICKS_PER_SECOND {
+            if !world.state.entity(id).is_flying() {
+                break;
+            }
+            world.run(1);
+        }
+        assert_eq!(
+            world.state.entity(id).standing(),
+            Some(asteroid(1)),
+            "it never arrived where it was wanted"
+        );
+    }
+
+    #[test]
+    fn a_frame_whose_yard_loses_its_last_builder_moves_to_the_next_yard_and_keeps_its_progress() {
+        let mut world = World::ring(Gravity::new(4.0e13), 3, &[TeamId(0)]);
+        let yard = world.fix(0, P::Shipyard, asteroid(0));
+        world.run(1);
+        world.state[SeatId(0)]
+            .stockpile_mut()
+            .add(Materials::new(400.0, 400.0, 400.0));
+        world.tick(&[Issued::want(0, asteroid(2), P::Raider, 1)]);
+        world.run(TICKS_PER_SECOND as u64);
+        let frame_at = |world: &World| {
+            world
+                .state
+                .frames()
+                .iter()
+                .find(|frame| frame.post().asteroid == asteroid(2))
+                .map(|frame| (frame.built_at(), frame.progress()))
+                .expect("the raider's frame")
+        };
+        let (built_at, progress) = frame_at(&world);
+        assert_eq!(built_at, asteroid(0));
+        assert!(progress > 0.0, "the yard built nothing in a second");
+
+        world.fix(0, P::Constructor, asteroid(1));
+        world.state.entities.hurt(yard, f64::MAX);
+        world.run(2);
+
+        let (moved_to, kept) = frame_at(&world);
+        assert_eq!(moved_to, asteroid(1), "the frame stayed at the dead yard");
+        assert!(
+            kept >= progress,
+            "the frame lost progress, {kept} from {progress}"
         );
     }
 

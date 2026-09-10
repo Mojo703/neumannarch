@@ -11,7 +11,7 @@ use neumannarch_game::display::fights::Fights;
 use neumannarch_game::display::glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
-    Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, FlightLine, PatternView, Scene,
+    Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, Flight, FlightLine, PatternView, Scene,
     SectorView, Shown, StockpileBarView, WheelButton, WheelGesture, WheelView,
 };
 use neumannarch_game::display::stockpile_bar::StockpileBar;
@@ -45,6 +45,10 @@ const YOU: SeatId = SeatId(0);
 
 const TAKEN: AsteroidId = AsteroidId(0);
 
+const YARD: AsteroidId = AsteroidId(0);
+
+const FRONT: AsteroidId = AsteroidId(1);
+
 const HOME: Vec3 = Vec3::new(20_000.0, 0.0, 0.0);
 
 const PROGRADE: Vec3 = Vec3::new(0.0, 0.0, -1.0);
@@ -64,26 +68,29 @@ fn main() {
     let watched = Watched::wanting();
     let belt = belt_scene();
     let framing_the_belt = BeltCamera::framing(belt.belt_inner_radius, belt.belt_outer_radius);
-    for (name, scene, camera) in [
+    for (name, scene, camera, pointed) in [
         (
             "region",
             on_the_ring(region_scene(&watched)),
             region_camera(),
+            None,
         ),
-        ("fight", fight_scene(), fight_camera()),
+        ("fight", fight_scene(), fight_camera(), None),
         (
             "stockpile",
             on_the_ring(stockpile_scene()),
             stockpile_camera(),
+            None,
         ),
-        ("belt", belt, framing_the_belt),
+        ("yard", on_the_ring(yard_scene()), yard_camera(), Some(YARD)),
+        ("belt", belt, framing_the_belt, None),
     ] {
-        let pixels = render(scene, camera, None, watched.clone());
+        let pixels = render(scene, camera, None, watched.clone(), pointed);
         save(&out.join(format!("{name}.png")), &pixels);
     }
     let (scene, drafting, watched) = draft_scene();
     let camera = draft_camera(&scene, drafting.bare);
-    let pixels = render(scene, camera, Some(drafting), watched);
+    let pixels = render(scene, camera, Some(drafting), watched, None);
     save(&out.join("draft.png"), &pixels);
 }
 
@@ -140,6 +147,7 @@ struct Looker {
     camera: BeltCamera,
     drafting: Option<Drafting>,
     watched: Watched,
+    pointed: Option<AsteroidId>,
 }
 
 impl Game for Looker {
@@ -163,7 +171,20 @@ impl Game for Looker {
         let bar = scene
             .stockpile_bar
             .map(|view| StockpileBar::across(over, view));
-        let wheels = Wheels::over(scene, &viewport, &aim(scene, &self.watched), &mut Still);
+        let pointer = self.pointed.and_then(|asteroid| {
+            let at = scene
+                .asteroids
+                .iter()
+                .find(|drawn| drawn.id == asteroid)?
+                .pos;
+            viewport.point_of(at)
+        });
+        let wheels = Wheels::over(
+            scene,
+            &viewport,
+            &aim(scene, &self.watched, pointer),
+            &mut Still,
+        );
         let order = self.drafting.as_ref().map(|drafting| {
             Order::over(
                 over,
@@ -207,10 +228,10 @@ impl Game for Looker {
     }
 }
 
-fn aim<'a>(scene: &Scene, watched: &'a Watched) -> Aim<'a> {
+fn aim<'a>(scene: &Scene, watched: &'a Watched, pointer: Option<egui::Pos2>) -> Aim<'a> {
     Aim {
         viewer: scene.seat,
-        pointer: None,
+        pointer,
         hovered: None,
         step: 1,
         view: &watched.view,
@@ -223,6 +244,7 @@ fn render(
     camera: BeltCamera,
     drafting: Option<Drafting>,
     watched: Watched,
+    pointed: Option<AsteroidId>,
 ) -> Vec<u8> {
     let mut session = Session::<Looker>::new(
         Config::new("neumannarch-look").with_tick_interval(neumannarch_sim::TICK),
@@ -233,6 +255,7 @@ fn render(
                 camera,
                 drafting,
                 watched,
+                pointed,
             })
         },
     )
@@ -375,6 +398,7 @@ fn region_scene(watched: &Watched) -> Scene {
                             Entry::Building(Building {
                                 progress: 0.45,
                                 starved_of: Some(Material::Metals),
+                                built_at: AsteroidId(1),
                             }),
                             Entry::Wanted {
                                 count: 1,
@@ -410,7 +434,7 @@ fn region_scene(watched: &Watched) -> Scene {
         flights: vec![FlightLine {
             from: Vec3::new(-90.0, 0.0, 80.0),
             to: Vec3::new(-280.0, 0.0, 220.0),
-            previewed: false,
+            flight: Flight::UnderWay,
         }],
         stockpile_bar: None,
         zone: ZONE,
@@ -526,6 +550,96 @@ fn fight_camera() -> BeltCamera {
     )
 }
 
+fn yard_scene() -> Scene {
+    let asteroids = vec![
+        asteroid(YARD.0, Vec3::new(-100.0, 0.0, 0.0), 6.0),
+        asteroid(FRONT.0, Vec3::new(100.0, 0.0, 40.0), 5.0),
+    ];
+
+    let entities = vec![
+        ship(0, P::Shipyard, Vec3::new(-100.0, 0.0, -6.0)),
+        ship(0, METALS_EXTRACTOR, Vec3::new(-105.0, 0.0, 4.0)),
+        ship(0, P::Frigate, Vec3::new(104.0, 0.0, 44.0)),
+        ship(0, P::Frigate, Vec3::new(96.0, 0.0, 36.0)),
+    ];
+
+    let building = Building {
+        progress: 0.55,
+        starved_of: None,
+        built_at: YARD,
+    };
+    let wheels = vec![
+        wheel(
+            YARD.0,
+            vec![sector(
+                0,
+                vec![
+                    strip(P::Shipyard, vec![Entry::Present(1)]),
+                    strip(METALS_EXTRACTOR, vec![Entry::Present(1)]),
+                    strip(
+                        P::Raider,
+                        vec![Entry::BuildingFor {
+                            building,
+                            wanted_at: FRONT,
+                        }],
+                    ),
+                ],
+                None,
+            )],
+        ),
+        wheel(
+            FRONT.0,
+            vec![sector(
+                0,
+                vec![
+                    strip(P::Frigate, vec![Entry::Present(2)]),
+                    strip(
+                        P::Raider,
+                        vec![
+                            Entry::BuildingElsewhere(building),
+                            Entry::Wanted {
+                                count: 1,
+                                dashed: false,
+                            },
+                        ],
+                    ),
+                ],
+                None,
+            )],
+        ),
+    ];
+
+    Scene {
+        asteroids,
+        entities,
+        wheels,
+        fights: BTreeMap::new(),
+        flights: vec![FlightLine {
+            from: Vec3::new(-100.0, 0.0, 0.0),
+            to: Vec3::new(100.0, 0.0, 40.0),
+            flight: Flight::Building,
+        }],
+        stockpile_bar: None,
+        zone: ZONE,
+        star_radius: Belt::STAR_RADIUS_METERS,
+        star_light_range: Belt::STAR_LIGHT_RANGE_METERS,
+        belt_inner_radius: Belt::inner_radius_meters(),
+        belt_outer_radius: Belt::OUTER_RADIUS_METERS,
+        seat: SeatId(0),
+        selection: Some(FRONT),
+        gesture: None,
+    }
+}
+
+fn yard_camera() -> BeltCamera {
+    BeltCamera::new(
+        HOME + Vec3::new(40.0, 0.0, 0.0),
+        620.0,
+        Belt::inner_radius_meters(),
+        Belt::OUTER_RADIUS_METERS,
+    )
+}
+
 fn stockpile_scene() -> Scene {
     let mut mined = asteroid(0, Vec3::ZERO, 6.0);
     mined.caps = Materials::new(20.0, 8.0, 12.0);
@@ -558,6 +672,7 @@ fn stockpile_scene() -> Scene {
                         Entry::Building(Building {
                             progress: 0.3,
                             starved_of: Some(Material::Volatiles),
+                            built_at: AsteroidId(0),
                         }),
                         Entry::Wanted {
                             count: 2,

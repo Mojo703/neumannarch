@@ -315,6 +315,20 @@ impl State {
         self.spawn(post.seat, pattern, post.asteroid, motion);
     }
 
+    pub(crate) fn spawn_built(&mut self, frame: &Frame, ran: Time) {
+        let post = frame.post();
+        let built_at = frame.built_at();
+        if !frame.built_elsewhere() {
+            self.spawn_at(post, frame.pattern(), ran);
+            return;
+        }
+        let motion = Motion::Steered {
+            body: self.spawn_body(built_at, self.time().after(ran)),
+        };
+        let id = self.spawn(post.seat, frame.pattern(), built_at, motion);
+        self.re_home(&BTreeMap::from([(id, post.asteroid)]));
+    }
+
     pub(crate) fn spawn_body(&self, asteroid: AsteroidId, at: Time) -> Body {
         let home = self[asteroid].orbit().at(at, self.gravity());
         let already = self
