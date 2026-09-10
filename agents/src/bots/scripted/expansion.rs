@@ -1,4 +1,5 @@
 use neumannarch_sim::AsteroidId;
+use neumannarch_sim::pattern::EntityPattern;
 
 use super::commitments::Commitments;
 use super::dice::Dice;
@@ -18,15 +19,13 @@ impl Expansion {
         commitments: &mut Commitments,
         dice: &mut Dice,
     ) -> Vec<Proposal> {
-        let Some(row) = survey.roles.masons.first().copied() else {
-            return Vec::new();
-        };
+        let pattern = EntityPattern::Constructor;
         let mut proposals: Vec<Proposal> = commitments
             .claimed_asteroids()
             .into_iter()
             .map(|asteroid| {
-                let homed = survey.count(asteroid, row).max(1);
-                Proposal::at(survey, Reason::Expansion, asteroid, row, homed)
+                let homed = survey.count(asteroid, pattern).max(1);
+                Proposal::at(survey, Reason::Expansion, asteroid, pattern, homed)
             })
             .collect();
         if commitments.claims() < personality.claims
@@ -34,7 +33,13 @@ impl Expansion {
             && let Some(asteroid) = Expansion::best_free(survey, commitments, dice)
         {
             commitments.claim(asteroid, survey.view.time);
-            proposals.push(Proposal::at(survey, Reason::Expansion, asteroid, row, 1));
+            proposals.push(Proposal::at(
+                survey,
+                Reason::Expansion,
+                asteroid,
+                pattern,
+                1,
+            ));
         }
         proposals
     }

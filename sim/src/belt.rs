@@ -5,7 +5,7 @@ use crate::materials::{Material, Materials};
 use crate::noise::{self, Noise};
 use crate::orbit::body::Gravity;
 use crate::orbit::elements::Orbit;
-use crate::roster::{CONSTRUCTOR, Roster, SHIPYARD};
+use crate::pattern::EntityPattern;
 use crate::setup::Setup;
 use crate::state::hash::digest;
 use crate::state::{Asteroid, Seat, State};
@@ -61,6 +61,8 @@ impl Belt {
             / (REFERENCE_PERIOD_SECONDS * REFERENCE_PERIOD_SECONDS),
     );
 
+    pub const MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED: f64 = 80.0;
+
     pub const STAR_RADIUS_METERS: f64 = 2_500.0;
 
     pub const STAR_LIGHT_RANGE_METERS: f64 = 75_000.0;
@@ -81,6 +83,7 @@ impl Belt {
 
     pub(crate) const REACHED_METERS: f64 = 0.5;
 
+    #[cfg(test)]
     pub(crate) fn furthest_station_meters(
         longest_damage_range_meters: f64,
         standoff_meters: f64,
@@ -172,7 +175,10 @@ impl Belt {
 
 impl State {
     pub fn start(setup: &Setup) -> State {
-        let reserve = BTreeMap::from([(SHIPYARD, 1), (CONSTRUCTOR, 1)]);
+        let reserve = BTreeMap::from([
+            (EntityPattern::Shipyard, 1),
+            (EntityPattern::Constructor, 1),
+        ]);
         let seats = setup
             .teams()
             .iter()
@@ -182,7 +188,6 @@ impl State {
             setup.clock(),
             setup.seed(),
             Belt::GRAVITY,
-            Roster::shipped(),
             Belt::from_seed(setup.seed()),
             seats,
         )

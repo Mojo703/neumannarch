@@ -1,6 +1,6 @@
-use neumannarch_sim::roster::{METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD, VOLATILES_EXTRACTOR};
-
-use neumannarch_sim::{AsteroidId, RowId};
+use neumannarch_sim::pattern::EntityPattern;
+use neumannarch_sim::pattern::EntityPattern as P;
+use neumannarch_sim::{AsteroidId, Material};
 
 use crate::bots::scripted::commitments::Commitments;
 use crate::bots::scripted::offence::*;
@@ -10,33 +10,42 @@ use crate::harness::fixture::{Fixture, surveyed};
 
 const RAIDERS: u32 = 6;
 
+fn yields_on_completion() -> Vec<EntityPattern> {
+    vec![
+        P::Shipyard,
+        P::Constructor,
+        P::Storage,
+        P::Extractor(Material::Metals),
+        P::Extractor(Material::Volatiles),
+        P::Extractor(Material::Energy),
+    ]
+}
+
 fn raiders_against_a_shipyard() -> (Fixture, AsteroidId, AsteroidId) {
-    let roster = Roster::shipped();
     let mut fixture = Fixture::drafted([None, None]);
     let free = fixture.free(2);
     let (mine, theirs) = (free[0], free[1]);
-    fixture.want(0, mine, SHIPYARD, 1);
-    fixture.want(1, theirs, SHIPYARD, 1);
-    fixture.want(0, mine, VOLATILES_EXTRACTOR, 1);
-    fixture.want(0, mine, RAIDER, RAIDERS);
+    fixture.want(0, mine, P::Shipyard, 1);
+    fixture.want(1, theirs, P::Shipyard, 1);
+    fixture.want(0, mine, P::Extractor(Material::Volatiles), 1);
+    fixture.want(0, mine, P::Raider, RAIDERS);
     fixture.until(|fixture| {
         let view = fixture.view(0);
-        surveyed(&view, &roster).standing(mine, RAIDER) == RAIDERS
+        surveyed(&view).standing(mine, P::Raider) == RAIDERS
     });
     (fixture, mine, theirs)
 }
 
 fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32 {
-    let roster = Roster::shipped();
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     proposals
         .iter()
         .filter(|proposal| proposal.posting.asteroid() == target)
         .map(|proposal| {
             proposal
                 .count
-                .saturating_sub(survey.count(target, proposal.posting.row()))
+                .saturating_sub(survey.count(target, proposal.posting.pattern()))
         })
         .sum()
 }
@@ -44,11 +53,10 @@ fn sent_to(proposals: &[Proposal], fixture: &Fixture, target: AsteroidId) -> u32
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
     let fixture = Fixture::drafted([Some(personality.clone()), None]);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     let building = survey.building();
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
@@ -83,19 +91,18 @@ fn one_more_unit_that_does_damage_is_asked_for_at_every_asteroid_where_it_builds
 
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
-fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_that_pays_on_completion()
- {
-    let roster = Roster::shipped();
+fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_short_of_a_pattern_that_pays_on_completion()
+{
     let personality = Personality::expand();
     let mut fixture = Fixture::drafted([None, None]);
     let mine = fixture.free(1)[0];
-    fixture.want(0, mine, SHIPYARD, 1);
-    fixture.want(0, mine, METALS_EXTRACTOR, 1);
+    fixture.want(0, mine, P::Shipyard, 1);
+    fixture.want(0, mine, P::Extractor(Material::Metals), 1);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     assert!(
-        survey.short_of(mine, &survey.roles.yields_on_completion()),
-        "nothing at {mine:?} is short of a row that pays on completion"
+        survey.short_of(mine, &yields_on_completion()),
+        "nothing at {mine:?} is short of a pattern that pays on completion"
     );
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
@@ -104,13 +111,13 @@ fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_tha
         .iter()
         .filter(|proposal| proposal.posting.asteroid() == mine)
     {
-        let row = proposal.posting.row();
+        let pattern = proposal.posting.pattern();
         assert!(
-            proposal.count <= survey.count(mine, row),
+            proposal.count <= survey.count(mine, pattern),
             "it asked for {} {} at {mine:?}, over the {} standing, while an extractor is unbuilt there",
             proposal.count,
-            roster[row].name,
-            survey.count(mine, row)
+            pattern.name(),
+            survey.count(mine, pattern)
         );
     }
 }
@@ -118,34 +125,34 @@ fn no_unit_that_does_damage_is_asked_for_at_an_asteroid_still_short_of_a_row_tha
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
     let (fixture, mine, theirs) = raiders_against_a_shipyard();
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
 
     let proposals = Offence::proposals(&survey, &personality, &mut Commitments::default());
 
-    let unit_cost = personality.damage_unit_cost(&roster, &personality.shares(&survey));
+    let unit_cost = Personality::damage_unit_cost(&personality.shares(&survey));
     let garrison = personality.garrison(survey.threat_at(mine), unit_cost);
-    let count = |at: AsteroidId, row: RowId| {
+    let count = |at: AsteroidId, pattern: EntityPattern| {
         proposals
             .iter()
-            .find(|proposal| proposal.posting == survey.posting(at, row))
-            .map_or_else(|| survey.count(at, row), |proposal| proposal.count)
+            .find(|proposal| proposal.posting == survey.posting(at, pattern))
+            .map_or_else(|| survey.count(at, pattern), |proposal| proposal.count)
     };
     let mut kept = 0.0;
     let mut flown = 0;
-    for (row, _) in personality.shares(&survey) {
-        let flying = count(theirs, row) - survey.count(theirs, row);
-        let held = count(mine, row).min(survey.standing(mine, row));
+    for (pattern, _) in personality.shares(&survey) {
+        let flying = count(theirs, pattern) - survey.count(theirs, pattern);
+        let held = count(mine, pattern).min(survey.standing(mine, pattern));
         assert_eq!(
             held + flying,
-            survey.standing(mine, row),
-            "the wave neither lost nor invented a {row:?}"
+            survey.standing(mine, pattern),
+            "the wave neither lost nor invented a {}",
+            pattern.name()
         );
         flown += flying;
-        kept += f64::from(held) * roster[row].cost.total();
+        kept += f64::from(held) * pattern.cost().total();
     }
     assert!(flown > 0, "the wave sent nothing: {proposals:?}");
     assert!(
@@ -161,19 +168,18 @@ fn every_standing_unit_beyond_an_asteroids_garrison_is_homed_at_the_target() {
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_target_standing_under_its_want_is_still_reinforced() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
     let (mut fixture, mine, theirs) = raiders_against_a_shipyard();
-    fixture.want(0, theirs, RAIDER, 1);
+    fixture.want(0, theirs, P::Raider, 1);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     assert_eq!(
-        survey.arriving(theirs, RAIDER),
+        survey.arriving(theirs, P::Raider),
         0,
         "the want was filled from a surplus, so nothing stands short there"
     );
     assert!(
-        survey.want(theirs, RAIDER) > survey.count(theirs, RAIDER),
+        survey.want(theirs, P::Raider) > survey.count(theirs, P::Raider),
         "the target already holds everything the seat wants there"
     );
 
@@ -188,19 +194,18 @@ fn a_target_standing_under_its_want_is_still_reinforced() {
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_wave_still_in_the_air_is_not_sent_a_second_time() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
     let (mut fixture, mine, theirs) = raiders_against_a_shipyard();
-    fixture.want(0, theirs, RAIDER, 1);
-    fixture.want(0, mine, RAIDER, RAIDERS - 1);
+    fixture.want(0, theirs, P::Raider, 1);
+    fixture.want(0, mine, P::Raider, RAIDERS - 1);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     assert_eq!(
-        survey.arriving(theirs, RAIDER),
+        survey.arriving(theirs, P::Raider),
         1,
         "the surplus raider is not on its way to {theirs:?}"
     );
-    let unit_cost = personality.damage_unit_cost(survey.roster, &personality.shares(&survey));
+    let unit_cost = Personality::damage_unit_cost(&personality.shares(&survey));
     assert!(
         survey.damage_value(mine) > personality.garrison(survey.threat_at(mine), unit_cost),
         "nothing stands at {mine:?} beyond its garrison to send"

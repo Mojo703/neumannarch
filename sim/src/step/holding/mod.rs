@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
+use crate::belt::Belt;
 use crate::ids::EntityId;
 use crate::orbit::body::Body;
-use crate::roster::Row;
 use crate::state::{Entity, Pass, Roll, Rolls, State};
 use crate::step::fire::Shots;
 use crate::time::RunningSpan;
@@ -75,7 +75,7 @@ impl<'a> Holding<'a> {
     fn transfer_thrust(&self, entity: Entity) -> Option<Vec3> {
         let body = entity.steered()?;
         let destination = self.state.asteroid_body(entity.home());
-        let limit = self.state.roster().movement_limit().0;
+        let limit = Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED;
         Some(Transfer::of(body, destination, limit).thrust(self.over))
     }
 }
@@ -103,21 +103,29 @@ impl<'a> HeldUnit<'a> {
     }
 
     fn thrust(&self, place: Option<Vec3>) -> Vec3 {
-        let row = self.row();
+        let pattern = self.entity.pattern();
+        let steering = pattern.steering();
+        let manoeuvring = pattern.manoeuvring();
         let body = self.body();
         let asteroid = &self.state[self.roll.asteroid()];
-        let sum = terms::separation(body, row, self.neighbours())
-            + terms::wander(row, self.state.time(), self.entity.id())
+        let sum = terms::separation(body, steering, self.neighbours())
+            + terms::wander(steering, self.state.time(), self.entity.id())
             + terms::returning(
                 body,
-                row,
+                steering,
+                manoeuvring,
                 self.roll.body(),
                 asteroid.toward_shell(self.roll.body(), body.pos),
             )
             + place.map_or(Vec3::ZERO, |place| {
-                terms::stationing(body, row, Body::new(place, self.roll.body().vel))
+                terms::stationing(
+                    body,
+                    steering,
+                    manoeuvring,
+                    Body::new(place, self.roll.body().vel),
+                )
             });
-        sum.capped(row.manoeuvring.0)
+        sum.capped(manoeuvring.0)
     }
 
     fn place(&self) -> Option<(Vec3, Option<Pass>)> {
@@ -134,10 +142,6 @@ impl<'a> HeldUnit<'a> {
 
     fn body(&self) -> Body {
         self.roll.body_of(self.entity)
-    }
-
-    fn row(&self) -> &'a Row {
-        &self.state[self.entity.row()]
     }
 
     fn neighbours(&self) -> impl Iterator<Item = Vec3> + 'a {

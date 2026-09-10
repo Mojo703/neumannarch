@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{RowId, SeatId};
+use crate::ids::SeatId;
+use crate::pattern::EntityPattern;
 use crate::posting::Posting;
 use crate::state::State;
 
@@ -18,14 +19,14 @@ impl<'a> Reserve<'a> {
     }
 
     pub(crate) fn run(self) -> Placements {
-        let mut spent: BTreeMap<SeatId, BTreeMap<RowId, u32>> = BTreeMap::new();
+        let mut spent: BTreeMap<SeatId, BTreeMap<EntityPattern, u32>> = BTreeMap::new();
         let mut placements = BTreeMap::new();
         for (posting, short) in self.shortfalls {
-            let held = self.state[posting.seat()].reserved(posting.row());
+            let held = self.state[posting.seat()].reserved(posting.pattern());
             let taken = spent
                 .entry(posting.seat())
                 .or_default()
-                .entry(posting.row())
+                .entry(posting.pattern())
                 .or_default();
             let filling = (*short).min(held.saturating_sub(*taken));
             *taken += filling;
@@ -55,7 +56,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::{AsteroidId, TeamId};
     use crate::materials::Materials;
-    use crate::roster::{SHIPYARD, STORAGE};
+    use crate::pattern::EntityPattern as P;
     use crate::state::Issued;
 
     const HERE: AsteroidId = AsteroidId(0);
@@ -64,7 +65,7 @@ mod tests {
 
     const MINE: SeatId = SeatId(0);
 
-    fn wanting(reserve: BTreeMap<RowId, u32>, wants: &[Issued]) -> State {
+    fn wanting(reserve: BTreeMap<EntityPattern, u32>, wants: &[Issued]) -> State {
         let world = World::stocked(Materials::new(1e4, 1e4, 1e4), reserve);
         let mut asked = world.state.clone();
         for issued in wants {
@@ -74,25 +75,25 @@ mod tests {
     }
 
     #[test]
-    fn a_shortfall_takes_no_more_of_a_row_than_the_seat_holds_in_reserve() {
+    fn a_shortfall_takes_no_more_of_a_pattern_than_the_seat_holds_in_reserve() {
         let asked = wanting(
-            BTreeMap::from([(STORAGE, 2)]),
-            &[Issued::want(0, HERE, STORAGE, 5)],
+            BTreeMap::from([(P::Storage, 2)]),
+            &[Issued::want(0, HERE, P::Storage, 5)],
         );
 
         let placements = Reserve::of(&asked, &asked.shortfalls()).run();
 
         assert_eq!(placements.iter().count(), 2, "five were wanted, two held");
-        assert_eq!(placements.filling(Posting::of(HERE, MINE, STORAGE)), 2);
+        assert_eq!(placements.filling(Posting::of(HERE, MINE, P::Storage)), 2);
     }
 
     #[test]
-    fn one_reserve_is_split_across_the_asteroids_that_want_the_row() {
+    fn one_reserve_is_split_across_the_asteroids_that_want_the_pattern() {
         let asked = wanting(
-            BTreeMap::from([(STORAGE, 1)]),
+            BTreeMap::from([(P::Storage, 1)]),
             &[
-                Issued::numbered(0, 0, HERE, STORAGE, 1),
-                Issued::numbered(0, 1, AWAY, STORAGE, 1),
+                Issued::numbered(0, 0, HERE, P::Storage, 1),
+                Issued::numbered(0, 1, AWAY, P::Storage, 1),
             ],
         );
 
@@ -100,20 +101,20 @@ mod tests {
 
         assert_eq!(placements.iter().count(), 1, "the reserve holds one");
         assert_eq!(
-            placements.filling(Posting::of(HERE, MINE, STORAGE)),
+            placements.filling(Posting::of(HERE, MINE, P::Storage)),
             1,
             "the lower asteroid is filled first"
         );
-        assert_eq!(placements.filling(Posting::of(AWAY, MINE, STORAGE)), 0);
+        assert_eq!(placements.filling(Posting::of(AWAY, MINE, P::Storage)), 0);
     }
 
     #[test]
     fn a_want_the_entities_standing_already_meet_draws_nothing() {
         let mut world = World::started(&[TeamId(0)]);
-        world.fix(0, SHIPYARD, HERE);
+        world.fix(0, P::Shipyard, HERE);
         let mut asked = world.state.clone();
         asked
-            .apply(Issued::want(0, HERE, SHIPYARD, 1))
+            .apply(Issued::want(0, HERE, P::Shipyard, 1))
             .expect("the want stands");
 
         assert_eq!(

@@ -3,8 +3,8 @@ use core::f64::consts::TAU;
 use crate::belt::Belt;
 use crate::ids::EntityId;
 use crate::orbit::body::Body;
+use crate::pattern::Weights;
 use crate::real::Real;
-use crate::roster::Row;
 use crate::time::Time;
 use crate::vec3::Vec3;
 
@@ -12,11 +12,15 @@ const DRIFT: [(f64, f64); 3] = [(0.037, 0.0), (0.053, 1.0), (0.071, 2.0)];
 
 const DRIFT_PHASES: u32 = 1024;
 
-pub(crate) fn wander(row: &Row, at: Time, id: EntityId) -> Vec3 {
-    drift(at, id) * row.steering.wander.0
+pub(crate) fn wander(steering: Weights, at: Time, id: EntityId) -> Vec3 {
+    drift(at, id) * steering.wander.0
 }
 
-pub(crate) fn separation(body: Body, row: &Row, neighbours: impl Iterator<Item = Vec3>) -> Vec3 {
+pub(crate) fn separation(
+    body: Body,
+    steering: Weights,
+    neighbours: impl Iterator<Item = Vec3>,
+) -> Vec3 {
     neighbours
         .filter_map(|pos| {
             let offset = pos - body.pos;
@@ -25,25 +29,31 @@ pub(crate) fn separation(body: Body, row: &Row, neighbours: impl Iterator<Item =
             (apart < Belt::SPACING_METERS).then(|| away * (1.0 - apart / Belt::SPACING_METERS))
         })
         .fold(Vec3::ZERO, |sum, push| sum + push)
-        * row.steering.separation.0
+        * steering.separation.0
 }
 
-pub(crate) fn returning(body: Body, row: &Row, asteroid: Body, into_shell: Vec3) -> Vec3 {
-    toward(body, row, row.steering.returning, asteroid, into_shell)
+pub(crate) fn returning(
+    body: Body,
+    steering: Weights,
+    manoeuvring: Real,
+    asteroid: Body,
+    into_shell: Vec3,
+) -> Vec3 {
+    toward(body, manoeuvring, steering.returning, asteroid, into_shell)
 }
 
-pub(crate) fn stationing(body: Body, row: &Row, station: Body) -> Vec3 {
+pub(crate) fn stationing(body: Body, steering: Weights, manoeuvring: Real, station: Body) -> Vec3 {
     toward(
         body,
-        row,
-        row.steering.station,
+        manoeuvring,
+        steering.station,
         station,
         station.pos - body.pos,
     )
 }
 
-fn toward(body: Body, row: &Row, weight: Real, place: Body, offset: Vec3) -> Vec3 {
-    let speed = (2.0 * row.manoeuvring.0 * offset.length().min(Belt::ARRIVAL_METERS)).sqrt();
+fn toward(body: Body, manoeuvring: Real, weight: Real, place: Body, offset: Vec3) -> Vec3 {
+    let speed = (2.0 * manoeuvring.0 * offset.length().min(Belt::ARRIVAL_METERS)).sqrt();
     let wanted = offset
         .normalized()
         .map_or(Vec3::ZERO, |along| along * speed);
@@ -64,16 +74,11 @@ mod tests {
     use crate::TICKS_PER_SECOND;
     use crate::fixture::World;
     use crate::ids::{AsteroidId, TeamId};
-    use crate::materials::Materials;
     use crate::orbit::body::Gravity;
-    use crate::roster::Weights;
-    use crate::roster::{Role, Tier};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
     const HOME: AsteroidId = AsteroidId(0);
-
-    const LIMIT: f64 = 1.25;
 
     const WANDER: f64 = 0.25;
 
@@ -83,28 +88,17 @@ mod tests {
 
     const STATION: f64 = 4.0;
 
+    const STEERING: Weights = Weights {
+        wander: Real(WANDER),
+        returning: Real(RETURNING),
+        separation: Real(SEPARATION),
+        station: Real(STATION),
+    };
+
+    const LIMIT: Real = Real(1.25);
+
     fn world() -> World {
         World::ring(GRAVITY, 1, &[TeamId(0)])
-    }
-
-    fn row() -> Row {
-        Row {
-            name: "test",
-            role: Role::Scout,
-            tier: Tier::ONE,
-            cost: Materials::new(1.0, 0.0, 0.0),
-            manoeuvring: Real(LIMIT),
-            steering: Weights {
-                wander: Real(WANDER),
-                returning: Real(RETURNING),
-                separation: Real(SEPARATION),
-                station: Real(STATION),
-            },
-            hp: Real(1.0),
-            plating: Real(0.0),
-            capacity: Materials::ZERO,
-            effects: vec![],
-        }
     }
 
     fn floor(world: &World) -> f64 {
@@ -123,14 +117,15 @@ mod tests {
         let asteroid = world.state.asteroid_body(HOME);
         returning(
             unit,
-            &row(),
+            STEERING,
+            LIMIT,
             asteroid,
             world.state[HOME].toward_shell(asteroid, unit.pos),
         )
     }
 
     fn cruise(over: f64) -> f64 {
-        (2.0 * LIMIT * over.min(Belt::ARRIVAL_METERS)).sqrt()
+        (2.0 * LIMIT.0 * over.min(Belt::ARRIVAL_METERS)).sqrt()
     }
 
     #[test]
@@ -188,10 +183,11 @@ mod tests {
         let carried = Vec3::new(0.0, 0.0, 7.0);
         let station = Body::new(Vec3::ZERO, carried);
 
-        assert!(stationing(Body::new(Vec3::ZERO, carried), &row(), station).length() < 1e-12);
+        let held = Body::new(Vec3::ZERO, carried);
+        assert!(stationing(held, STEERING, LIMIT, station).length() < 1e-12);
 
         let away = Body::new(Vec3::new(0.0, 0.0, -2.0), carried);
-        let pull = stationing(away, &row(), station);
+        let pull = stationing(away, STEERING, LIMIT, station);
         assert!(pull.z > 0.0, "{pull:?}");
         assert!(
             (pull.length() - STATION * cruise(2.0)).abs() < 1e-9,
@@ -204,7 +200,7 @@ mod tests {
         let unit = Body::new(Vec3::ZERO, Vec3::ZERO);
         let near = Vec3::new(0.25 * Belt::SPACING_METERS, 0.0, 0.0);
 
-        let push = separation(unit, &row(), [near].into_iter());
+        let push = separation(unit, STEERING, [near].into_iter());
 
         assert!(push.x < 0.0, "{push:?}");
         assert!(
@@ -214,29 +210,25 @@ mod tests {
         assert_eq!(
             separation(
                 unit,
-                &row(),
+                STEERING,
                 [Vec3::new(Belt::SPACING_METERS, 0.0, 0.0)].into_iter()
             ),
             Vec3::ZERO
         );
         assert_eq!(
-            separation(unit, &row(), [Vec3::ZERO].into_iter()),
+            separation(unit, STEERING, [Vec3::ZERO].into_iter()),
             Vec3::ZERO
         );
     }
 
     #[test]
-    fn each_term_is_scaled_by_the_rows_own_weight() {
+    fn each_term_is_scaled_by_the_patterns_own_weight() {
         let world = world();
-        let row = row();
-        let doubled = Row {
-            steering: Weights {
-                wander: Real(2.0 * WANDER),
-                returning: Real(2.0 * RETURNING),
-                separation: Real(2.0 * SEPARATION),
-                station: Real(2.0 * STATION),
-            },
-            ..row.clone()
+        let doubled = Weights {
+            wander: Real(2.0 * WANDER),
+            returning: Real(2.0 * RETURNING),
+            separation: Real(2.0 * SEPARATION),
+            station: Real(2.0 * STATION),
         };
         let unit = out(&world, 2.0 * Belt::ZONE_RADIUS_METERS);
         let asteroid = world.state.asteroid_body(HOME);
@@ -247,20 +239,20 @@ mod tests {
         let twice = |once: Vec3, twice: Vec3| twice.distance(once * 2.0) < 1e-12;
 
         assert!(twice(
-            wander(&row, Time(11), EntityId(3)),
-            wander(&doubled, Time(11), EntityId(3))
+            wander(STEERING, Time(11), EntityId(3)),
+            wander(doubled, Time(11), EntityId(3))
         ));
         assert!(twice(
-            returning(unit, &row, asteroid, into_shell),
-            returning(unit, &doubled, asteroid, into_shell)
+            returning(unit, STEERING, LIMIT, asteroid, into_shell),
+            returning(unit, doubled, LIMIT, asteroid, into_shell)
         ));
         assert!(twice(
-            separation(unit, &row, near.into_iter()),
-            separation(unit, &doubled, near.into_iter())
+            separation(unit, STEERING, near.into_iter()),
+            separation(unit, doubled, near.into_iter())
         ));
         assert!(twice(
-            stationing(unit, &row, station),
-            stationing(unit, &doubled, station)
+            stationing(unit, STEERING, LIMIT, station),
+            stationing(unit, doubled, LIMIT, station)
         ));
     }
 

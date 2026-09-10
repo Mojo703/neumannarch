@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::State;
-use crate::ids::{AsteroidId, RowId, SeatId};
+use crate::ids::{AsteroidId, SeatId};
+use crate::pattern::EntityPattern;
 use crate::post::Post;
 use crate::posting::Posting;
 use crate::time::Tick;
@@ -14,7 +15,7 @@ pub const MAX_COMMANDS_PER_TICK: usize = 32;
 pub enum Command {
     Want {
         asteroid: AsteroidId,
-        row: RowId,
+        pattern: EntityPattern,
         count: u32,
     },
 }
@@ -54,7 +55,6 @@ pub enum Rejected {
     NoSuchSeat,
     DeadSeat,
     NoSuchAsteroid,
-    NoSuchRow,
     TooMany,
     NotYet,
     AsteroidTaken,
@@ -120,12 +120,12 @@ impl State {
     pub fn apply(&mut self, issued: Issued) -> Result<(), Rejected> {
         let Command::Want {
             asteroid,
-            row,
+            pattern,
             count,
         } = issued.command;
-        let posting = Posting::of(asteroid, issued.seat, row);
+        let posting = Posting::of(asteroid, issued.seat, pattern);
         self.admits_want(posting, count)?;
-        self.set_want(posting.post(), row, count);
+        self.set_want(posting.post(), pattern, count);
         Ok(())
     }
 
@@ -139,16 +139,13 @@ impl State {
         if self.asteroid(posting.asteroid()).is_none() {
             return Err(Rejected::NoSuchAsteroid);
         }
-        if self.roster().get(posting.row()).is_none() {
-            return Err(Rejected::NoSuchRow);
-        }
         if count > MAX_WANT {
             return Err(Rejected::TooMany);
         }
         if !self.draws_reserve(posting, count) {
             return Ok(());
         }
-        match self.draft.awaits(posting.seat(), posting.row()) {
+        match self.draft.awaits(posting.seat(), posting.pattern()) {
             Some(false) => Err(Rejected::NotYet),
             Some(true) if self.is_taken(posting.asteroid()) => Err(Rejected::AsteroidTaken),
             Some(_) | None => Ok(()),
@@ -157,13 +154,13 @@ impl State {
 
     fn draws_reserve(&self, posting: Posting, count: u32) -> bool {
         self.seat(posting.seat())
-            .is_some_and(|seated| seated.reserved(posting.row()) > 0)
-            && count > self.count(posting.post(), posting.row())
+            .is_some_and(|seated| seated.reserved(posting.pattern()) > 0)
+            && count > self.count(posting.post(), posting.pattern())
     }
 
-    fn set_want(&mut self, post: Post, row: RowId, count: u32) {
+    fn set_want(&mut self, post: Post, pattern: EntityPattern, count: u32) {
         let wants = self.wants.entry(post).or_default();
-        wants.set(row, count);
+        wants.set(pattern, count);
         if wants.is_empty() {
             self.wants.remove(&post);
         }
@@ -175,7 +172,7 @@ mod tests {
     use super::*;
     use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::roster::FRIGATE;
+    use crate::pattern::EntityPattern as P;
     use crate::time::Time;
 
     const HERE: AsteroidId = AsteroidId(0);
@@ -193,7 +190,7 @@ mod tests {
                 seq: 0,
                 command: Command::Want {
                     asteroid: posting.asteroid(),
-                    row: posting.row(),
+                    pattern: posting.pattern(),
                     count,
                 },
             });
@@ -202,43 +199,51 @@ mod tests {
         };
 
         assert_eq!(
-            asked(&world.state, Posting::of(HERE, first.seat, first.row), 1),
+            asked(
+                &world.state,
+                Posting::of(HERE, first.seat, first.pattern),
+                1
+            ),
             Ok(())
         );
         assert_eq!(
-            asked(&world.state, Posting::of(HERE, later.seat, later.row), 1),
+            asked(
+                &world.state,
+                Posting::of(HERE, later.seat, later.pattern),
+                1
+            ),
             Err(Rejected::NotYet),
             "a seat whose stage has not begun cannot place"
         );
         assert_eq!(
-            asked(&world.state, Posting::of(HERE, first.seat, FRIGATE), 1),
+            asked(&world.state, Posting::of(HERE, first.seat, P::Frigate), 1),
             Ok(()),
             "a frigate is no pick"
         );
         assert_eq!(
             asked(
                 &world.state,
-                Posting::of(HERE, first.seat, FRIGATE),
+                Posting::of(HERE, first.seat, P::Frigate),
                 MAX_WANT + 1
             ),
             Err(Rejected::TooMany)
         );
         assert_eq!(
-            asked(&world.state, Posting::of(HERE, SeatId(9), FRIGATE), 1),
+            asked(&world.state, Posting::of(HERE, SeatId(9), P::Frigate), 1),
             Err(Rejected::NoSuchSeat)
         );
 
-        world.tick(&[Issued::numbered(first.seat.0, 0, HERE, first.row, 1)]);
+        world.tick(&[Issued::numbered(first.seat.0, 0, HERE, first.pattern, 1)]);
         let next = world.state.draft().running().expect("the next stage runs");
 
         assert_eq!(
-            asked(&world.state, Posting::of(HERE, next.seat, next.row), 1),
+            asked(&world.state, Posting::of(HERE, next.seat, next.pattern), 1),
             Err(Rejected::AsteroidTaken)
         );
         assert_eq!(
             asked(
                 &world.state,
-                Posting::of(AsteroidId(1), next.seat, next.row),
+                Posting::of(AsteroidId(1), next.seat, next.pattern),
                 1
             ),
             Ok(())

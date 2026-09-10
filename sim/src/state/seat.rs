@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{RowId, TeamId};
+use crate::ids::TeamId;
 use crate::materials::{Materials, PerSecond, Stockpile};
+use crate::pattern::EntityPattern;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Seat {
@@ -9,13 +10,13 @@ pub struct Seat {
     alive: bool,
     stockpile: Stockpile,
     base_capacity: Materials,
-    reserve: BTreeMap<RowId, u32>,
+    reserve: BTreeMap<EntityPattern, u32>,
     income: PerSecond,
     spend: PerSecond,
 }
 
 impl Seat {
-    pub fn new(team: TeamId, stock: Materials, reserve: BTreeMap<RowId, u32>) -> Seat {
+    pub fn new(team: TeamId, stock: Materials, reserve: BTreeMap<EntityPattern, u32>) -> Seat {
         Seat {
             team,
             alive: true,
@@ -51,12 +52,12 @@ impl Seat {
         self.spend.completed()
     }
 
-    pub(crate) fn reserve(&self) -> &BTreeMap<RowId, u32> {
+    pub(crate) fn reserve(&self) -> &BTreeMap<EntityPattern, u32> {
         &self.reserve
     }
 
-    pub fn reserved(&self, row: RowId) -> u32 {
-        self.reserve.get(&row).copied().unwrap_or(0)
+    pub fn reserved(&self, pattern: EntityPattern) -> u32 {
+        self.reserve.get(&pattern).copied().unwrap_or(0)
     }
 
     pub(crate) fn reserve_is_empty(&self) -> bool {
@@ -86,12 +87,12 @@ impl Seat {
         self.spend.close();
     }
 
-    pub(crate) fn take_reserved(&mut self, row: RowId) -> bool {
-        match self.reserve.get_mut(&row) {
+    pub(crate) fn take_reserved(&mut self, pattern: EntityPattern) -> bool {
+        match self.reserve.get_mut(&pattern) {
             Some(count) if *count > 0 => {
                 *count -= 1;
                 if *count == 0 {
-                    self.reserve.remove(&row);
+                    self.reserve.remove(&pattern);
                 }
                 true
             }

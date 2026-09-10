@@ -92,7 +92,7 @@ fn entity_instance<G: Game>(
     let points = ENTITY_SIDE_METERS / meters_per_point;
     let side = zoom::floored(points, ENTITY_FLOOR_POINTS) * meters_per_point;
     GlyphQuad {
-        glyph: entity.glyph,
+        pattern: entity.pattern,
         seat: entity.seat,
     }
     .at(Transform::from_scale_rotation_translation(

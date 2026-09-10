@@ -41,7 +41,7 @@ impl State {
             value: self
                 .entities()
                 .filter(|entity| mine(entity.seat()))
-                .map(|entity| self[entity.row()].cost.total())
+                .map(|entity| entity.pattern().cost().total())
                 .sum(),
             alive: self
                 .seats()
@@ -86,7 +86,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::AsteroidId;
     use crate::orbit::body::Gravity;
-    use crate::roster::{RAIDER, STORAGE};
+    use crate::pattern::EntityPattern as P;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -109,10 +109,10 @@ mod tests {
     #[test]
     fn the_side_holding_the_most_asteroids_leads() {
         let mut world = world();
-        world.fix(0, STORAGE, AsteroidId(0));
-        world.fix(0, STORAGE, AsteroidId(1));
-        world.fix(1, STORAGE, AsteroidId(2));
-        world.hold(1, RAIDER, AsteroidId(2), 5.0);
+        world.fix(0, P::Storage, AsteroidId(0));
+        world.fix(0, P::Storage, AsteroidId(1));
+        world.fix(1, P::Storage, AsteroidId(2));
+        world.hold(1, P::Raider, AsteroidId(2), 5.0);
 
         let standings = world.state.standings();
 
@@ -128,9 +128,9 @@ mod tests {
     #[test]
     fn an_asteroid_counts_for_a_side_with_a_structure_there() {
         let mut world = world();
-        world.fix(0, STORAGE, AsteroidId(0));
-        world.hold(1, RAIDER, AsteroidId(1), 5.0);
-        world.hold(1, RAIDER, AsteroidId(2), 5.0);
+        world.fix(0, P::Storage, AsteroidId(0));
+        world.hold(1, P::Raider, AsteroidId(1), 5.0);
+        world.hold(1, P::Raider, AsteroidId(2), 5.0);
 
         let standings = world.state.standings();
 
@@ -146,9 +146,9 @@ mod tests {
     #[test]
     fn sides_holding_as_many_asteroids_break_by_total_army_value() {
         let mut world = world();
-        world.fix(0, STORAGE, AsteroidId(0));
-        world.fix(1, STORAGE, AsteroidId(1));
-        world.hold(1, RAIDER, AsteroidId(1), 5.0);
+        world.fix(0, P::Storage, AsteroidId(0));
+        world.fix(1, P::Storage, AsteroidId(1));
+        world.hold(1, P::Raider, AsteroidId(1), 5.0);
 
         let standings = world.state.standings();
 

@@ -1,8 +1,7 @@
-use neumannarch_sim::roster::Roster;
-use neumannarch_sim::{Materials, RowId, Time};
+use neumannarch_sim::pattern::{EntityPattern, Kind};
+use neumannarch_sim::{Materials, Time};
 
 use super::proposal::Reason;
-use super::roles::Roles;
 use super::survey::Survey;
 
 const PLATING_WORTH: f64 = 20.0;
@@ -11,10 +10,16 @@ const ATTACK_RATIO_LASTS: f64 = 2.0 / 3.0;
 
 const BUILD_HORIZON: f64 = 20.0;
 
+pub(crate) fn armed_units() -> impl Iterator<Item = EntityPattern> {
+    EntityPattern::EVERY
+        .into_iter()
+        .filter(|pattern| pattern.kind() == Kind::Unit && pattern.does_damage())
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mix {
     Counters,
-    Pinned(Vec<(RowId, f64)>),
+    Pinned(Vec<(EntityPattern, f64)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,10 +81,10 @@ impl Personality {
         }
     }
 
-    pub fn damage_unit_cost(&self, roster: &Roster, weights: &[(RowId, f64)]) -> f64 {
+    pub fn damage_unit_cost(weights: &[(EntityPattern, f64)]) -> f64 {
         weights
             .iter()
-            .filter_map(|(row, share)| roster.get(*row).map(|row| row.cost.total() * share))
+            .map(|(pattern, share)| pattern.cost().total() * share)
             .sum()
     }
 
@@ -98,19 +103,14 @@ impl Personality {
         (threat * self.defence_ratio).max(f64::from(self.garrison_floor) * unit_cost)
     }
 
-    pub fn shares(&self, survey: &Survey) -> Vec<(RowId, f64)> {
-        self.weights(
-            survey.roster,
-            survey.roles,
-            survey.enemy_plating,
-            survey.enemy_range,
-        )
+    pub fn shares(&self, survey: &Survey) -> Vec<(EntityPattern, f64)> {
+        self.weights(survey.enemy_plating, survey.enemy_range)
     }
 
     pub fn damage_mix(&self, survey: &Survey) -> Materials {
         self.shares(survey)
             .iter()
-            .filter_map(|(row, share)| survey.roster.get(*row).map(|stats| stats.cost * *share))
+            .map(|(pattern, share)| pattern.cost() * *share)
             .fold(Materials::ZERO, |mix, cost| mix + cost)
     }
 
@@ -149,44 +149,29 @@ impl Personality {
         self.attack_ratio * (1.0 - spent).max(0.0)
     }
 
-    pub fn weights(
-        &self,
-        roster: &Roster,
-        roles: &Roles,
-        plating: f64,
-        range: f64,
-    ) -> Vec<(RowId, f64)> {
+    pub fn weights(&self, plating: f64, range: f64) -> Vec<(EntityPattern, f64)> {
         let scored = match &self.mix {
             Mix::Pinned(pinned) => pinned
                 .iter()
-                .filter(|(row, _)| roles.army.contains(row))
-                .map(|(row, weight)| (*row, weight.max(0.0)))
+                .filter(|(pattern, _)| armed_units().any(|p| p == *pattern))
+                .map(|(pattern, weight)| (*pattern, weight.max(0.0)))
                 .collect(),
-            Mix::Counters => self.counters(roster, roles, plating, range),
+            Mix::Counters => self.counters(plating, range),
         };
         share(scored)
     }
 
-    fn counters(
-        &self,
-        roster: &Roster,
-        roles: &Roles,
-        plating: f64,
-        range: f64,
-    ) -> Vec<(RowId, f64)> {
-        let rated = |through: f64| -> Vec<(RowId, f64)> {
-            roles
-                .army
-                .iter()
-                .filter_map(|id| roster.get(*id).map(|row| (*id, row)))
-                .map(|(id, row)| {
-                    let cost = row.cost.total().max(f64::MIN_POSITIVE);
-                    let reach = row.max_damage_range();
+    fn counters(&self, plating: f64, range: f64) -> Vec<(EntityPattern, f64)> {
+        let rated = |through: f64| -> Vec<(EntityPattern, f64)> {
+            armed_units()
+                .map(|pattern| {
+                    let cost = pattern.cost().total().max(f64::MIN_POSITIVE);
+                    let reach = pattern.max_damage_range();
                     let edge = (reach - range) / reach.max(range).max(1.0);
-                    let durability = (row.hp.0 + PLATING_WORTH * row.plating.0) / cost;
-                    let rate = row.dps_through(through) / cost;
+                    let durability = (pattern.hp().0 + PLATING_WORTH * pattern.plating().0) / cost;
+                    let rate = pattern.dps_through(through) / cost;
                     (
-                        id,
+                        pattern,
                         rate * (1.0 + self.range_taste * edge).max(0.0)
                             * (1.0 + self.armour_taste * durability),
                     )
@@ -216,14 +201,14 @@ fn above_economy(order: &mut Vec<Reason>, reason: Reason) {
     order.insert(economy, reason);
 }
 
-fn share(scored: Vec<(RowId, f64)>) -> Vec<(RowId, f64)> {
+fn share(scored: Vec<(EntityPattern, f64)>) -> Vec<(EntityPattern, f64)> {
     let total: f64 = scored.iter().map(|(_, weight)| weight).sum();
     let count = scored.len() as f64;
     scored
         .into_iter()
-        .map(|(row, weight)| match total > 0.0 {
-            true => (row, weight / total),
-            false => (row, 1.0 / count),
+        .map(|(pattern, weight)| match total > 0.0 {
+            true => (pattern, weight / total),
+            false => (pattern, 1.0 / count),
         })
         .collect()
 }

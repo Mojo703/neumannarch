@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use crate::ids::{AsteroidId, SeatId};
 use crate::materials::Materials;
 use crate::posting::Posting;
-use crate::roster::Roster;
 use crate::state::{Command, Issued, Rejected, Rolls, State};
 use crate::step::fulfilment::Fulfilment;
 use crate::step::reserve::Reserve;
@@ -37,11 +36,11 @@ impl State {
 }
 
 impl Preview {
-    pub fn cost_to_build(&self, roster: &Roster) -> Materials {
+    pub fn cost_to_build(&self) -> Materials {
         self.shortfalls
             .iter()
             .fold(Materials::ZERO, |sum, (posting, filling)| {
-                sum + roster[posting.row()].cost * f64::from(filling.to_build)
+                sum + posting.pattern().cost() * f64::from(filling.to_build)
             })
     }
 
@@ -66,7 +65,7 @@ impl Preview {
                 continue;
             }
             let arriving = shortfalls
-                .entry(Posting::of(*destination, seat, entity.row()))
+                .entry(Posting::of(*destination, seat, entity.pattern()))
                 .or_default();
             *arriving.sent_from.entry(entity.home()).or_default() += 1;
         }
@@ -84,7 +83,7 @@ impl Preview {
                 .iter()
                 .filter(|cancellation| cancellation.posting.seat() == seat)
                 .fold(Materials::ZERO, |sum, cancellation| {
-                    sum + cancellation.refund(state)
+                    sum + cancellation.refund()
                 }),
         }
     }
@@ -142,8 +141,9 @@ mod tests {
 
     use super::*;
     use crate::fixture::World;
-    use crate::ids::{RowId, TeamId};
-    use crate::roster::{FRIGATE, SHIPYARD};
+    use crate::ids::TeamId;
+    use crate::pattern::EntityPattern as P;
+    use crate::pattern::EntityPattern;
     use crate::state::Issued;
 
     const HERE: AsteroidId = AsteroidId(0);
@@ -156,10 +156,10 @@ mod tests {
         World::started(&[TeamId(0), TeamId(1)])
     }
 
-    fn want(asteroid: AsteroidId, row: RowId, count: u32) -> Command {
+    fn want(asteroid: AsteroidId, pattern: EntityPattern, count: u32) -> Command {
         Command::Want {
             asteroid,
-            row,
+            pattern,
             count,
         }
     }
@@ -168,27 +168,27 @@ mod tests {
         world.state.preview(ME, wants).expect("the wants stand")
     }
 
-    fn mine(asteroid: AsteroidId, row: RowId) -> Posting {
-        Posting::of(asteroid, ME, row)
+    fn mine(asteroid: AsteroidId, pattern: EntityPattern) -> Posting {
+        Posting::of(asteroid, ME, pattern)
     }
 
     #[test]
     fn a_want_the_reserve_fills_is_placed_and_costs_nothing() {
         let world = World::stocked(
             Materials::new(1e4, 1e4, 1e4),
-            BTreeMap::from([(SHIPYARD, 2)]),
+            BTreeMap::from([(P::Shipyard, 2)]),
         );
 
-        let preview = previewed(&world, &[want(HERE, SHIPYARD, 2)]);
+        let preview = previewed(&world, &[want(HERE, P::Shipyard, 2)]);
 
         let filling = preview
             .shortfalls
-            .get(&mine(HERE, SHIPYARD))
+            .get(&mine(HERE, P::Shipyard))
             .expect("the shipyard is wanted here");
         assert_eq!(filling.from_reserve, 2, "the reserve holds two");
         assert_eq!(filling.to_build, 0);
         assert_eq!(
-            preview.cost_to_build(world.state.roster()),
+            preview.cost_to_build(),
             Materials::ZERO,
             "a reserve unit is paid for"
         );
@@ -196,78 +196,72 @@ mod tests {
     }
 
     #[test]
-    fn a_want_no_reserve_or_surplus_fills_costs_the_rows_cost_for_every_unit_to_build() {
+    fn a_want_no_reserve_or_surplus_fills_costs_the_patterns_cost_for_every_unit_to_build() {
         let mut world = world();
-        world.fix(0, SHIPYARD, HERE);
+        world.fix(0, P::Shipyard, HERE);
 
-        let preview = previewed(&world, &[want(HERE, FRIGATE, 3)]);
+        let preview = previewed(&world, &[want(HERE, P::Frigate, 3)]);
 
         let filling = preview
             .shortfalls
-            .get(&mine(HERE, FRIGATE))
+            .get(&mine(HERE, P::Frigate))
             .expect("three are short");
         assert_eq!(filling.to_build, 3, "a count of units, never of openings");
         assert_eq!(filling.from_reserve, 0);
-        assert_eq!(
-            preview.cost_to_build(world.state.roster()),
-            world.state[FRIGATE].cost * 3.0
-        );
+        assert_eq!(preview.cost_to_build(), P::Frigate.cost() * 3.0);
     }
 
     #[test]
     fn a_hover_reports_only_what_it_adds_to_the_shortfall_already_being_filled() {
         let mut world = world();
-        world.fix(0, SHIPYARD, HERE);
-        world.tick(&[Issued::want(0, HERE, FRIGATE, 2)]);
+        world.fix(0, P::Shipyard, HERE);
+        world.tick(&[Issued::want(0, HERE, P::Frigate, 2)]);
 
-        let preview = previewed(&world, &[want(HERE, FRIGATE, 3)]);
+        let preview = previewed(&world, &[want(HERE, P::Frigate, 3)]);
 
         let filling = preview
             .shortfalls
-            .get(&mine(HERE, FRIGATE))
+            .get(&mine(HERE, P::Frigate))
             .expect("one more is short");
         assert_eq!(
             filling.to_build, 1,
             "the two already short are not the hover's"
         );
-        assert_eq!(
-            preview.cost_to_build(world.state.roster()),
-            world.state[FRIGATE].cost
-        );
+        assert_eq!(preview.cost_to_build(), P::Frigate.cost());
     }
 
     #[test]
     fn lowering_a_want_refunds_the_share_of_the_cost_its_frame_consumed() {
         let mut world = world();
-        world.fix(0, SHIPYARD, HERE);
-        world.tick(&[Issued::want(0, HERE, FRIGATE, 1)]);
+        world.fix(0, P::Shipyard, HERE);
+        world.tick(&[Issued::want(0, HERE, P::Frigate, 1)]);
         world.run(60);
         let frame = world
             .state
             .frames()
             .iter()
-            .find(|frame| frame.row() == FRIGATE)
+            .find(|frame| frame.pattern() == P::Frigate)
             .expect("the frigate is building");
-        let cost = world.state[FRIGATE].cost;
+        let cost = P::Frigate.cost();
         let paid = cost * (frame.progress() / cost.total());
 
-        let preview = previewed(&world, &[want(HERE, FRIGATE, 0)]);
+        let preview = previewed(&world, &[want(HERE, P::Frigate, 0)]);
 
         assert!(paid.total() > 0.0, "the frame consumed something");
         assert_eq!(preview.refund, paid);
-        assert_eq!(preview.cost_to_build(world.state.roster()), Materials::ZERO);
+        assert_eq!(preview.cost_to_build(), Materials::ZERO);
     }
 
     #[test]
     fn lowering_a_want_the_state_is_still_short_of_adds_no_filling() {
         let mut world = world();
-        world.fix(0, SHIPYARD, HERE);
-        world.tick(&[Issued::want(0, HERE, FRIGATE, 3)]);
+        world.fix(0, P::Shipyard, HERE);
+        world.tick(&[Issued::want(0, HERE, P::Frigate, 3)]);
 
-        let preview = previewed(&world, &[want(HERE, FRIGATE, 2)]);
+        let preview = previewed(&world, &[want(HERE, P::Frigate, 2)]);
 
         assert_eq!(
-            preview.shortfalls.get(&mine(HERE, FRIGATE)),
+            preview.shortfalls.get(&mine(HERE, P::Frigate)),
             None,
             "a want coming down adds no filling of its own"
         );
@@ -276,17 +270,20 @@ mod tests {
     #[test]
     fn a_send_reports_its_units_arriving_from_the_asteroid_they_leave() {
         let mut world = world();
-        world.hold(0, FRIGATE, HERE, 0.0);
+        world.hold(0, P::Frigate, HERE, 0.0);
 
-        let preview = previewed(&world, &[want(HERE, FRIGATE, 0), want(AWAY, FRIGATE, 1)]);
+        let preview = previewed(
+            &world,
+            &[want(HERE, P::Frigate, 0), want(AWAY, P::Frigate, 1)],
+        );
 
         let filling = preview
             .shortfalls
-            .get(&mine(AWAY, FRIGATE))
+            .get(&mine(AWAY, P::Frigate))
             .expect("one is wanted away");
         assert_eq!(filling.sent_from, BTreeMap::from([(HERE, 1)]));
         assert_eq!(filling.to_build, 0, "a unit on its way builds nothing");
-        assert_eq!(preview.cost_to_build(world.state.roster()), Materials::ZERO);
+        assert_eq!(preview.cost_to_build(), Materials::ZERO);
     }
 
     #[test]
@@ -295,7 +292,7 @@ mod tests {
 
         let refused = world
             .state
-            .preview(ME, &[want(HERE, FRIGATE, crate::state::MAX_WANT + 1)]);
+            .preview(ME, &[want(HERE, P::Frigate, crate::state::MAX_WANT + 1)]);
 
         assert_eq!(refused, Err(Rejected::TooMany));
     }
@@ -303,8 +300,8 @@ mod tests {
     #[test]
     fn a_preview_of_no_wants_is_empty() {
         let mut world = world();
-        world.fix(0, SHIPYARD, HERE);
-        world.tick(&[Issued::want(0, HERE, FRIGATE, 2)]);
+        world.fix(0, P::Shipyard, HERE);
+        world.tick(&[Issued::want(0, HERE, P::Frigate, 2)]);
 
         assert_eq!(previewed(&world, &[]), Preview::default());
     }

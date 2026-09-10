@@ -184,12 +184,14 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    use crate::pattern::EntityPattern as P;
     use core::num::NonZeroU32;
 
     use super::*;
     use crate::TICKS_PER_SECOND;
-    use crate::ids::{AsteroidId, RowId, TeamId};
-    use crate::roster::{FRIGATE, METALS_EXTRACTOR, SHIPYARD};
+    use crate::ids::{AsteroidId, TeamId};
+    use crate::materials::Material;
+    use crate::pattern::EntityPattern;
     use crate::state::{
         Command, Issued, MAX_COMMANDS_PER_TICK, Motion, PlacementStage, STAGE_SPAN,
     };
@@ -234,13 +236,19 @@ mod tests {
         AsteroidId(at)
     }
 
-    fn want(seat: u8, seq: u32, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
+    fn want(
+        seat: u8,
+        seq: u32,
+        asteroid: AsteroidId,
+        pattern: EntityPattern,
+        count: u32,
+    ) -> Issued {
         Issued {
             seat: SeatId(seat),
             seq,
             command: Command::Want {
                 asteroid,
-                row,
+                pattern,
                 count,
             },
         }
@@ -259,12 +267,13 @@ mod tests {
             .enumerate()
             .map(|(at, stage)| {
                 let seq = u32::try_from(at).expect("a stage a seat");
-                let placing = want(stage.seat.0, seq, asteroid(at as u32), stage.row, 1);
+                let placing = want(stage.seat.0, seq, asteroid(at as u32), stage.pattern, 1);
                 stamped(STAGE_SPAN.0 * at as u64, placing)
             })
             .collect();
-        script.push(stamped(3, want(0, 8, worked(), METALS_EXTRACTOR, 2)));
-        script.push(stamped(9, want(0, 9, worked(), FRIGATE, 1)));
+        let extractor = P::Extractor(Material::Metals);
+        script.push(stamped(3, want(0, 8, worked(), extractor, 2)));
+        script.push(stamped(9, want(0, 9, worked(), P::Frigate, 1)));
         script.sort_by_key(|stamped| (stamped.tick, stamped.issued.seat, stamped.issued.seq));
         script
     }
@@ -274,7 +283,8 @@ mod tests {
     }
 
     fn worked() -> AsteroidId {
-        let mine = |stage: &&PlacementStage| stage.seat == SeatId(0) && stage.row == SHIPYARD;
+        let mine =
+            |stage: &&PlacementStage| stage.seat == SeatId(0) && stage.pattern == P::Shipyard;
         let at = stages().iter().position(|stage| mine(&stage));
         asteroid(at.expect("seat zero drafts a shipyard") as u32)
     }
@@ -343,7 +353,7 @@ mod tests {
         let mut session = session(span);
         run(&mut session, 20);
         let latest = session.state().tick();
-        let issued = want(0, 0, asteroid(0), SHIPYARD, 1);
+        let issued = want(0, 0, asteroid(0), P::Shipyard, 1);
 
         assert_eq!(
             session.insert(stamped(latest.back(span).0 - 1, issued)),
@@ -361,18 +371,24 @@ mod tests {
         for seq in 1..MAX_COMMANDS_PER_TICK as u32 {
             assert!(
                 session
-                    .insert(stamped(latest.0, want(0, seq, asteroid(0), SHIPYARD, 1)))
+                    .insert(stamped(latest.0, want(0, seq, asteroid(0), P::Shipyard, 1)))
                     .is_ok()
             );
         }
         let over = MAX_COMMANDS_PER_TICK as u32;
         assert_eq!(
-            session.insert(stamped(latest.0, want(0, over, asteroid(0), SHIPYARD, 1))),
+            session.insert(stamped(
+                latest.0,
+                want(0, over, asteroid(0), P::Shipyard, 1)
+            )),
             Err(Refused::TooMany)
         );
         assert!(
             session
-                .insert(stamped(latest.0, want(1, over, asteroid(0), SHIPYARD, 1)))
+                .insert(stamped(
+                    latest.0,
+                    want(1, over, asteroid(0), P::Shipyard, 1)
+                ))
                 .is_ok(),
             "the cap is one seat's"
         );
@@ -477,7 +493,7 @@ mod tests {
             let body = session.live.spawn_body(place, Time::ZERO);
             session.live.spawn(
                 SeatId((at / 21 % 2) as u8),
-                FRIGATE,
+                P::Frigate,
                 place,
                 Motion::Steered { body },
             );
@@ -491,7 +507,7 @@ mod tests {
             reason = "a test measuring wall time is not the sim reading a clock"
         )]
         let started = std::time::Instant::now();
-        let rewound = session.insert(stamped(oldest.0, want(1, 0, asteroid(4), FRIGATE, 1)));
+        let rewound = session.insert(stamped(oldest.0, want(1, 0, asteroid(4), P::Frigate, 1)));
         let took = started.elapsed().as_secs_f64();
 
         assert_eq!(rewound, Ok(Rewound::From(oldest)));

@@ -1,3 +1,6 @@
+use neumannarch_sim::Material;
+use neumannarch_sim::pattern::EntityPattern;
+
 use super::commitments::Commitments;
 use super::personality::Personality;
 use super::proposal::{Proposal, Reason};
@@ -8,6 +11,17 @@ const PAYBACK_HORIZON: f64 = 60.0;
 const STORE_TRIGGER: f64 = 0.9;
 
 pub struct Economy;
+
+fn yields_on_completion() -> Vec<EntityPattern> {
+    vec![
+        EntityPattern::Shipyard,
+        EntityPattern::Constructor,
+        EntityPattern::Storage,
+        EntityPattern::Extractor(Material::Metals),
+        EntityPattern::Extractor(Material::Volatiles),
+        EntityPattern::Extractor(Material::Energy),
+    ]
+}
 
 impl Economy {
     pub fn proposals(
@@ -23,12 +37,12 @@ impl Economy {
     }
 
     fn one_at_a_time(survey: &Survey, proposals: Vec<Proposal>) -> Vec<Proposal> {
-        let yielding = survey.roles.yields_on_completion();
+        let yielding = yields_on_completion();
         proposals
             .into_iter()
             .filter(|proposal| {
-                let (asteroid, row) = (proposal.posting.asteroid(), proposal.posting.row());
-                proposal.count <= survey.count(asteroid, row)
+                let (asteroid, pattern) = (proposal.posting.asteroid(), proposal.posting.pattern());
+                proposal.count <= survey.count(asteroid, pattern)
                     || !survey.short_of(asteroid, &yielding)
             })
             .collect()
@@ -43,23 +57,23 @@ impl Economy {
             .seconds()
             .min(PAYBACK_HORIZON);
         let mut proposals = Vec::new();
-        for (material, row) in &survey.roles.extractors {
-            let Some(stats) = survey.roster.get(*row).filter(|_| mix[*material] > 0.0) else {
+        for material in [Material::Metals, Material::Volatiles, Material::Energy] {
+            if mix[material] <= 0.0 {
                 continue;
-            };
+            }
+            let pattern = EntityPattern::Extractor(material);
             for asteroid in survey.developed() {
-                let pulls = stats
-                    .extracts_of(*material)
-                    .min(survey.spare_cap_at(asteroid, *material));
-                if pulls * repaying < stats.cost.total() {
+                let spare = survey.spare_cap_at(asteroid, material);
+                let pulls = pattern.extracts(material).min(spare);
+                if pulls * repaying < pattern.cost().total() {
                     continue;
                 }
-                let standing = survey.count(asteroid, *row);
+                let standing = survey.count(asteroid, pattern);
                 proposals.push(Proposal::at(
                     survey,
                     Reason::Economy,
                     asteroid,
-                    *row,
+                    pattern,
                     standing + 1,
                 ));
             }
@@ -68,9 +82,7 @@ impl Economy {
     }
 
     fn yards(survey: &Survey) -> Vec<Proposal> {
-        let Some(row) = survey.roles.yards.first().copied() else {
-            return Vec::new();
-        };
+        let pattern = EntityPattern::Shipyard;
         if survey.build_rate() >= survey.view.income.total() {
             return Vec::new();
         }
@@ -78,23 +90,24 @@ impl Economy {
             .building()
             .into_iter()
             .map(|asteroid| {
-                let standing = survey.count(asteroid, row);
-                Proposal::at(survey, Reason::Economy, asteroid, row, standing + 1)
+                let standing = survey.count(asteroid, pattern);
+                Proposal::at(survey, Reason::Economy, asteroid, pattern, standing + 1)
             })
             .collect()
     }
 
     fn stores(survey: &Survey, personality: &Personality) -> Vec<Proposal> {
-        let (Some(home), Some(row)) = (survey.home(), survey.roles.stores.first().copied()) else {
+        let Some(home) = survey.home() else {
             return Vec::new();
         };
+        let pattern = EntityPattern::Storage;
         let stockpile = &survey.view.stockpile;
         let full = stockpile.stock().total() >= STORE_TRIGGER * stockpile.capacity().total();
         vec![Proposal::at(
             survey,
             Reason::Economy,
             home,
-            row,
+            pattern,
             personality.stores + u32::from(full),
         )]
     }
@@ -104,10 +117,13 @@ impl Economy {
         personality: &Personality,
         commitments: &Commitments,
     ) -> Vec<Proposal> {
-        let (Some(home), Some(row)) = (survey.home(), survey.roles.masons.first().copied()) else {
+        let Some(home) = survey.home() else {
             return Vec::new();
         };
-        let spare = survey.count(home, row).saturating_sub(personality.masons);
+        let pattern = EntityPattern::Constructor;
+        let spare = survey
+            .count(home, pattern)
+            .saturating_sub(personality.masons);
         let claiming = personality.funding_order.contains(&Reason::Expansion)
             && commitments.claims() < personality.claims
             && survey.short_of_room(personality.demand(survey));
@@ -117,11 +133,11 @@ impl Economy {
             .into_iter()
             .filter(|asteroid| *asteroid != home)
             .map(|asteroid| {
-                let standing = survey.count(asteroid, row);
-                Proposal::at(survey, Reason::Economy, asteroid, row, standing)
+                let standing = survey.count(asteroid, pattern);
+                Proposal::at(survey, Reason::Economy, asteroid, pattern, standing)
             })
             .collect();
-        proposals.push(Proposal::at(survey, Reason::Economy, home, row, count));
+        proposals.push(Proposal::at(survey, Reason::Economy, home, pattern, count));
         proposals
     }
 }

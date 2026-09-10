@@ -1,9 +1,9 @@
-use neumannarch_sim::roster::{FRIGATE, Roster, SHIPYARD};
-
 use std::collections::BTreeMap;
 
+use neumannarch_sim::AsteroidId;
+use neumannarch_sim::pattern::EntityPattern;
+use neumannarch_sim::pattern::EntityPattern as P;
 use neumannarch_sim::state::MAX_WANT;
-use neumannarch_sim::{AsteroidId, RowId};
 
 use crate::bots::scripted::funding::*;
 use crate::bots::scripted::personality::Personality;
@@ -12,30 +12,28 @@ use crate::harness::fixture::{Fixture, surveyed};
 
 const FREE_ASTEROIDS: usize = 32;
 
-fn standing(fixture: &Fixture, asteroid: AsteroidId, row: RowId) -> u32 {
-    let roster = Roster::shipped();
+fn standing(fixture: &Fixture, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
     let view = fixture.view(0);
-    surveyed(&view, &roster).standing(asteroid, row)
+    surveyed(&view).standing(asteroid, pattern)
 }
 
 fn a_frigate_flown_where_no_builder_of_its_seat_stands() -> (Fixture, AsteroidId, AsteroidId) {
-    let roster = Roster::shipped();
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(FREE_ASTEROIDS);
     let home = free[0];
-    fixture.want(0, home, SHIPYARD, 1);
+    fixture.want(0, home, P::Shipyard, 1);
     let away = {
         let view = fixture.view(0);
-        surveyed(&view, &roster)
+        surveyed(&view)
             .nearest(home, &free[1..])
             .expect("the belt leaves a second asteroid free")
     };
-    fixture.want(0, home, FRIGATE, 2);
-    fixture.until(|fixture| standing(fixture, home, FRIGATE) == 2);
-    fixture.want(0, home, FRIGATE, 1);
-    fixture.want(0, away, FRIGATE, 1);
-    fixture.until(|fixture| standing(fixture, away, FRIGATE) == 1);
-    fixture.want(0, away, FRIGATE, 2);
+    fixture.want(0, home, P::Frigate, 2);
+    fixture.until(|fixture| standing(fixture, home, P::Frigate) == 2);
+    fixture.want(0, home, P::Frigate, 1);
+    fixture.want(0, away, P::Frigate, 1);
+    fixture.until(|fixture| standing(fixture, away, P::Frigate) == 1);
+    fixture.want(0, away, P::Frigate, 2);
     (fixture, home, away)
 }
 
@@ -44,11 +42,10 @@ fn a_frigate_flown_where_no_builder_of_its_seat_stands() -> (Fixture, AsteroidId
 fn a_proposal_is_funded_whole_or_not_at_all_until_the_budget_is_spent() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
-    let roster = Roster::shipped();
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     let yard = survey.held().first().copied().expect("a drafted shipyard");
     let asking = |count| Proposal {
-        posting: survey.posting(yard, FRIGATE),
+        posting: survey.posting(yard, P::Frigate),
         count,
         reason: Reason::Offence,
     };
@@ -73,21 +70,20 @@ fn a_proposal_is_funded_whole_or_not_at_all_until_the_budget_is_spent() {
 fn a_proposal_is_refused_where_no_builder_of_the_seat_stands() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
-    let roster = Roster::shipped();
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     let free = fixture.free(1)[0];
 
     let wants = Funding::over(
         &survey,
         &[Proposal {
-            posting: survey.posting(free, FRIGATE),
+            posting: survey.posting(free, P::Frigate),
             count: 1,
             reason: Reason::Offence,
         }],
     );
 
     assert_eq!(
-        wants.get(&survey.posting(free, FRIGATE)),
+        wants.get(&survey.posting(free, P::Frigate)),
         None,
         "nothing is built at an asteroid the seat does not build at"
     );
@@ -98,13 +94,12 @@ fn a_proposal_is_refused_where_no_builder_of_the_seat_stands() {
 fn a_want_nothing_stands_behind_and_no_proposal_asks_for_is_lowered_to_what_it_can_justify() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
-    fixture.want(0, free, SHIPYARD, 1);
-    fixture.want(0, free, FRIGATE, 3);
+    fixture.want(0, free, P::Shipyard, 1);
+    fixture.want(0, free, P::Frigate, 3);
     fixture.run(2);
     let view = fixture.view(0);
-    let roster = Roster::shipped();
-    let survey = surveyed(&view, &roster);
-    let posting = survey.posting(free, FRIGATE);
+    let survey = surveyed(&view);
+    let posting = survey.posting(free, P::Frigate);
 
     let wants = Funding::over(&survey, &[]);
 
@@ -122,14 +117,13 @@ fn a_want_nothing_stands_behind_and_no_proposal_asks_for_is_lowered_to_what_it_c
 fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
-    fixture.want(0, free, FRIGATE, 1);
+    fixture.want(0, free, P::Frigate, 1);
     fixture.run(2);
     let view = fixture.view(0);
-    let roster = Roster::shipped();
-    let survey = surveyed(&view, &roster);
-    let posting = survey.posting(free, FRIGATE);
+    let survey = surveyed(&view);
+    let posting = survey.posting(free, P::Frigate);
     assert!(
-        survey.frame_open(free, FRIGATE),
+        survey.frame_open(free, P::Frigate),
         "no frame stands at {free:?} to fund"
     );
     assert!(!survey.builds_at(free), "a builder reached {free:?}");
@@ -153,13 +147,12 @@ fn a_frame_no_builder_of_the_seat_can_fill_funds_nothing_behind_it() {
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
-    let roster = Roster::shipped();
     let (fixture, home, away) = a_frigate_flown_where_no_builder_of_its_seat_stands();
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
-    let posting = survey.posting(away, FRIGATE);
+    let survey = surveyed(&view);
+    let posting = survey.posting(away, P::Frigate);
     assert!(
-        survey.frame_open(away, FRIGATE),
+        survey.frame_open(away, P::Frigate),
         "no frame stands at {away:?} to leave anything behind"
     );
     assert!(
@@ -167,7 +160,7 @@ fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
         "a builder of the seat reached {away:?}"
     );
     assert_eq!(
-        survey.standing(away, FRIGATE),
+        survey.standing(away, P::Frigate),
         1,
         "the flown frigate never stood at {away:?}"
     );
@@ -176,7 +169,7 @@ fn a_frame_no_builder_of_the_seat_can_fill_leaves_no_want_behind_it() {
         &survey,
         &[
             Proposal {
-                posting: survey.posting(home, FRIGATE),
+                posting: survey.posting(home, P::Frigate),
                 count: 0,
                 reason: Reason::Offence,
             },

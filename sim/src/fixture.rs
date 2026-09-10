@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
+use crate::ids::{AsteroidId, EntityId, SeatId, TeamId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
+use crate::pattern::EntityPattern;
 use crate::post::Post;
-use crate::roster::Roster;
 use crate::setup::Setup;
 use crate::state::view::View;
 use crate::state::{Asteroid, Batch, Command, Issued, Motion, Rejected, Rolls, Seat, State, view};
@@ -50,12 +50,8 @@ impl World {
     }
 
     pub(crate) fn seated(seats: Vec<Seat>) -> World {
-        World::crewed(Roster::shipped(), seats)
-    }
-
-    pub(crate) fn crewed(roster: Roster, seats: Vec<Seat>) -> World {
         let mut world = World {
-            state: State::new(CLOCK, 0, Belt::GRAVITY, roster, Belt::from_seed(0), seats),
+            state: State::new(CLOCK, 0, Belt::GRAVITY, Belt::from_seed(0), seats),
         };
         world.start_the_clock();
         world
@@ -66,9 +62,9 @@ impl World {
             .reserve()
             .keys()
             .enumerate()
-            .map(|(at, row)| {
+            .map(|(at, pattern)| {
                 let at = at as u32;
-                Issued::numbered(seat, at, AsteroidId(from.0 + at), *row, 1)
+                Issued::numbered(seat, at, AsteroidId(from.0 + at), *pattern, 1)
             })
             .collect();
         self.tick(&picks);
@@ -81,7 +77,7 @@ impl World {
         self.state.close_draft();
     }
 
-    pub fn stocked(stock: Materials, reserve: BTreeMap<RowId, u32>) -> World {
+    pub fn stocked(stock: Materials, reserve: BTreeMap<EntityPattern, u32>) -> World {
         World::seated(vec![Seat::new(TeamId(0), stock, reserve)])
     }
 
@@ -91,7 +87,6 @@ impl World {
                 CLOCK,
                 0,
                 gravity,
-                Roster::shipped(),
                 (0..asteroids).map(|at| ringed(at, gravity)).collect(),
                 teams
                     .iter()
@@ -141,14 +136,15 @@ impl World {
         outcome.rejected.first().map(|(_, why)| *why)
     }
 
-    pub fn fix(&mut self, seat: u8, row: RowId, asteroid: AsteroidId) -> EntityId {
-        self.state.spawn(SeatId(seat), row, asteroid, Motion::Fixed)
+    pub fn fix(&mut self, seat: u8, pattern: EntityPattern, asteroid: AsteroidId) -> EntityId {
+        self.state
+            .spawn(SeatId(seat), pattern, asteroid, Motion::Fixed)
     }
 
     pub(crate) fn hold(
         &mut self,
         seat: u8,
-        row: RowId,
+        pattern: EntityPattern,
         asteroid: AsteroidId,
         out_meters: f64,
     ) -> EntityId {
@@ -156,23 +152,29 @@ impl World {
         let radial = body.pos.normalized().expect("a radius");
         self.free(
             seat,
-            row,
+            pattern,
             asteroid,
             Body::new(body.pos + radial * out_meters, body.vel),
         )
     }
 
-    pub fn free(&mut self, seat: u8, row: RowId, asteroid: AsteroidId, body: Body) -> EntityId {
+    pub fn free(
+        &mut self,
+        seat: u8,
+        pattern: EntityPattern,
+        asteroid: AsteroidId,
+        body: Body,
+    ) -> EntityId {
         self.state
-            .spawn(SeatId(seat), row, asteroid, Motion::Steered { body })
+            .spawn(SeatId(seat), pattern, asteroid, Motion::Steered { body })
     }
 
     pub fn send(&mut self, entity: EntityId, to: AsteroidId) {
         self.state.re_home(&BTreeMap::from([(entity, to)]));
     }
 
-    pub fn count(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.state.count(Post::of(seat, asteroid), row)
+    pub fn count(&self, seat: u8, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
+        self.state.count(Post::of(seat, asteroid), pattern)
     }
 
     pub fn progress(&self, seat: u8, asteroid: AsteroidId) -> f64 {
@@ -182,10 +184,10 @@ impl World {
             .sum()
     }
 
-    pub fn frames(&self, seat: u8, asteroid: AsteroidId, row: RowId) -> usize {
+    pub fn frames(&self, seat: u8, asteroid: AsteroidId, pattern: EntityPattern) -> usize {
         self.state
             .frames_at(Post::of(seat, asteroid))
-            .filter(|frame| frame.row() == row)
+            .filter(|frame| frame.pattern() == pattern)
             .count()
     }
 
@@ -252,15 +254,15 @@ impl Batch {
 }
 
 impl Issued {
-    pub fn want(seat: u8, asteroid: AsteroidId, row: RowId, count: u32) -> Issued {
-        Issued::numbered(seat, 0, asteroid, row, count)
+    pub fn want(seat: u8, asteroid: AsteroidId, pattern: EntityPattern, count: u32) -> Issued {
+        Issued::numbered(seat, 0, asteroid, pattern, count)
     }
 
     pub(crate) fn numbered(
         seat: u8,
         seq: u32,
         asteroid: AsteroidId,
-        row: RowId,
+        pattern: EntityPattern,
         count: u32,
     ) -> Issued {
         Issued {
@@ -268,7 +270,7 @@ impl Issued {
             seq,
             command: Command::Want {
                 asteroid,
-                row,
+                pattern,
                 count,
             },
         }

@@ -20,12 +20,12 @@ pub(crate) use wants::Wants;
 
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::Materials;
 use crate::orbit::body::{Body, Gravity};
+use crate::pattern::{EntityPattern, Kind, Slot};
 use crate::post::Post;
 use crate::posting::Posting;
-use crate::roster::{DamagePlace, Kind, Roster, Row};
 use crate::time::{Moment, Tick, Time};
 use crate::vec3::Vec3;
 
@@ -44,7 +44,6 @@ pub struct State {
     seed: u64,
     gravity: Gravity,
     seats: Vec<Seat>,
-    roster: Roster,
     asteroids: Vec<Asteroid>,
     pub(crate) entities: Entities,
     wants: BTreeMap<Post, Wants>,
@@ -57,18 +56,16 @@ impl State {
         length: Time,
         seed: u64,
         gravity: Gravity,
-        roster: Roster,
         asteroids: Vec<Asteroid>,
         seats: Vec<Seat>,
     ) -> State {
         State {
             tick: Tick::ZERO,
             length,
-            draft: Draft::of(seed, &seats, &roster),
+            draft: Draft::of(seed, &seats),
             seed,
             gravity,
             seats,
-            roster,
             asteroids,
             entities: Entities::empty(),
             wants: BTreeMap::new(),
@@ -142,10 +139,6 @@ impl State {
         self.seats.get(usize::from(id.0))
     }
 
-    pub fn roster(&self) -> &Roster {
-        &self.roster
-    }
-
     pub fn wants(&self, post: Post) -> Option<&Wants> {
         self.wants.get(&post)
     }
@@ -161,7 +154,7 @@ impl State {
     pub fn held_by(&self, seat: SeatId) -> impl Iterator<Item = AsteroidId> {
         self.deduped(
             self.of_seat(seat)
-                .filter(|entity| self[entity.row()].kind() == Kind::Structure)
+                .filter(|entity| entity.pattern().kind() == Kind::Structure)
                 .filter_map(Entity::standing),
         )
     }
@@ -196,18 +189,22 @@ impl State {
         self.frames.iter().filter(move |frame| frame.post() == post)
     }
 
-    pub fn frames_of(&self, post: Post, row: RowId) -> impl Iterator<Item = (usize, &Frame)> {
+    pub fn frames_of(
+        &self,
+        post: Post,
+        pattern: EntityPattern,
+    ) -> impl Iterator<Item = (usize, &Frame)> {
         self.frames
             .iter()
             .enumerate()
-            .filter(move |(_, frame)| frame.post() == post && frame.row() == row)
+            .filter(move |(_, frame)| frame.post() == post && frame.pattern() == pattern)
     }
 
     pub(crate) fn homed(&self) -> BTreeMap<Posting, u32> {
         let mut homed: BTreeMap<Posting, u32> = BTreeMap::new();
         for entity in self.entities() {
             *homed
-                .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+                .entry(Posting::of(entity.home(), entity.seat(), entity.pattern()))
                 .or_default() += 1;
         }
         homed
@@ -218,8 +215,8 @@ impl State {
         self.posts()
             .flat_map(|(post, wants)| {
                 let homed = &homed;
-                wants.iter().filter_map(move |(row, want)| {
-                    let posting = Posting::new(post, row);
+                wants.iter().filter_map(move |(pattern, want)| {
+                    let posting = Posting::new(post, pattern);
                     want.checked_sub(homed.get(&posting).copied().unwrap_or_default())
                         .filter(|missing| *missing > 0)
                         .map(|missing| (posting, missing))
@@ -228,20 +225,20 @@ impl State {
             .collect()
     }
 
-    pub fn count(&self, post: Post, row: RowId) -> u32 {
-        let counted = self.posted(post, row).count();
+    pub fn count(&self, post: Post, pattern: EntityPattern) -> u32 {
+        let counted = self.posted(post, pattern).count();
         u32::try_from(counted).unwrap_or(u32::MAX)
     }
 
     pub fn surplus_at(&self, posting: Posting) -> Vec<EntityId> {
-        let (post, row) = (posting.post(), posting.row());
+        let (post, pattern) = (posting.post(), posting.pattern());
         let covered = self
             .wants(post)
-            .map_or(0, |wants| wants.get(row))
-            .saturating_sub(self.frames_of(post, row).count() as u32);
+            .map_or(0, |wants| wants.get(pattern))
+            .saturating_sub(self.frames_of(post, pattern).count() as u32);
         let mut posted: usize = 0;
         let mut held: Vec<EntityId> = Vec::new();
-        for entity in self.posted(post, row) {
+        for entity in self.posted(post, pattern) {
             posted += 1;
             if entity.standing().is_some() {
                 held.push(entity.id());
@@ -252,16 +249,16 @@ impl State {
         held
     }
 
-    fn posted(&self, post: Post, row: RowId) -> impl Iterator<Item = Entity<'_>> {
+    fn posted(&self, post: Post, pattern: EntityPattern) -> impl Iterator<Item = Entity<'_>> {
         self.entities
             .homed_at(post.asteroid)
-            .filter(move |entity| entity.seat() == post.seat && entity.row() == row)
+            .filter(move |entity| entity.seat() == post.seat && entity.pattern() == pattern)
     }
 
     pub fn holdings(&self) -> BTreeMap<Posting, Held> {
         let mut holdings: BTreeMap<Posting, Held> = BTreeMap::new();
         for entity in self.entities.iter() {
-            let at = |asteroid: AsteroidId| Posting::of(asteroid, entity.seat(), entity.row());
+            let at = |asteroid: AsteroidId| Posting::of(asteroid, entity.seat(), entity.pattern());
             match entity.standing() {
                 Some(asteroid) => holdings.entry(at(asteroid)).or_default().present += 1,
                 None => holdings.entry(at(entity.home())).or_default().arriving += 1,
@@ -287,35 +284,35 @@ impl State {
     pub(crate) fn spawn(
         &mut self,
         seat: SeatId,
-        row: RowId,
+        pattern: EntityPattern,
         home: AsteroidId,
         motion: Motion,
     ) -> EntityId {
-        let id = self.entities.spawn(seat, row, home, self[row].hp.0, motion);
-        let places: Vec<DamagePlace> = self[row].damage_places().collect();
-        self.ready
-            .ready_from(id, places.into_iter(), Moment::at(self.time()));
+        let id = self.entities.spawn(seat, pattern, home, motion);
+        let guns = pattern.hitscans().map(|(slot, _)| slot);
+        self.ready.ready_from(id, guns, Moment::at(self.time()));
         id
     }
 
-    pub(crate) fn place_from_reserve(&mut self, post: Post, row: RowId, ran: Time) {
+    pub(crate) fn place_from_reserve(&mut self, post: Post, pattern: EntityPattern, ran: Time) {
         if self
             .seat_mut(post.seat)
-            .is_some_and(|seat| seat.take_reserved(row))
+            .is_some_and(|seat| seat.take_reserved(pattern))
         {
-            self.draft.place(post.asteroid, post.seat, row, self.tick);
-            self.spawn_at(post, row, ran);
+            self.draft
+                .place(post.asteroid, post.seat, pattern, self.tick);
+            self.spawn_at(post, pattern, ran);
         }
     }
 
-    pub(crate) fn spawn_at(&mut self, post: Post, row: RowId, ran: Time) {
-        let motion = match self[row].kind() {
+    pub(crate) fn spawn_at(&mut self, post: Post, pattern: EntityPattern, ran: Time) {
+        let motion = match pattern.kind() {
             Kind::Structure => Motion::Fixed,
             Kind::Unit => Motion::Steered {
                 body: self.spawn_body(post.asteroid, self.time().after(ran)),
             },
         };
-        self.spawn(post.seat, row, post.asteroid, motion);
+        self.spawn(post.seat, pattern, post.asteroid, motion);
     }
 
     pub(crate) fn spawn_body(&self, asteroid: AsteroidId, at: Time) -> Body {
@@ -343,11 +340,6 @@ impl State {
 
     pub(crate) fn arrive(&mut self, arrived: &[EntityId]) {
         self.entities.arrive(arrived);
-    }
-
-    pub(crate) fn heal(&mut self, id: EntityId, hp: f64) {
-        let full = self[self.entity(id).row()].hp.0;
-        self.entities.heal(id, hp, full);
     }
 
     pub(crate) fn reap(&mut self) -> Vec<EntityId> {
@@ -399,18 +391,18 @@ impl State {
     pub(crate) fn set_ready(
         &mut self,
         entity: EntityId,
-        place: DamagePlace,
+        slot: Slot,
         at: Moment,
         kept: Option<EntityId>,
     ) {
-        self.ready.ready_again(entity, place, at, kept);
+        self.ready.ready_again(entity, slot, at, kept);
     }
 
     pub(crate) fn refresh_capacities(&mut self) {
         let mut carried = vec![Materials::ZERO; self.seats.len()];
         for entity in self.entities.iter() {
             if let Some(sum) = carried.get_mut(usize::from(entity.seat().0)) {
-                *sum += self.roster[entity.row()].capacity;
+                *sum += entity.pattern().capacity();
             }
         }
         for (seat, carried) in self.seats.iter_mut().zip(carried) {
@@ -425,14 +417,6 @@ impl Index<AsteroidId> for State {
 
     fn index(&self, id: AsteroidId) -> &Asteroid {
         &self.asteroids[id.0 as usize]
-    }
-}
-
-impl Index<RowId> for State {
-    type Output = Row;
-
-    fn index(&self, id: RowId) -> &Row {
-        &self.roster[id]
     }
 }
 
@@ -478,7 +462,7 @@ mod tests {
     use super::*;
     use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::roster::Kind;
+    use crate::pattern::EntityPattern as P;
     use crate::vec3::Vec3;
 
     const ASTEROID: AsteroidId = AsteroidId(0);
@@ -492,7 +476,7 @@ mod tests {
     #[test]
     fn reaping_the_dead_takes_every_dead_units_damage_places_whatever_order_they_stand_in() {
         let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)]);
-        let raider = crate::roster::RAIDER;
+        let raider = P::Raider;
         let later_asteroid_first = world.hold(0, raider, AsteroidId(1), 0.0);
         let earlier_asteroid_second = world.hold(0, raider, AsteroidId(0), 0.0);
         for unit in [later_asteroid_first, earlier_asteroid_second] {
@@ -508,20 +492,11 @@ mod tests {
         );
     }
 
-    fn row_of(state: &State, kind: Kind) -> RowId {
-        state
-            .roster()
-            .iter()
-            .find(|(_, row)| row.kind() == kind)
-            .map(|(id, _)| id)
-            .expect("the shipped roster has both kinds")
-    }
-
     #[test]
     fn held_by_names_the_asteroids_of_a_seats_structures_and_occupied_by_all_it_is_homed_at() {
         let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1)]);
-        let structure = row_of(&world.state, Kind::Structure);
-        let unit = row_of(&world.state, Kind::Unit);
+        let structure = P::Storage;
+        let unit = P::Raider;
         let away = AsteroidId(1);
         let body = world.state.spawn_body(away, world.state.time());
         world.fix(0, structure, ASTEROID);
@@ -545,10 +520,10 @@ mod tests {
     }
 
     #[test]
-    fn count_is_the_seat_entities_of_the_row_at_the_asteroid() {
+    fn count_is_the_seat_entities_of_the_pattern_at_the_asteroid() {
         let mut world = world();
-        let structure = row_of(&world.state, Kind::Structure);
-        let unit = row_of(&world.state, Kind::Unit);
+        let structure = P::Storage;
+        let unit = P::Raider;
         let first = world.fix(0, structure, ASTEROID);
         let second = world.fix(0, structure, ASTEROID);
         world.fix(1, structure, ASTEROID);
@@ -557,15 +532,15 @@ mod tests {
         assert_eq!(world.count(0, ASTEROID, unit), 0);
         assert_eq!(world.count(1, ASTEROID, structure), 1);
         assert_eq!(world.state.entities().count(), 3);
-        assert_eq!(world.state.entity(first).hp(), world.state[structure].hp.0);
+        assert_eq!(world.state.entity(first).hp(), structure.hp().0);
         assert_eq!(world.state.entity(second).id(), second);
     }
 
     #[test]
     fn a_fixed_entity_has_its_asteroids_body_and_a_free_one_its_own() {
         let mut world = world();
-        let structure = row_of(&world.state, Kind::Structure);
-        let unit = row_of(&world.state, Kind::Unit);
+        let structure = P::Storage;
+        let unit = P::Raider;
         let body = Body::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
         let fixed = world.fix(0, structure, ASTEROID);
         let free = world.free(0, unit, ASTEROID, body);

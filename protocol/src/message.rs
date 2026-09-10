@@ -44,8 +44,9 @@ pub enum Message {
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::pattern::EntityPattern;
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{AsteroidId, RowId, TeamId};
+    use neumannarch_sim::{AsteroidId, TeamId};
 
     use super::*;
     use crate::lobby::Holder;
@@ -86,7 +87,7 @@ mod tests {
                     seq: 4,
                     command: Command::Want {
                         asteroid: AsteroidId(6),
-                        row: RowId(2),
+                        pattern: EntityPattern::Storage,
                         count: 3,
                     },
                 },
@@ -110,6 +111,31 @@ mod tests {
                 Message::decode(&message.encoded()),
                 Ok(message.clone()),
                 "{message:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_want_of_every_pattern_comes_back_off_the_wire_as_it_went_on() {
+        for pattern in EntityPattern::EVERY {
+            let message = Message::Relayed(Relayed::Command(Stamped {
+                tick: Tick(9),
+                issued: Issued {
+                    seat: SeatId(1),
+                    seq: 4,
+                    command: Command::Want {
+                        asteroid: AsteroidId(6),
+                        pattern,
+                        count: 3,
+                    },
+                },
+            }));
+
+            assert_eq!(
+                Message::decode(&message.encoded()),
+                Ok(message.clone()),
+                "{}",
+                pattern.name()
             );
         }
     }

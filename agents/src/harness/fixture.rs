@@ -1,18 +1,16 @@
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, State};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Retention, RowId, SeatId, Sequence, Session, Setup, Stamped, TICKS_PER_SECOND,
+    AsteroidId, Retention, SeatId, Sequence, Session, Setup, Stamped, TICKS_PER_SECOND,
 };
 
 use crate::Seated;
 use crate::bots::scripted::Scripted;
 use crate::bots::scripted::personality::Personality;
-use crate::bots::scripted::roles::Roles;
 use crate::bots::scripted::survey::Survey;
 use crate::harness::played_match::{BELT_SEED, free_for_all, minutes};
 
@@ -39,10 +37,9 @@ impl Fixture {
         };
         for (seat, personality) in ids.into_iter().zip(seats) {
             match personality {
-                Some(personality) => fixture.playing.push(Seated::new(
-                    seat,
-                    Box::new(Scripted::new(personality, Roster::shipped())),
-                )),
+                Some(personality) => fixture
+                    .playing
+                    .push(Seated::new(seat, Box::new(Scripted::new(personality)))),
                 None => {
                     fixture.hands.insert(seat, Sequence::new(seat));
                 }
@@ -92,7 +89,13 @@ impl Fixture {
         }
     }
 
-    pub(crate) fn want(&mut self, seat: u8, asteroid: AsteroidId, row: RowId, count: u32) {
+    pub(crate) fn want(
+        &mut self,
+        seat: u8,
+        asteroid: AsteroidId,
+        pattern: EntityPattern,
+        count: u32,
+    ) {
         let tick = self.state().tick();
         let sequence = self
             .hands
@@ -102,7 +105,7 @@ impl Fixture {
             tick,
             Command::Want {
                 asteroid,
-                row,
+                pattern,
                 count,
             },
         );
@@ -140,11 +143,6 @@ impl Fixture {
     }
 }
 
-pub(crate) fn surveyed<'a>(view: &'a View, roster: &'a Roster) -> Survey<'a> {
-    static ROLES: OnceLock<Roles> = OnceLock::new();
-    Survey::of(
-        view,
-        roster,
-        ROLES.get_or_init(|| Roles::of(&Roster::shipped())),
-    )
+pub(crate) fn surveyed(view: &View) -> Survey<'_> {
+    Survey::of(view)
 }

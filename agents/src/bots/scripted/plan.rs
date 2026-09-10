@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use neumannarch_sim::Posting;
+use neumannarch_sim::pattern::Kind;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_COMMANDS_PER_TICK};
 
@@ -60,11 +61,12 @@ impl Plan {
 
     fn drafting(survey: &Survey, personality: &Personality) -> Plan {
         let mut wants: BTreeMap<Posting, u32> = BTreeMap::new();
-        for (asteroid, rows) in &survey.mine {
-            for (row, held) in rows.iter().filter(|(row, _)| survey.is_structure(**row)) {
-                if held.present > 0 {
-                    wants.insert(survey.posting(*asteroid, *row), held.present);
-                }
+        for (asteroid, patterns) in &survey.mine {
+            let standing = patterns
+                .iter()
+                .filter(|(pattern, held)| pattern.kind() == Kind::Structure && held.present > 0);
+            for (pattern, held) in standing {
+                wants.insert(survey.posting(*asteroid, *pattern), held.present);
             }
         }
         let staged = survey
@@ -75,7 +77,7 @@ impl Plan {
         if let Some(stage) = staged
             && let Some(asteroid) = survey.fittest(personality.wanted_shares(survey))
         {
-            wants.insert(survey.posting(asteroid, stage.row), 1);
+            wants.insert(survey.posting(asteroid, stage.pattern), 1);
         }
         Plan { wants }
     }
@@ -113,7 +115,7 @@ fn ranked(order: &[Reason], reason: Reason) -> usize {
 pub(super) fn want(posting: Posting, count: u32) -> Command {
     Command::Want {
         asteroid: posting.asteroid(),
-        row: posting.row(),
+        pattern: posting.pattern(),
         count,
     }
 }

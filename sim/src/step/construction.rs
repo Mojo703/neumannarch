@@ -59,7 +59,7 @@ impl<'a> Construction<'a> {
             for seat in roll.seats() {
                 if roll
                     .of_seat(seat)
-                    .any(|entity| self.state[entity.row()].builds().next().is_some())
+                    .any(|entity| entity.pattern().build_rate() > 0.0)
                 {
                     building.entry(seat).or_default().push(roll.asteroid());
                 }
@@ -70,7 +70,8 @@ impl<'a> Construction<'a> {
 
     fn builders(&self, roll: &Roll, seat: SeatId) -> Vec<f64> {
         roll.of_seat(seat)
-            .flat_map(|entity| self.state[entity.row()].builds())
+            .map(|entity| entity.pattern().build_rate())
+            .filter(|rate| *rate > 0.0)
             .collect()
     }
 
@@ -88,7 +89,7 @@ impl<'a> Construction<'a> {
             .map(|at| {
                 let frame = &self.state.frames()[*at];
                 Work {
-                    cost: self.state[frame.row()].cost,
+                    cost: frame.pattern().cost(),
                     progress: frame.progress(),
                 }
             })
@@ -117,14 +118,14 @@ impl<'a> Construction<'a> {
         let damaged: Vec<Entity> = roll
             .standing()
             .filter(|entity| self.state[entity.seat()].team() == team)
-            .filter(|entity| entity.hp() < self.state[entity.row()].hp.0)
+            .filter(|entity| entity.hp() < entity.pattern().hp().0)
             .collect();
         if damaged.is_empty() || effort <= 0.0 {
             return;
         }
         let share = effort / damaged.len() as f64;
         for entity in damaged {
-            let missing = self.state[entity.row()].hp.0 - entity.hp();
+            let missing = entity.pattern().hp().0 - entity.hp();
             progress.repairs.push(Repair {
                 entity: entity.id(),
                 hp: share.min(missing),
@@ -325,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn a_metals_only_row_is_not_slowed_by_an_energy_shortage() {
+    fn a_metals_only_pattern_is_not_slowed_by_an_energy_shortage() {
         let works = [
             Work {
                 cost: Materials::new(10.0, 0.0, 0.0),

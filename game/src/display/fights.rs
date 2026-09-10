@@ -151,7 +151,7 @@ mod tests {
             seq: 0,
             command: Command::Want {
                 asteroid: ASTEROID,
-                row: stage.row,
+                pattern: stage.pattern,
                 count: 1,
             },
         };

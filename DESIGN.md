@@ -5,9 +5,9 @@ the simulation computes; DISPLAY.md is the authority on what the player
 sees, and the code on how it is shaped. Where this document is silent,
 prefer the reading that adds no new type, field, or rule. Numbers live in the
 roster in `sim`, never here. Distances are metres, times seconds and
-rates per second throughout. The roster is the table of rows a match is
-played with; a row is one kind of entity, a ship or a structure, with its
-stats; a want is a count of a row a player asks for at an asteroid.
+rates per second throughout. The roster is the table of patterns a match is
+played with; a pattern is one kind of entity, a ship or a structure, with its
+stats; a want is a count of a pattern a player asks for at an asteroid.
 
 ## Fantasy
 
@@ -23,11 +23,11 @@ probe; the win is holding the system when the clock runs out.
 1. **Decisions are the player's; execution is the sim's.** The player states
    what they want and where. The sim fills it by fixed rules that contain no
    judgement. The player never references a unit.
-2. **One verb.** Set the count of a row at an asteroid. Everything else
+2. **One verb.** Set the count of a pattern at an asteroid. Everything else
    the player does is a client gesture that issues that verb.
 3. **Emergent, deterministic outcomes.** Counters come from stats and
-   geometry, never from tables of types. A row states its role, and the
-   role decides only the row's glyph and whether it runs passes or holds
+   geometry, never from tables of types. A pattern states its role, and the
+   role decides only the pattern's glyph and whether it runs passes or holds
    its station. No randomness.
 4. **Short matches.** A match ends at the clock, minutes rather than hours.
 5. **Two to four players in any team shape.** One against one is the balance
@@ -41,7 +41,7 @@ probe; the win is holding the system when the clock runs out.
   alike. A side with no entities and an empty reserve is out before the
   clock.
 - Start: nothing on the map. Each player has a stockpile and a reserve, a
-  count per row, of one shipyard and one constructor. A match opens in
+  count per pattern, of one shipyard and one constructor. A match opens in
   the placement draft, with time stopped: no body moves, nothing is
   extracted, nothing builds, nothing is sent and nothing fires until the
   clock starts, and the belt is
@@ -54,9 +54,9 @@ probe; the win is holding the system when the clock runs out.
   the next begins at once. A seat whose placement stage ran out keeps
   the right to place and may do so at any later tick, alongside the
   running one, first come first served. A placement is a want the seat's
-  reserve fills: the row appears at the asteroid at once, complete, and
-  the placement stage it was held for is placed. An asteroid any seat
-  has a body homed at is taken. A want that would draw the seat's
+  reserve fills: an entity of the pattern appears at the asteroid at once,
+  complete, and the placement stage it was held for is placed. An asteroid
+  any seat has a body homed at is taken. A want that would draw the seat's
   reserve is refused by name before that seat's first placement stage
   has begun, and refused by name at a taken asteroid, whatever its
   count. Any other want is accepted during the
@@ -114,10 +114,10 @@ probe; the win is holding the system when the clock runs out.
   because the same gravity moves them.
 - Units thrust with infinite fuel, under two constant limits: the
   movement limit, one value for every unit, spent only on a transfer
-  between asteroids, and a manoeuvring limit per row, far below it,
+  between asteroids, and a manoeuvring limit per pattern, far below it,
   spent holding position, keeping apart and fighting, in flight as at
   home. Every send crosses the same distance in the same time whatever
-  is in it; rows differ in how they hold, chase and give way. Movement
+  is in it; patterns differ in how they hold, chase and give way. Movement
   and combat states how each is used.
 - No collisions. Entity size is visual. Arrival is the rule's tolerance
   being met (Movement and combat), never a distance a player can read.
@@ -127,26 +127,26 @@ probe; the win is holding the system when the clock runs out.
 - Three: metals, volatiles, energy. Stockpiled per player, each with a
   capacity; excess is lost. All three are extracted from asteroids. A player's
   capacity starts at what it starts holding, so nothing it begins with is
-  lost, and the rows that carry capacity add to that. A hypothesis.
+  lost, and the patterns that carry capacity add to that. A hypothesis.
 - Materials differ only by where they are. Map generation gives asteroids
   regionally distinct cap triples.
-- Cost vectors split roles: nimble rows are volatile-heavy, armoured rows
-  metal-heavy, long-range and fast-building rows energy-heavy.
-- Capacity comes from the rows that carry it, storage among them.
+- Cost vectors split roles: nimble patterns are volatile-heavy, armoured
+  patterns metal-heavy, long-range and fast-building patterns energy-heavy.
+- Capacity comes from the patterns that carry it, storage among them.
 
 ## Entity
 
-One row schema. Every entity is a copy of its row plus position, velocity,
+One pattern schema. Every entity is a copy of its pattern plus position, velocity,
 HP, and its home asteroid.
 
 | field | notes |
 |---|---|
-| role | what the row is for; it decides the glyph, and short-range fire runs passes where every other role holds its station; nothing else reads it |
+| role | what the pattern is for; it decides the glyph, and short-range fire runs passes where every other role holds its station; nothing else reads it |
 | manoeuvring | the manoeuvring limit, below the movement limit; zero for structures |
 | holding weights | one weight per term of the holding rule; every weight is zero for a structure, which never moves, and above zero for every unit |
 | HP | |
 | plating | flat damage reduction per hit |
-| effects | see Effects |
+| effects | at most two, each a named effect of the roster; see Effects |
 | cost | a material triple |
 | capacity | stockpile capacity contributed, per material |
 
@@ -163,7 +163,9 @@ HP, and its home asteroid.
 
 ## Effects
 
-Every effect has a kind, and each kind carries its own fields.
+Every effect has a kind, and each kind carries its own fields. An effect is a
+named entry of the roster, a pattern carries at most two, and a second
+pattern may carry the same one.
 
 - **Damage.** Hitscan: the shot lands the instant it is fired, at any
   distance inside its range, so nothing travels and nothing is led. It
@@ -176,7 +178,7 @@ Every effect has a kind, and each kind carries its own fields.
   its home asteroid. The asteroid's cap for that material is the
   ceiling: at the cap, it is split equally among the extractors of that
   material there, and any share an extractor cannot use is split among
-  the rest. The roster ships one extractor row per material, so what an
+  the rest. The roster ships one extractor pattern per material, so what an
   asteroid yields is a per-asteroid decision against its caps.
 
 **Build is flow.** Every shortfall is a frame draining the stockpile
@@ -211,29 +213,29 @@ step, so a unit destroyed this tick still acts this tick.
 ## Compositions
 
 A place is an asteroid. A composition is a player's want at a place: a count
-per row. Each place holds at most one composition per player. The verb
+per pattern. Each place holds at most one composition per player. The verb
 sets one count.
 
 - Every entity belongs to one place, its home. A unit in transit counts
   toward its home.
 - **Reserve.** A shortfall is filled from the player's reserve before
   anything else: the entity appears at the place, complete, at once.
-- **Surplus.** When a place has more of a row than its want, the
-  highest-indexed units of that row there are surplus. Where a shortfall
-  of the row exists elsewhere, a place's complete units are surplus
-  before its frames of that row are unwanted, so lowering a want to send
+- **Surplus.** When a place has more of a pattern than its want, the
+  highest-indexed units of that pattern there are surplus. Where a shortfall
+  of the pattern exists elsewhere, a place's complete units are surplus
+  before its frames of that pattern are unwanted, so lowering a want to send
   a unit away sends the unit and keeps the frame building; where no
   shortfall wants them, the frames are cancelled and refunded and the
   units stay. Shortfalls are filled in order of asteroid then player.
   Each is filled from the nearest surplus, asteroid to asteroid as of
   that tick, ties by lowest asteroid. A surplus unit sent to a shortfall
-  cancels that place's frame of the same row and refunds it. Surplus with no shortfall anywhere stays where it is,
+  cancels that place's frame of the same pattern and refunds it. Surplus with no shortfall anywhere stays where it is,
   complete, until a shortfall wants it. Nothing complete is ever
   scrapped or refunded; a structure stays until it is destroyed.
-- **Shortfall.** When a place wants more of a row than it has, counting
+- **Shortfall.** When a place wants more of a pattern than it has, counting
   units there and in transit and never frames, and neither the reserve nor
-  a surplus of that row anywhere can fill it, frames open at that place for
-  builders at that asteroid to fill, one frame of a row at a time; rows build
+  a surplus of that pattern anywhere can fill it, frames open at that place for
+  builders at that asteroid to fill, one frame of a pattern at a time; patterns build
   in parallel.
 - A unit's home changes only by the surplus rule.
 - A composition with no want, no units, and no frames does not exist.
@@ -243,7 +245,7 @@ sets one count.
 - **The zone.** Every asteroid has a zone: the region within one radius of
   it, the same radius for every asteroid, one constant of the belt. A unit at
   an asteroid holds inside the zone, a builder reaches
-  everything inside it, a unit of a row whose role runs passes chases
+  everything inside it, a unit of a pattern whose role runs passes chases
   any enemy inside it, and the
   display draws it. Zones are small against the spacing of asteroids, so
   two rarely meet, and where two do the rules read no distance: a unit is
@@ -270,13 +272,13 @@ sets one count.
   a unit thrusts by this rule alone.
 - **Holding.** At its asteroid a unit moves by the holding rule. Each tick it
   sums the steering terms below and thrusts by the sum, capped at its
-  row's manoeuvring limit. Each term's weight is the row's. A term that
+  pattern's manoeuvring limit. Each term's weight is the pattern's. A term that
   pulls toward a place pulls toward a desired velocity, the difference
   between that velocity and the unit's own, so the rule damps itself and
   a unit arrives without ringing. The desired speed toward a place is
-  the speed the row's manoeuvring limit can stop from within the arrival
-  distance, one constant of the zone, so a strong row is also a fast one
-  and no row states a speed. Wander: a
+  the speed the pattern's manoeuvring limit can stop from within the arrival
+  distance, one constant of the zone, so a strong pattern is also a fast one
+  and no pattern states a speed. Wander: a
   held force drifts through the zone and never sits still. Return: a
   pull back that grows with distance outside the zone, and a push out
   that grows with depth inside the asteroid's own radius plus one spacing,
@@ -301,15 +303,15 @@ sets one count.
   turn further round, so two teams face each other across the stage and
   three or four stand evenly about it; the circle is divided again the
   tick a team takes its first station there or loses its last.
-  A line is a whole team's units of one row at the asteroid, the seats
+  A line is a whole team's units of one pattern at the asteroid, the seats
   of that team pooled into one, since a side belongs to a team and not
   to a seat. A unit's station is its place in that line, on its team's
-  side, at its row's stand-off from the
-  stage's centre. The stand-off is half the row's damage range less half
+  side, at its pattern's stand-off from the
+  stage's centre. The stand-off is half the pattern's damage range less half
   a stated distance, one constant of the belt, so two teams' lines of
-  one row stand that distance inside their range and long-range rows
-  stand behind short-range rows. Three or four teams divide the circle
-  more finely: two of their lines of one row stand no further apart than
+  one pattern stand that distance inside their range and long-range patterns
+  stand behind short-range patterns. Three or four teams divide the circle
+  more finely: two of their lines of one pattern stand no further apart than
   that, and nearer the closer their sides, so they close further inside
   their range. Where three or more sides divide the circle a line
   spreads no further each way than its own stand-off, and the wrap below
@@ -318,14 +320,14 @@ sets one count.
   sides stand opposite and their lines run parallel, so at two teams a
   line spreads its full width. A roster carrying a damage range no
   longer than that distance cannot be built, nor one whose
-  stations would stand outside the zone. A row lies
+  stations would stand outside the zone. A line lies
   centred on its stand-off point and spreads both ways square to it, in
   id order, a stated count of stations each way at the station spacing,
-  both constants of the belt, so a row leans neither way. A row of more
+  both constants of the belt, so a line leans neither way. A line of more
   units wraps into a further rank one station spacing
   behind, the stage holds a stated count of ranks, one constant of the
   belt, and the counts are set so every station stands inside the zone;
-  a row of more units than the stage has stations fills it again from
+  a line of more units than the stage has stations fills it again from
   the front, so two units share a station and separation parts them. A
   side alone at an asteroid holds its side of the stage, so a garrison
   stands before an attacker arrives, and an arrival walks from the rim
@@ -338,9 +340,9 @@ sets one count.
   from the unit's own identifier, so no two units share one and a line
   of them needs no spacing along an arc; separation parts the pair
   wherever two circles cross, and a unit keeps its plane wherever it
-  goes. The circle turns at a quarter of the speed the row's
+  goes. The circle turns at a quarter of the speed the pattern's
   manoeuvring limit holds on a circle of that radius, from a starting
-  phase drawn from the identifier too, so two units of one row do not
+  phase drawn from the identifier too, so two units of one pattern do not
   begin together. The station is the point on the circle at the current
   phase: it moves every tick and the unit circles by steering to it, by
   the same station term at the same weight as a unit that does damage.
@@ -348,7 +350,7 @@ sets one count.
   reaches the whole zone to build from anywhere on its circle, and
   stands where an enemy can reach and kill it.
   Heading never gates fire.
-  Pass: a unit of a row whose role runs passes runs at the enemy of the
+  Pass: a unit of a pattern whose role runs passes runs at the enemy of the
   highest threat standing inside the zone, at any distance, taking that
   enemy afresh every tick and keeping none, and breaks off for its
   station on the tick that same enemy hits it; reaching it, it runs
@@ -364,16 +366,16 @@ sets one count.
   zone the unit steers to its station and stays in its run, so a pass
   begins from the station the tick an enemy appears.
   A pass is no term of its own and carries no weight: it names the place
-  the station term steers to, in the station's stead, at the row's
-  station weight, so a runner and a row that holds its station steer by
+  the station term steers to, in the station's stead, at the pattern's
+  station weight, so a runner and a unit that holds its station steer by
   the same sum and differ only in where that place stands. The enemy a
   unit runs at and the enemy it fires at are two separate choices: the
   pass takes one enemy in the zone to run at, the unit takes what it
   fires at by the rule under Effects, and the two need not be the same.
   Only the enemy it runs at can turn it around, so a runner fires at
   whatever stands in the range of any damage effect it carries as it
-  runs, and holds its run through fire from anyone else. A row whose
-  role holds its station holds it and fires from it; return stays in the
+  runs, and holds its run through fire from anyone else. A unit whose
+  pattern's role holds its station holds it and fires from it; return stays in the
   sum throughout, so a pass never leaves the zone. A unit does not fire
   at a target whose assigned damage this tick already kills it, so a
   force spreads its fire along the enemy line. There is no facing. The
@@ -383,7 +385,7 @@ sets one count.
 
 ## Visibility
 
-Everything is visible to every player always: every entity, its row, its
+Everything is visible to every player always: every entity, its pattern, its
 seat, its position and velocity, every asteroid with its orbit, its caps
 and all its future positions, and the standings. Wants and frames are
 the one exception: a player sees their own and not another's. The
@@ -400,7 +402,7 @@ nothing to remember.
 3. The playable on the engine over the sim's view.
 4. A scripted agent and the balance harness.
 5. Map generation from seed with regional caps.
-6. Factions as skews over one roster; rows beyond the first nine.
+6. Factions as skews over one roster; patterns beyond the first nine.
 
 ## Questions for the harness
 

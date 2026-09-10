@@ -20,7 +20,7 @@ impl Income {
         let mut taken = Income::default();
         for roll in rolls.iter() {
             let caps = state[roll.asteroid()].caps();
-            let pulling = Extractor::pulling(state, roll);
+            let pulling = Extractor::pulling(roll);
             taken
                 .0
                 .extend(extract(roll.asteroid(), caps, &pulling, ran.seconds()).0);
@@ -37,15 +37,14 @@ impl Income {
 }
 
 impl Extractor {
-    fn pulling(state: &State, roll: &Roll) -> Vec<Extractor> {
+    fn pulling(roll: &Roll) -> Vec<Extractor> {
         let mut extractors = Vec::new();
         for entity in roll.standing() {
             let seat = entity.seat();
-            let pulls = state[entity.row()].extracts();
-            extractors.extend(pulls.map(|(material, rate)| Extractor {
+            extractors.extend(entity.pattern().extractions().map(|extraction| Extractor {
                 seat,
-                material,
-                rate,
+                material: extraction.material,
+                rate: extraction.rate.0,
             }));
         }
         extractors

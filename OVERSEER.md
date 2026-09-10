@@ -123,3 +123,12 @@ for the one that talks to the owner. Project state lives in TODO.md.
   "let's talk in chat" is for one exchange, not a standing rule.
 - Never edit with sed or a script, not even one line; it is the rule
   the owner watches for.
+- The overseer writes the core and never the leaves (owner,
+  2026-09-10): a type, its const table and the one store that keys on
+  it are the overseer's to write in the session; every call site
+  `cargo check` then names is an agent's, briefed with the final
+  surface. Thirty call-site edits by hand was the wrong split.
+- Show the code (owner, 2026-09-09). The owner is a skilled Rust
+  writer and judges a shape from the Rust, so a proposal, a critique
+  or a report carries the type and the function as they would be
+  written, never a prose paraphrase of them.

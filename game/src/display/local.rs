@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::Command;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Retention, RowId, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Time,
+    AsteroidId, Retention, SeatId, Sequence, Session, Setup, TICKS_PER_SECOND, TeamId, Time,
 };
 
 pub(crate) const PLAYER: SeatId = SeatId(0);
@@ -58,15 +59,15 @@ impl Local {
         View::of(self.session.state(), seat, shots)
     }
 
-    pub(crate) fn want(&mut self, wants: &[(AsteroidId, RowId, u32)]) {
+    pub(crate) fn want(&mut self, wants: &[(AsteroidId, EntityPattern, u32)]) {
         self.want_of(PLAYER, wants);
     }
 
-    pub(crate) fn want_of(&mut self, seat: SeatId, wants: &[(AsteroidId, RowId, u32)]) {
-        for (asteroid, row, count) in wants {
+    pub(crate) fn want_of(&mut self, seat: SeatId, wants: &[(AsteroidId, EntityPattern, u32)]) {
+        for (asteroid, pattern, count) in wants {
             let command = Command::Want {
                 asteroid: *asteroid,
-                row: *row,
+                pattern: *pattern,
                 count: *count,
             };
             let tick = self.session.state().tick();

@@ -6,7 +6,7 @@ use crate::vec3::Vec3;
 
 impl HeldUnit<'_> {
     pub(super) fn passing(&self) -> Option<(Vec3, Pass)> {
-        self.row().runs_passes().then_some(())?;
+        self.entity.pattern().runs_passes().then_some(())?;
         let station = self.station()?;
         Some(match self.entity.pass() {
             Pass::Running => self.running(station),
@@ -41,7 +41,7 @@ impl HeldUnit<'_> {
     fn prey(&self) -> Option<EntityId> {
         let shooter = Shooter {
             team: self.state[self.entity.seat()].team(),
-            plating: self.row().plating,
+            plating: self.entity.pattern().plating(),
         };
         self.roll
             .best(
@@ -61,7 +61,8 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::{AsteroidId, EntityId, TeamId};
     use crate::orbit::body::{Body, Gravity};
-    use crate::roster::{CONSTRUCTOR, LANCER, RAIDER};
+    use crate::pattern::EntityPattern as P;
+    use crate::pattern::Slot;
     use crate::state::Rolls;
     use crate::step::fire::{Hit, Shots};
 
@@ -81,7 +82,7 @@ mod tests {
         Shots {
             hits: vec![Hit {
                 shooter,
-                place: 0,
+                slot: Slot::First,
                 target,
                 damage: 1.0,
             }],
@@ -95,7 +96,7 @@ mod tests {
         HeldUnit::of(&world.state, world.state.entity(unit), roll, shots)
             .expect("a steered unit holds")
             .passing()
-            .expect("a stationed unit of a row that runs passes is passing")
+            .expect("a stationed unit of a pattern that runs passes is passing")
     }
 
     fn station_of(world: &World, unit: EntityId) -> Vec3 {
@@ -122,7 +123,7 @@ mod tests {
     #[test]
     fn a_runner_with_no_enemy_holds_its_station() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
 
         let (place, pass) = passed(&world, runner, &unshot());
 
@@ -133,8 +134,8 @@ mod tests {
     #[test]
     fn a_runner_its_prey_did_not_hit_this_tick_runs_at_it() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let prey = world.hold(1, CONSTRUCTOR, HOME, 10.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let prey = world.hold(1, P::Constructor, HOME, 10.0);
 
         let (place, pass) = passed(&world, runner, &unshot());
 
@@ -145,8 +146,8 @@ mod tests {
     #[test]
     fn a_runner_its_prey_hit_this_tick_turns_for_its_station() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let prey = world.hold(1, LANCER, HOME, 10.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let prey = world.hold(1, P::Lancer, HOME, 10.0);
 
         let (place, pass) = passed(&world, runner, &hit(prey, runner));
 
@@ -157,9 +158,9 @@ mod tests {
     #[test]
     fn a_runner_another_enemy_hit_this_tick_keeps_running_at_its_prey() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let prey = world.hold(1, LANCER, HOME, 6.0);
-        let plinker = world.hold(1, LANCER, HOME, 20.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let prey = world.hold(1, P::Lancer, HOME, 6.0);
+        let plinker = world.hold(1, P::Lancer, HOME, 20.0);
 
         let (place, pass) = passed(&world, runner, &hit(plinker, runner));
 
@@ -174,9 +175,9 @@ mod tests {
     #[test]
     fn a_runner_whose_prey_hit_another_unit_keeps_running_at_it() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let prey = world.hold(1, LANCER, HOME, 6.0);
-        let fellow = world.hold(0, RAIDER, HOME, 1.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let prey = world.hold(1, P::Lancer, HOME, 6.0);
+        let fellow = world.hold(0, P::Raider, HOME, 1.0);
 
         let (place, pass) = passed(&world, runner, &hit(prey, fellow));
 
@@ -187,8 +188,8 @@ mod tests {
     #[test]
     fn a_return_holds_for_its_station_until_it_reaches_it_and_then_runs_again() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        world.hold(1, CONSTRUCTOR, HOME, 10.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        world.hold(1, P::Constructor, HOME, 10.0);
         let station = station_of(&world, runner);
         world.state.entities.set_pass(runner, Pass::Returning);
 
@@ -207,8 +208,8 @@ mod tests {
     #[test]
     fn a_return_its_prey_hits_beside_it_keeps_for_its_station() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let prey = world.hold(1, LANCER, HOME, 10.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let prey = world.hold(1, P::Lancer, HOME, 10.0);
         let station = station_of(&world, runner);
         world.state.entities.set_pass(runner, Pass::Returning);
         let beside = world.body(prey).pos;
@@ -227,9 +228,9 @@ mod tests {
     #[test]
     fn a_runner_takes_the_highest_threat_in_the_zone_and_nothing_outside_it() {
         let mut world = world();
-        let runner = world.hold(0, RAIDER, HOME, 0.0);
-        let harmless = world.hold(1, CONSTRUCTOR, HOME, 4.0);
-        let dangerous = world.hold(1, LANCER, HOME, 8.0);
+        let runner = world.hold(0, P::Raider, HOME, 0.0);
+        let harmless = world.hold(1, P::Constructor, HOME, 4.0);
+        let dangerous = world.hold(1, P::Lancer, HOME, 8.0);
 
         let (place, _) = passed(&world, runner, &unshot());
         assert_eq!(

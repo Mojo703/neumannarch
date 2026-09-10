@@ -2,11 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::orbit::Gravity;
-use neumannarch_sim::roster::{Glyph, Kind, Roster};
+use neumannarch_sim::pattern::{EntityPattern, Kind};
 use neumannarch_sim::state::view::{Building, View};
 use neumannarch_sim::state::{Asteroid, Command, Held, Preview};
 use neumannarch_sim::{
-    AsteroidId, EntityId, Materials, Post, Posting, RowId, SeatId, Stockpile, Time, Vec3,
+    AsteroidId, EntityId, Materials, Post, Posting, SeatId, Stockpile, Time, Vec3,
 };
 
 use crate::display::fights::Fights;
@@ -51,9 +51,9 @@ pub struct Arc {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityView {
     pub seat: SeatId,
-    pub glyph: Glyph,
+    pub pattern: EntityPattern,
     pub pos: Vec3,
-    pub range: Option<f64>,
+    pub standing: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,15 +104,15 @@ pub enum Entry {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RowView {
-    pub row: RowId,
+pub struct PatternView {
+    pub pattern: EntityPattern,
     pub entries: Vec<Shown>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SectorView {
     pub seat: SeatId,
-    pub rows: Vec<RowView>,
+    pub patterns: Vec<PatternView>,
     pub arc: Option<Arc>,
 }
 
@@ -142,11 +142,11 @@ impl Client<'_> {
     }
 }
 
-fn ringed(view: &View, roster: &Roster) -> BTreeMap<EntityId, Vec3> {
+fn ringed(view: &View) -> BTreeMap<EntityId, Vec3> {
     let mut standing: BTreeMap<AsteroidId, u32> = BTreeMap::new();
     let mut ringed = BTreeMap::new();
     for present in &view.present {
-        if roster[present.row].kind() != Kind::Structure {
+        if present.pattern.kind() != Kind::Structure {
             continue;
         }
         let Some(terrain) = view.terrain_of(present.home) else {
@@ -213,8 +213,8 @@ impl Scene {
         }
     }
 
-    pub fn from_view(view: &View, roster: &Roster, client: Client<'_>) -> Scene {
-        let ringed = ringed(view, roster);
+    pub fn from_view(view: &View, client: Client<'_>) -> Scene {
+        let ringed = ringed(view);
         let asked = client.asked();
         let mut fights: BTreeMap<AsteroidId, Vec<Arc>> = BTreeMap::new();
         for (asteroid, arc) in client.fights.arcs() {
@@ -237,9 +237,9 @@ impl Scene {
                 .iter()
                 .map(|present| EntityView {
                     seat: present.seat,
-                    glyph: roster[present.row].glyph(),
+                    pattern: present.pattern,
                     pos: ringed.get(&present.id).copied().unwrap_or(present.body.pos),
-                    range: reach(roster, present.row, present.at.standing().is_some()),
+                    standing: present.at.standing().is_some(),
                 })
                 .collect(),
             wheels: Sectors::of(view, &fights, &asked)
@@ -253,7 +253,7 @@ impl Scene {
                 spend: view.spend,
                 elapsed: view.time,
                 clock: view.length,
-                marked: marked_on_bar(roster, client.gesture.as_ref()),
+                marked: marked_on_bar(client.gesture.as_ref()),
             }),
             zone: view.zone,
             star_radius: view.star_radius,
@@ -347,11 +347,17 @@ impl WheelButton {
     }
 }
 
+impl EntityView {
+    pub fn reach(&self) -> Option<f64> {
+        (self.standing && self.pattern.does_damage()).then(|| self.pattern.max_damage_range())
+    }
+}
+
 impl ButtonAt {
     pub fn edit(self, want: u32) -> Command {
         Command::Want {
             asteroid: self.posting.asteroid(),
-            row: self.posting.row(),
+            pattern: self.posting.pattern(),
             count: self.button.wanted(want),
         }
     }
@@ -361,30 +367,25 @@ pub fn asteroid_name(asteroid: AsteroidId) -> String {
     format!("Asteroid {}", u64::from(asteroid.0) + 1)
 }
 
-fn reach(roster: &Roster, row: RowId, standing: bool) -> Option<f64> {
-    let does_damage = roster[row].does_damage();
-    (standing && does_damage).then(|| roster[row].max_damage_range())
-}
-
-type Rows = BTreeMap<RowId, Vec<Shown>>;
+type Patterns = BTreeMap<EntityPattern, Vec<Shown>>;
 
 struct Sectors {
-    rows: BTreeMap<Post, Rows>,
+    patterns: BTreeMap<Post, Patterns>,
     arcs: BTreeMap<Post, Arc>,
 }
 
 impl Sectors {
     fn of(view: &View, fights: &BTreeMap<AsteroidId, Vec<Arc>>, asked: &[AsteroidId]) -> Sectors {
-        let mut rows: BTreeMap<Post, Rows> = BTreeMap::new();
+        let mut patterns: BTreeMap<Post, Patterns> = BTreeMap::new();
         for (post, composition) in &view.compositions {
             if !asked.contains(&post.asteroid) {
                 continue;
             }
-            let sector = rows.entry(*post).or_default();
-            for (row, held) in &composition.rows {
-                let entries = entries_of(view, Posting::new(*post, *row), *held);
+            let sector = patterns.entry(*post).or_default();
+            for (pattern, held) in &composition.patterns {
+                let entries = entries_of(view, Posting::new(*post, *pattern), *held);
                 if !entries.is_empty() {
-                    sector.insert(*row, entries);
+                    sector.insert(*pattern, entries);
                 }
             }
         }
@@ -392,10 +393,10 @@ impl Sectors {
             if !asked.contains(&posting.asteroid()) {
                 continue;
             }
-            let entries = rows
+            let entries = patterns
                 .entry(posting.post())
                 .or_default()
-                .entry(posting.row())
+                .entry(posting.pattern())
                 .or_default();
             if let Some(building) = plan.building {
                 entries.push(shown(Entry::Building(building)));
@@ -427,16 +428,17 @@ impl Sectors {
             })
             .collect();
         for post in arcs.keys() {
-            rows.entry(*post).or_default();
+            patterns.entry(*post).or_default();
         }
         for asteroid in asked.iter().copied().filter(|_| view.still_in) {
-            rows.entry(Post {
-                asteroid,
-                seat: view.seat,
-            })
-            .or_default();
+            patterns
+                .entry(Post {
+                    asteroid,
+                    seat: view.seat,
+                })
+                .or_default();
         }
-        Sectors { rows, arcs }
+        Sectors { patterns, arcs }
     }
 
     fn previewing(mut self, view: &View, gesture: Option<&WheelGesture>) -> Sectors {
@@ -466,7 +468,7 @@ impl Sectors {
             arriving.sort_by_key(order);
             for from in filling.sent_from.keys() {
                 for shown in self
-                    .entries(Posting::of(*from, posting.seat(), posting.row()))
+                    .entries(Posting::of(*from, posting.seat(), posting.pattern()))
                     .iter_mut()
                     .filter(|shown| matches!(shown.entry, Entry::Present(_)))
                 {
@@ -478,16 +480,16 @@ impl Sectors {
     }
 
     fn entries(&mut self, posting: Posting) -> &mut Vec<Shown> {
-        self.rows
+        self.patterns
             .entry(posting.post())
             .or_default()
-            .entry(posting.row())
+            .entry(posting.pattern())
             .or_default()
     }
 
     fn drawn(self) -> Vec<WheelView> {
         let mut wheels: BTreeMap<AsteroidId, WheelView> = BTreeMap::new();
-        for (post, rows) in self.rows {
+        for (post, patterns) in self.patterns {
             wheels
                 .entry(post.asteroid)
                 .or_insert_with(|| WheelView {
@@ -497,10 +499,10 @@ impl Sectors {
                 .sectors
                 .push(SectorView {
                     seat: post.seat,
-                    rows: rows
+                    patterns: patterns
                         .into_iter()
                         .filter(|(_, entries)| !entries.is_empty())
-                        .map(|(row, entries)| RowView { row, entries })
+                        .map(|(pattern, entries)| PatternView { pattern, entries })
                         .collect(),
                     arc: self.arcs.get(&post).copied(),
                 });
@@ -554,7 +556,9 @@ fn arriving_from(view: &View, posting: Posting) -> Option<AsteroidId> {
     view.present
         .iter()
         .filter(|unit| {
-            unit.seat == posting.seat() && unit.row == posting.row() && unit.home == asteroid
+            unit.seat == posting.seat()
+                && unit.pattern == posting.pattern()
+                && unit.home == asteroid
         })
         .find_map(|unit| unit.at.flying_from())
 }
@@ -562,7 +566,7 @@ fn arriving_from(view: &View, posting: Posting) -> Option<AsteroidId> {
 fn covered(view: &View, posting: Posting) -> u32 {
     view.compositions
         .get(&posting.post())
-        .and_then(|composition| composition.rows.get(&posting.row()))
+        .and_then(|composition| composition.patterns.get(&posting.pattern()))
         .map_or(0, |held| held.present + held.arriving)
 }
 
@@ -613,12 +617,12 @@ fn previewed_lines(view: &View, gesture: Option<&WheelGesture>) -> Vec<FlightLin
         .collect()
 }
 
-fn marked_on_bar(roster: &Roster, gesture: Option<&WheelGesture>) -> Option<BarMark> {
+fn marked_on_bar(gesture: Option<&WheelGesture>) -> Option<BarMark> {
     let WheelGesture::Button(at, preview) = gesture? else {
         return None;
     };
     match at.button {
-        WheelButton::Plus(_) => Some(BarMark::Cost(preview.cost_to_build(roster))),
+        WheelButton::Plus(_) => Some(BarMark::Cost(preview.cost_to_build())),
         WheelButton::Minus(_) => Some(BarMark::Refund(preview.refund)),
     }
 }
@@ -626,7 +630,7 @@ fn marked_on_bar(roster: &Roster, gesture: Option<&WheelGesture>) -> Option<BarM
 #[cfg(test)]
 mod tests {
     use neumannarch_sim::TICKS_PER_SECOND;
-    use neumannarch_sim::roster::{CONSTRUCTOR, FRIGATE, SHIPYARD, STORAGE};
+    use neumannarch_sim::pattern::EntityPattern as P;
 
     use super::*;
     use crate::display::local::{Local, PLAYER, RIVAL};
@@ -647,7 +651,6 @@ mod tests {
     ) -> Scene {
         Scene::from_view(
             &local.view(),
-            local.session().state().roster(),
             Client {
                 selection,
                 asked: local
@@ -663,7 +666,7 @@ mod tests {
     }
 
     fn dragging(local: &Local, sending: Sending) -> WheelGesture {
-        let edits = sending.commands(&local.view(), local.session().state().roster());
+        let edits = sending.commands(&local.view());
         WheelGesture::Send(sending, previewed(local, &edits))
     }
 
@@ -680,14 +683,19 @@ mod tests {
             .expect("the wants the pointer would issue stand")
     }
 
-    fn entries(scene: &Scene, asteroid: AsteroidId, seat: SeatId, row: RowId) -> Vec<Shown> {
+    fn entries(
+        scene: &Scene,
+        asteroid: AsteroidId,
+        seat: SeatId,
+        pattern: EntityPattern,
+    ) -> Vec<Shown> {
         scene
             .wheel_of(asteroid)
             .into_iter()
             .flat_map(|wheel| &wheel.sectors)
             .filter(|sector| sector.seat == seat)
-            .flat_map(|sector| &sector.rows)
-            .filter(|shown| shown.row == row)
+            .flat_map(|sector| &sector.patterns)
+            .filter(|shown| shown.pattern == pattern)
             .flat_map(|shown| shown.entries.clone())
             .collect()
     }
@@ -695,12 +703,11 @@ mod tests {
     #[test]
     fn only_an_asked_asteroid_carries_a_wheel_whatever_it_holds() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), P::Shipyard, 1)]);
 
         let asking = |asked: Vec<AsteroidId>| {
             Scene::from_view(
                 &local.view(),
-                local.session().state().roster(),
                 Client {
                     selection: None,
                     asked,
@@ -736,13 +743,13 @@ mod tests {
             true => ((PLAYER, mine), (RIVAL, theirs)),
             false => ((RIVAL, theirs), (PLAYER, mine)),
         };
-        local.want_of(first.0, &[(at(0), first.1.row, 1)]);
-        local.want_of(second.0, &[(at(1), second.1.row, 1)]);
+        local.want_of(first.0, &[(at(0), first.1.pattern, 1)]);
+        local.want_of(second.0, &[(at(1), second.1.pattern, 1)]);
 
         let drafting = scene(&local);
         for (asteroid, (seat, stage)) in [(at(0), first), (at(1), second)] {
             assert_eq!(
-                entries(&drafting, asteroid, seat, stage.row),
+                entries(&drafting, asteroid, seat, stage.pattern),
                 vec![shown(Entry::Present(1))],
                 "the pick stands at its asteroid while the draft runs"
             );
@@ -760,11 +767,13 @@ mod tests {
             .expect("the selection carries a wheel");
         assert_eq!(wheel.sectors.len(), 1);
         assert_eq!(wheel.sectors[0].seat, PLAYER);
-        assert!(wheel.sectors[0].rows.is_empty(), "and no entry of its own");
+        assert!(
+            wheel.sectors[0].patterns.is_empty(),
+            "and no entry of its own"
+        );
 
         let pointed = Scene::from_view(
             &local.view(),
-            local.session().state().roster(),
             Client {
                 selection: None,
                 asked: vec![at(5)],
@@ -782,9 +791,9 @@ mod tests {
     #[test]
     fn a_placed_structure_stands_as_one_present_entry_with_its_count() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), P::Shipyard, 1)]);
 
-        let shown = entries(&scene(&local), at(0), PLAYER, SHIPYARD);
+        let shown = entries(&scene(&local), at(0), PLAYER, P::Shipyard);
 
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].entry, Entry::Present(1));
@@ -796,18 +805,18 @@ mod tests {
     #[test]
     fn a_frame_fills_where_a_builder_stands_and_a_want_is_dashed_where_none_does() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
-        local.want(&[(at(0), STORAGE, 1), (at(5), FRIGATE, 2)]);
+        local.want(&[(at(0), P::Shipyard, 1)]);
+        local.want(&[(at(0), P::Storage, 1), (at(5), P::Frigate, 2)]);
         local.run(60);
         let scene = scene(&local);
 
-        let built = entries(&scene, at(0), PLAYER, STORAGE);
+        let built = entries(&scene, at(0), PLAYER, P::Storage);
         assert_eq!(built.len(), 1, "the frame covers the want");
         assert!(matches!(built[0].entry, Entry::Building(_)));
         assert!(matches!(built[0].entry.fill(), Fill::Filling(progress) if progress > 0.0));
         assert_eq!(built[0].entry.count(), None, "a frame carries no count");
 
-        let unbuilt = entries(&scene, at(5), PLAYER, FRIGATE);
+        let unbuilt = entries(&scene, at(5), PLAYER, P::Frigate);
         assert_eq!(
             unbuilt[1].entry,
             Entry::Wanted {
@@ -823,15 +832,15 @@ mod tests {
     #[test]
     fn a_re_homed_unit_leaves_its_asteroids_wheel_at_once_and_flies_on_the_belt() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), CONSTRUCTOR, 1)]);
-        local.want(&[(at(0), CONSTRUCTOR, 0), (at(1), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), P::Constructor, 1)]);
+        local.want(&[(at(0), P::Constructor, 0), (at(1), P::Constructor, 1)]);
         let scene = scene(&local);
 
         assert!(
-            entries(&scene, at(0), PLAYER, CONSTRUCTOR).is_empty(),
+            entries(&scene, at(0), PLAYER, P::Constructor).is_empty(),
             "the wheel keeps a ship that is already flying"
         );
-        let arriving = entries(&scene, at(1), PLAYER, CONSTRUCTOR);
+        let arriving = entries(&scene, at(1), PLAYER, P::Constructor);
         assert_eq!(
             arriving[0].entry,
             Entry::Arriving {
@@ -857,18 +866,18 @@ mod tests {
     #[test]
     fn another_seats_sector_shows_what_it_holds_and_never_its_wants() {
         let mut local = Local::start(2);
-        local.want_of(RIVAL, &[(at(3), SHIPYARD, 1), (at(3), FRIGATE, 2)]);
+        local.want_of(RIVAL, &[(at(3), P::Shipyard, 1), (at(3), P::Frigate, 2)]);
         local.run(1);
 
         let scene = scene(&local);
 
         assert_eq!(
-            entries(&scene, at(3), RIVAL, SHIPYARD)[0].entry,
+            entries(&scene, at(3), RIVAL, P::Shipyard)[0].entry,
             Entry::Present(1),
             "an enemy structure is on its wheel"
         );
         assert!(
-            entries(&scene, at(3), RIVAL, FRIGATE).is_empty(),
+            entries(&scene, at(3), RIVAL, P::Frigate).is_empty(),
             "what it wants is its own to see"
         );
     }
@@ -876,18 +885,18 @@ mod tests {
     #[test]
     fn what_stands_above_the_want_is_surplus_and_stays() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
+        local.want(&[(at(0), P::Shipyard, 1)]);
         local.run(1);
         assert!(
-            !entries(&scene(&local), at(0), PLAYER, SHIPYARD)
+            !entries(&scene(&local), at(0), PLAYER, P::Shipyard)
                 .iter()
                 .any(|shown| matches!(shown.entry, Entry::Surplus(_))),
             "a covered want has no surplus"
         );
 
-        local.want(&[(at(0), SHIPYARD, 0)]);
+        local.want(&[(at(0), P::Shipyard, 0)]);
         local.run(1);
-        let shown = entries(&scene(&local), at(0), PLAYER, SHIPYARD);
+        let shown = entries(&scene(&local), at(0), PLAYER, P::Shipyard);
 
         assert_eq!(shown[0].entry, Entry::Present(1), "nothing is scrapped");
         assert_eq!(shown[1].entry, Entry::Surplus(1));
@@ -903,7 +912,6 @@ mod tests {
 
         let scene = Scene::from_view(
             &out,
-            local.session().state().roster(),
             Client {
                 selection: Some(at(5)),
                 asked: vec![at(5)],
@@ -923,11 +931,11 @@ mod tests {
     #[test]
     fn a_wheels_surplus_is_the_count_the_sim_would_send_and_never_the_client_arithmetic() {
         let mut local = Local::start(2);
-        local.want(&[(at(1), SHIPYARD, 1), (at(0), CONSTRUCTOR, 1)]);
-        local.want(&[(at(1), CONSTRUCTOR, 1)]);
+        local.want(&[(at(1), P::Shipyard, 1), (at(0), P::Constructor, 1)]);
+        local.want(&[(at(1), P::Constructor, 1)]);
         local.run(4 * u64::from(TICKS_PER_SECOND));
-        local.want(&[(at(1), CONSTRUCTOR, 0), (at(0), CONSTRUCTOR, 2)]);
-        local.want(&[(at(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(1), P::Constructor, 0), (at(0), P::Constructor, 2)]);
+        local.want(&[(at(0), P::Constructor, 1)]);
         let view = local.view();
 
         let here = view
@@ -936,19 +944,19 @@ mod tests {
                 asteroid: at(0),
                 seat: PLAYER,
             })
-            .and_then(|composition| composition.rows.get(&CONSTRUCTOR))
+            .and_then(|composition| composition.patterns.get(&P::Constructor))
             .copied()
             .expect("the constructors are homed here");
 
         assert_eq!(here.present, 1);
         assert_eq!(here.arriving, 1);
-        assert_eq!(view.want_of(Posting::of(at(0), PLAYER, CONSTRUCTOR)), 1);
+        assert_eq!(view.want_of(Posting::of(at(0), PLAYER, P::Constructor)), 1);
         assert_eq!(
             here.surplus, 1,
             "the want covers one of the two homed here, so the other stands above it"
         );
         assert_eq!(
-            entries(&scene(&local), at(0), PLAYER, CONSTRUCTOR)
+            entries(&scene(&local), at(0), PLAYER, P::Constructor)
                 .iter()
                 .map(|shown| shown.entry)
                 .collect::<Vec<Entry>>(),
@@ -967,8 +975,7 @@ mod tests {
     #[test]
     fn the_bar_marks_the_sims_cost_and_refund_and_nothing_where_the_reserve_fills_the_want() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
-        let roster = local.session().state().roster();
+        local.want(&[(at(0), P::Shipyard, 1)]);
         let marked = |posting, button| {
             let pressed = ButtonAt { posting, button };
             drawn(
@@ -981,16 +988,16 @@ mod tests {
             .and_then(|bar| bar.marked)
         };
 
-        let frigate = Posting::of(at(0), PLAYER, FRIGATE);
+        let frigate = Posting::of(at(0), PLAYER, P::Frigate);
 
         assert_eq!(
             marked(frigate, WheelButton::Plus(1)),
-            Some(BarMark::Cost(roster[FRIGATE].cost)),
+            Some(BarMark::Cost(P::Frigate.cost())),
             "one more frigate costs one frigate"
         );
         assert_eq!(
             marked(
-                Posting::of(at(5), PLAYER, CONSTRUCTOR),
+                Posting::of(at(5), PLAYER, P::Constructor),
                 WheelButton::Plus(1)
             ),
             Some(BarMark::Cost(Materials::ZERO)),
@@ -1006,11 +1013,11 @@ mod tests {
     #[test]
     fn a_hovered_button_changes_no_entry() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
-        local.want(&[(at(0), SHIPYARD, 3)]);
-        let hover = |row, button| {
+        local.want(&[(at(0), P::Shipyard, 1)]);
+        local.want(&[(at(0), P::Shipyard, 3)]);
+        let hover = |pattern, button| {
             let at = ButtonAt {
-                posting: Posting::of(at(0), PLAYER, row),
+                posting: Posting::of(at(0), PLAYER, pattern),
                 button,
             };
             let scene = drawn(
@@ -1019,17 +1026,17 @@ mod tests {
                 Some(at.posting.asteroid()),
                 Some(pressing(&local, at)),
             );
-            entries(&scene, at.posting.asteroid(), PLAYER, row)
+            entries(&scene, at.posting.asteroid(), PLAYER, pattern)
         };
         let still = scene(&local);
 
         assert_eq!(
-            hover(SHIPYARD, WheelButton::Minus(1)),
-            entries(&still, at(0), PLAYER, SHIPYARD),
+            hover(P::Shipyard, WheelButton::Minus(1)),
+            entries(&still, at(0), PLAYER, P::Shipyard),
             "minus leaves what stands and what is wanted as they are"
         );
         assert!(
-            hover(FRIGATE, WheelButton::Plus(5)).is_empty(),
+            hover(P::Frigate, WheelButton::Plus(5)).is_empty(),
             "plus adds nothing until it is clicked"
         );
     }
@@ -1037,7 +1044,7 @@ mod tests {
     #[test]
     fn a_send_drag_dims_the_source_and_shows_the_destination_arriving() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), CONSTRUCTOR, 1)]);
+        local.want(&[(at(0), P::Constructor, 1)]);
         let sending = Sending {
             from: at(0),
             to: at(1),
@@ -1051,11 +1058,11 @@ mod tests {
             Some(dragging(&local, sending)),
         );
 
-        let source = entries(&scene, at(0), PLAYER, CONSTRUCTOR);
+        let source = entries(&scene, at(0), PLAYER, P::Constructor);
         assert_eq!(source[0].entry, Entry::Present(1));
         assert!(source[0].previewed, "what would go is dimmed");
 
-        let destination = entries(&scene, at(1), PLAYER, CONSTRUCTOR);
+        let destination = entries(&scene, at(1), PLAYER, P::Constructor);
         assert_eq!(
             destination[0].entry,
             Entry::Arriving {
@@ -1082,24 +1089,28 @@ mod tests {
     #[test]
     fn a_ship_that_does_damage_at_an_asteroid_carries_its_range_and_one_in_flight_carries_none() {
         let mut local = Local::start(2);
-        local.want(&[(at(0), SHIPYARD, 1)]);
-        let roster = local.session().state().roster();
+        local.want(&[(at(0), P::Shipyard, 1)]);
+        let ship = |pattern, standing| {
+            EntityView {
+                seat: PLAYER,
+                pattern,
+                pos: Vec3::ZERO,
+                standing,
+            }
+            .reach()
+        };
 
         assert_eq!(
-            reach(roster, FRIGATE, true),
-            Some(roster[FRIGATE].max_damage_range()),
+            ship(P::Frigate, true),
+            Some(P::Frigate.max_damage_range()),
             "a frigate at an asteroid draws its longest range"
         );
-        assert_eq!(reach(roster, FRIGATE, false), None, "and none in flight");
-        assert_eq!(
-            reach(roster, SHIPYARD, true),
-            None,
-            "a shipyard does no damage"
-        );
+        assert_eq!(ship(P::Frigate, false), None, "and none in flight");
+        assert_eq!(ship(P::Shipyard, true), None, "a shipyard does no damage");
 
         let scene = scene(&local);
         assert_eq!(scene.entities.len(), 1);
-        assert_eq!(scene.entities[0].range, None);
+        assert_eq!(scene.entities[0].reach(), None);
         assert_eq!(scene.zone, local.view().zone);
     }
 

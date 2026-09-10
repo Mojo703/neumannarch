@@ -1,5 +1,5 @@
 use neumannarch_protocol::Bot;
-use neumannarch_sim::roster::{RAIDER, Roster};
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::{AsteroidId, Retention, Setup, TeamId, Time};
 
 use super::*;
@@ -17,7 +17,7 @@ impl Agent for Counting {
         self.0 += 1;
         vec![Command::Want {
             asteroid: AsteroidId(0),
-            row: RAIDER,
+            pattern: EntityPattern::Raider,
             count: 1,
         }]
     }
@@ -25,7 +25,6 @@ impl Agent for Counting {
 
 #[test]
 fn every_bot_a_lobby_can_seat_is_named_and_built_by_the_registry() {
-    let roster = Roster::shipped();
     for bot in [Bot::Turtle, Bot::Expand] {
         let shipped = Shipped::of(bot);
         assert_eq!(
@@ -34,11 +33,9 @@ fn every_bot_a_lobby_can_seat_is_named_and_built_by_the_registry() {
             "{bot:?} answers to no shipped name"
         );
         assert_eq!(
-            shipped.seated(&roster).decide(&View::of(
-                session().state(),
-                SeatId(0),
-                &Shots::default()
-            )),
+            shipped
+                .seated()
+                .decide(&View::of(session().state(), SeatId(0), &Shots::default())),
             Vec::new(),
             "a bot seated before its stage runs asks for nothing"
         );
@@ -83,10 +80,7 @@ fn an_agent_decides_once_a_cadence_and_stamps_its_seat_and_its_count() {
 fn a_bot_places_on_the_first_tick_its_stage_runs_whatever_the_cadence() {
     let mut session = session();
     let staged = session.state().draft().stages()[1];
-    let mut seated = Seated::new(
-        staged.seat,
-        Box::new(Scripted::new(Personality::expand(), Roster::shipped())),
-    );
+    let mut seated = Seated::new(staged.seat, Box::new(Scripted::new(Personality::expand())));
 
     while session.state().draft().running() != Some(staged) {
         assert_eq!(seated.issue(&session), Vec::new(), "its stage waits");

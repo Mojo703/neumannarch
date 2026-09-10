@@ -16,7 +16,7 @@ pub const OVERRUN_ROOM: f32 = BAR_LENGTH / 4.0;
 
 pub const PROJECTION_SECONDS: f64 = 10.0;
 
-const TOP_MARGIN: f32 = wheel::ROW_GAP;
+const TOP_MARGIN: f32 = wheel::SECTION_GAP;
 
 const BAR_HEIGHT: f32 = wheel::LINE_HEIGHT;
 

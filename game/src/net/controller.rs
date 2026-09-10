@@ -1,6 +1,5 @@
 use neumannarch_agents::{Seated, Shipped};
 use neumannarch_protocol::{Crew, Occupant, Seating};
-use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::{Command, MAX_COMMANDS_PER_TICK};
 use neumannarch_sim::{SeatId, Sequence, Session, Stamped};
 
@@ -16,7 +15,7 @@ pub enum Controller {
 }
 
 impl Controller {
-    pub fn of(seating: &Seating, crew: &Crew, roster: &Roster) -> Vec<Controller> {
+    pub fn of(seating: &Seating, crew: &Crew) -> Vec<Controller> {
         seating
             .seats()
             .map(|(seat, holder)| match holder {
@@ -24,7 +23,7 @@ impl Controller {
                     Controller::Human(Human::new(seat))
                 }
                 Occupant::Bot(bot) if crew.seats().contains(&seat) => {
-                    Controller::Bot(Box::new(Seated::new(seat, Shipped::of(bot).seated(roster))))
+                    Controller::Bot(Box::new(Seated::new(seat, Shipped::of(bot).seated())))
                 }
                 Occupant::Bot(_) | Occupant::Player(_) => Controller::Remote(seat),
             })
@@ -81,7 +80,7 @@ impl Human {
 #[cfg(test)]
 mod tests {
     use neumannarch_protocol::{Holder, Lobby, LobbyEdit, PlayerId};
-    use neumannarch_sim::roster::SHIPYARD;
+    use neumannarch_sim::pattern::EntityPattern;
     use neumannarch_sim::{AsteroidId, Retention};
 
     use super::*;
@@ -89,7 +88,7 @@ mod tests {
     fn command(count: u32) -> Command {
         Command::Want {
             asteroid: AsteroidId(0),
-            row: SHIPYARD,
+            pattern: EntityPattern::Shipyard,
             count,
         }
     }
@@ -111,7 +110,7 @@ mod tests {
         let started = lobby.freeze().expect("the lobby is a match");
         let seating = started.seating();
         let crew = seating.run_by(me).expect("the machine runs a seat");
-        Controller::of(seating, &crew, &Roster::shipped())
+        Controller::of(seating, &crew)
     }
 
     #[test]

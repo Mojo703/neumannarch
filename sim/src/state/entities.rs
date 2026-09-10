@@ -1,8 +1,9 @@
 use core::ops::Range;
 use std::collections::BTreeMap;
 
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::orbit::body::Body;
+use crate::pattern::EntityPattern;
 use crate::real::Real;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -27,7 +28,7 @@ pub(crate) enum Pass {
 pub(crate) struct Entities {
     ids: Vec<EntityId>,
     seats: Vec<SeatId>,
-    rows: Vec<RowId>,
+    patterns: Vec<EntityPattern>,
     homes: Vec<AsteroidId>,
     berths: Vec<Berth>,
     hp: Vec<Real>,
@@ -66,7 +67,7 @@ impl Entities {
         Entities {
             ids: Vec::new(),
             seats: Vec::new(),
-            rows: Vec::new(),
+            patterns: Vec::new(),
             homes: Vec::new(),
             berths: Vec::new(),
             hp: Vec::new(),
@@ -82,9 +83,8 @@ impl Entities {
     pub(crate) fn spawn(
         &mut self,
         seat: SeatId,
-        row: RowId,
+        pattern: EntityPattern,
         home: AsteroidId,
-        hp: f64,
         motion: Motion,
     ) -> EntityId {
         let id = self.next_id;
@@ -93,10 +93,10 @@ impl Entities {
         let at = self.place_for(berth, seat, id);
         self.ids.insert(at, id);
         self.seats.insert(at, seat);
-        self.rows.insert(at, row);
+        self.patterns.insert(at, pattern);
         self.homes.insert(at, home);
         self.berths.insert(at, berth);
-        self.hp.insert(at, Real(hp));
+        self.hp.insert(at, Real(pattern.hp().0));
         self.motions.insert(at, motion);
         self.passes.insert(at, Pass::Running);
         for place in &mut self.places_ascending {
@@ -204,8 +204,9 @@ impl Entities {
         self.hp[at].0 -= damage;
     }
 
-    pub(crate) fn heal(&mut self, id: EntityId, hp: f64, full: f64) {
+    pub(crate) fn heal(&mut self, id: EntityId, hp: f64) {
         let at = self.place_of(id);
+        let full = self.patterns[at].hp().0;
         self.hp[at].0 = (self.hp[at].0 + hp).min(full);
     }
 
@@ -246,7 +247,7 @@ impl Entities {
     fn reorder(&mut self, order: &[u32]) {
         self.ids = gather(&self.ids, order);
         self.seats = gather(&self.seats, order);
-        self.rows = gather(&self.rows, order);
+        self.patterns = gather(&self.patterns, order);
         self.homes = gather(&self.homes, order);
         self.berths = gather(&self.berths, order);
         self.hp = gather(&self.hp, order);
@@ -317,8 +318,8 @@ impl<'a> Entity<'a> {
         self.entities.seats[self.at]
     }
 
-    pub fn row(self) -> RowId {
-        self.entities.rows[self.at]
+    pub fn pattern(self) -> EntityPattern {
+        self.entities.patterns[self.at]
     }
 
     pub fn home(self) -> AsteroidId {
@@ -367,7 +368,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::TeamId;
     use crate::orbit::body::Gravity;
-    use crate::roster::{FRIGATE, SHIPYARD};
+    use crate::pattern::EntityPattern as P;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -386,10 +387,10 @@ mod tests {
     #[test]
     fn the_store_reads_in_standing_then_seat_then_id_order() {
         let mut world = world();
-        let last = world.hold(1, FRIGATE, AWAY, 0.0);
-        let first = world.hold(0, FRIGATE, HOME, 0.0);
-        let second = world.hold(1, FRIGATE, HOME, 2.0);
-        let third = world.hold(1, FRIGATE, HOME, 4.0);
+        let last = world.hold(1, P::Frigate, AWAY, 0.0);
+        let first = world.hold(0, P::Frigate, HOME, 0.0);
+        let second = world.hold(1, P::Frigate, HOME, 2.0);
+        let third = world.hold(1, P::Frigate, HOME, 4.0);
 
         assert_eq!(ids(&world), vec![first, second, third, last]);
         assert_eq!(
@@ -407,8 +408,8 @@ mod tests {
     #[test]
     fn a_flier_sorts_last_and_still_answers_to_its_id() {
         let mut world = world();
-        let flier = world.hold(0, FRIGATE, HOME, 0.0);
-        let stayer = world.hold(0, FRIGATE, HOME, 2.0);
+        let flier = world.hold(0, P::Frigate, HOME, 0.0);
+        let stayer = world.hold(0, P::Frigate, HOME, 2.0);
 
         world.send(flier, AWAY);
 
@@ -443,24 +444,24 @@ mod tests {
     #[test]
     fn reaping_the_dead_keeps_the_survivors_order_and_the_next_id() {
         let mut world = world();
-        let first = world.hold(0, FRIGATE, HOME, 0.0);
-        let doomed = world.hold(0, FRIGATE, HOME, 2.0);
-        let last = world.hold(0, FRIGATE, HOME, 4.0);
+        let first = world.hold(0, P::Frigate, HOME, 0.0);
+        let doomed = world.hold(0, P::Frigate, HOME, 2.0);
+        let last = world.hold(0, P::Frigate, HOME, 4.0);
         let hp = world.state.entity(doomed).hp();
         world.state.entities.hurt(doomed, hp);
 
         assert_eq!(world.state.reap(), vec![doomed]);
         assert_eq!(ids(&world), vec![first, last]);
 
-        let next = world.fix(0, SHIPYARD, HOME);
+        let next = world.fix(0, P::Shipyard, HOME);
         assert_eq!(next.0, last.0 + 1, "a dead id is never minted again");
     }
 
     #[test]
     fn reaping_takes_an_entity_whose_hit_points_are_no_number_with_the_dead() {
         let mut world = world();
-        let sound = world.hold(0, FRIGATE, HOME, 0.0);
-        let unnumbered = world.hold(0, FRIGATE, HOME, 2.0);
+        let sound = world.hold(0, P::Frigate, HOME, 0.0);
+        let unnumbered = world.hold(0, P::Frigate, HOME, 2.0);
         world.state.entities.hurt(unnumbered, f64::NAN);
 
         assert_eq!(
@@ -474,8 +475,8 @@ mod tests {
     #[test]
     fn a_reap_carries_every_survivors_pass_to_its_new_place() {
         let mut world = world();
-        let doomed = world.hold(0, FRIGATE, HOME, 0.0);
-        let returning = world.hold(0, FRIGATE, HOME, 2.0);
+        let doomed = world.hold(0, P::Frigate, HOME, 0.0);
+        let returning = world.hold(0, P::Frigate, HOME, 2.0);
         world.state.entities.set_pass(returning, Pass::Returning);
         world.state.entities.hurt(doomed, f64::MAX);
 
@@ -487,7 +488,7 @@ mod tests {
     #[test]
     fn a_unit_sent_away_starts_its_next_pass_from_the_run() {
         let mut world = world();
-        let unit = world.hold(0, FRIGATE, HOME, 0.0);
+        let unit = world.hold(0, P::Frigate, HOME, 0.0);
         world.state.entities.set_pass(unit, Pass::Returning);
 
         world.send(unit, AWAY);

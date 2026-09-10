@@ -11,8 +11,8 @@ use neumannarch_game::display::fights::Fights;
 use neumannarch_game::display::glyph;
 use neumannarch_game::display::glyph_quad::GlyphQuad;
 use neumannarch_game::display::scene::{
-    Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, FlightLine, RowView, Scene, SectorView,
-    Shown, StockpileBarView, WheelButton, WheelGesture, WheelView,
+    Arc, AsteroidView, ButtonAt, Client, EntityView, Entry, FlightLine, PatternView, Scene,
+    SectorView, Shown, StockpileBarView, WheelButton, WheelGesture, WheelView,
 };
 use neumannarch_game::display::stockpile_bar::StockpileBar;
 use neumannarch_game::display::viewport::Viewport;
@@ -26,15 +26,13 @@ use neumannarch_protocol::{Lobby, LobbyEdit, PlayerId};
 use neumannarch_sim::Session as Match;
 use neumannarch_sim::belt::Belt;
 use neumannarch_sim::orbit::Body;
-use neumannarch_sim::roster::{
-    ENERGY_EXTRACTOR, FRIGATE, Glyph, LANCER, METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD,
-};
+use neumannarch_sim::pattern::{EntityPattern, EntityPattern as P};
 use neumannarch_sim::state::view::{Building, View};
 use neumannarch_sim::state::{Command, FightStage, Line, STAGE_SPAN, State};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{
-    AsteroidId, Material, Materials, Posting, Retention, RowId, SeatId, Sequence, Stockpile,
-    TeamId, Time, Vec3,
+    AsteroidId, Material, Materials, Posting, Retention, SeatId, Sequence, Stockpile, TeamId, Time,
+    Vec3,
 };
 
 meshes! { enum Shape { Sphere, GlyphQuad } }
@@ -55,9 +53,9 @@ const DRAFT_ZOOM_PER_METER_APART: f64 = 2.4;
 
 const DRAFT_FOCUS_TOWARD_TAKEN: f64 = 0.3;
 
-fn glyph_of(row: RowId) -> Glyph {
-    Roster::shipped()[row].glyph()
-}
+const METALS_EXTRACTOR: EntityPattern = P::Extractor(Material::Metals);
+
+const ENERGY_EXTRACTOR: EntityPattern = P::Extractor(Material::Energy);
 
 fn main() {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("look");
@@ -106,12 +104,12 @@ impl Watched {
     fn wanting() -> Watched {
         let (mut session, _) = skirmish_where_you_go_first();
         let mut sequence = Sequence::new(YOU);
-        for row in [FRIGATE, RAIDER] {
+        for pattern in [P::Frigate, P::Raider] {
             let stamped = sequence.stamp(
                 session.state().tick(),
                 Command::Want {
                     asteroid: AsteroidId(0),
-                    row,
+                    pattern,
                     count: 1,
                 },
             );
@@ -160,25 +158,17 @@ impl Game for Looker {
 
         belt::draw(&self.scene, &viewport, ctx);
 
-        let roster = Roster::shipped();
         let scene = &self.scene;
         let over = viewport.bounds();
         let bar = scene
             .stockpile_bar
             .map(|view| StockpileBar::across(over, view));
-        let wheels = Wheels::over(
-            scene,
-            &roster,
-            &viewport,
-            &aim(scene, &self.watched),
-            &mut Still,
-        );
+        let wheels = Wheels::over(scene, &viewport, &aim(scene, &self.watched), &mut Still);
         let order = self.drafting.as_ref().map(|drafting| {
             Order::over(
                 over,
                 &self.watched.view.draft,
                 self.watched.view.tick,
-                &roster,
                 &drafting.names,
                 1.0,
             )
@@ -188,11 +178,11 @@ impl Game for Looker {
             let at = wheels
                 .iter()
                 .find(|wheel| wheel.asteroid() == posting.asteroid())?
-                .button(posting.row(), WheelButton::Plus(1))?;
+                .button(posting.pattern(), WheelButton::Plus(1))?;
             let (beside, spoken) = wheels.spoken_at(at)?;
             Some((
                 egui::Rect::from_center_size(beside, egui::Vec2::splat(2.0 * glyph::HALF)),
-                spoken.phrase(&roster),
+                spoken.phrase(),
             ))
         });
         ctx.ui(|ui| {
@@ -280,21 +270,19 @@ fn caps_of(id: u32) -> Materials {
     }
 }
 
-fn ship(seat: u8, row: RowId, pos: Vec3) -> EntityView {
+fn ship(seat: u8, pattern: EntityPattern, pos: Vec3) -> EntityView {
     EntityView {
         seat: SeatId(seat),
-        glyph: glyph_of(row),
+        pattern,
         pos,
-        range: Roster::shipped()[row]
-            .does_damage()
-            .then(|| Roster::shipped()[row].max_damage_range()),
+        standing: true,
     }
 }
 
-fn flier(seat: u8, row: RowId, pos: Vec3) -> EntityView {
+fn flier(seat: u8, pattern: EntityPattern, pos: Vec3) -> EntityView {
     EntityView {
-        range: None,
-        ..ship(seat, row, pos)
+        standing: false,
+        ..ship(seat, pattern, pos)
     }
 }
 
@@ -305,17 +293,17 @@ fn shown(entry: Entry) -> Shown {
     }
 }
 
-fn row(row: RowId, entries: Vec<Entry>) -> RowView {
-    RowView {
-        row,
+fn strip(pattern: EntityPattern, entries: Vec<Entry>) -> PatternView {
+    PatternView {
+        pattern,
         entries: entries.into_iter().map(shown).collect(),
     }
 }
 
-fn sector(seat: u8, rows: Vec<RowView>, arc: Option<Arc>) -> SectorView {
+fn sector(seat: u8, patterns: Vec<PatternView>, arc: Option<Arc>) -> SectorView {
     SectorView {
         seat: SeatId(seat),
-        rows,
+        patterns,
         arc,
     }
 }
@@ -343,13 +331,13 @@ fn region_scene(watched: &Watched) -> Scene {
     ];
 
     let entities = vec![
-        ship(0, RAIDER, Vec3::new(4.0, 0.0, 2.0)),
-        ship(0, FRIGATE, Vec3::new(-4.0, 0.0, 3.0)),
-        ship(1, RAIDER, Vec3::new(2.0, 0.0, -4.0)),
-        ship(1, LANCER, Vec3::new(-2.0, 0.0, -5.0)),
-        ship(0, SHIPYARD, Vec3::new(320.0, 0.0, -104.0)),
-        ship(0, FRIGATE, Vec3::new(325.0, 0.0, -112.0)),
-        flier(1, RAIDER, Vec3::new(-90.0, 0.0, 80.0)),
+        ship(0, P::Raider, Vec3::new(4.0, 0.0, 2.0)),
+        ship(0, P::Frigate, Vec3::new(-4.0, 0.0, 3.0)),
+        ship(1, P::Raider, Vec3::new(2.0, 0.0, -4.0)),
+        ship(1, P::Lancer, Vec3::new(-2.0, 0.0, -5.0)),
+        ship(0, P::Shipyard, Vec3::new(320.0, 0.0, -104.0)),
+        ship(0, P::Frigate, Vec3::new(325.0, 0.0, -112.0)),
+        flier(1, P::Raider, Vec3::new(-90.0, 0.0, 80.0)),
     ];
 
     let wheels = vec![
@@ -359,16 +347,16 @@ fn region_scene(watched: &Watched) -> Scene {
                 sector(
                     0,
                     vec![
-                        row(FRIGATE, vec![Entry::Present(1)]),
-                        row(RAIDER, vec![Entry::Present(1)]),
+                        strip(P::Frigate, vec![Entry::Present(1)]),
+                        strip(P::Raider, vec![Entry::Present(1)]),
                     ],
                     arc(0, 0.7, 0.85),
                 ),
                 sector(
                     1,
-                    Roster::shipped()
-                        .iter()
-                        .map(|(id, _)| row(id, vec![Entry::Present(1)]))
+                    EntityPattern::EVERY
+                        .into_iter()
+                        .map(|pattern| strip(pattern, vec![Entry::Present(1)]))
                         .collect(),
                     arc(1, 0.4, 0.4),
                 ),
@@ -379,9 +367,9 @@ fn region_scene(watched: &Watched) -> Scene {
             vec![sector(
                 0,
                 vec![
-                    row(SHIPYARD, vec![Entry::Present(1), Entry::Surplus(1)]),
-                    row(
-                        FRIGATE,
+                    strip(P::Shipyard, vec![Entry::Present(1), Entry::Surplus(1)]),
+                    strip(
+                        P::Frigate,
                         vec![
                             Entry::Present(1),
                             Entry::Building(Building {
@@ -402,8 +390,8 @@ fn region_scene(watched: &Watched) -> Scene {
             2,
             vec![sector(
                 1,
-                vec![row(
-                    RAIDER,
+                vec![strip(
+                    P::Raider,
                     vec![Entry::Arriving {
                         count: 1,
                         from: AsteroidId(0),
@@ -433,7 +421,7 @@ fn region_scene(watched: &Watched) -> Scene {
         seat: SeatId(0),
         selection: Some(AsteroidId(0)),
         gesture: Some(watched.previewing(ButtonAt {
-            posting: Posting::of(AsteroidId(0), SeatId(0), RAIDER),
+            posting: Posting::of(AsteroidId(0), SeatId(0), P::Raider),
             button: WheelButton::Plus(1),
         })),
     }
@@ -452,31 +440,30 @@ fn fight_scene() -> Scene {
     let radius = 6.0;
     let asteroids = vec![asteroid(0, HOME, radius)];
 
-    let roster = Roster::shipped();
     let lines: Vec<Line> = [
-        (0u8, RAIDER),
-        (0, FRIGATE),
-        (0, LANCER),
-        (1, RAIDER),
-        (1, FRIGATE),
+        (0u8, P::Raider),
+        (0, P::Frigate),
+        (0, P::Lancer),
+        (1, P::Raider),
+        (1, P::Frigate),
     ]
     .into_iter()
-    .map(|(seat, row)| Line {
+    .map(|(seat, pattern)| Line {
         team: TeamId(seat),
-        row,
+        pattern,
         standing: 1,
     })
     .collect();
-    let stage = FightStage::of(Body::new(HOME, PROGRADE), radius, &roster, &lines);
+    let stage = FightStage::of(Body::new(HOME, PROGRADE), radius, &lines);
     let entities: Vec<EntityView> = lines
         .iter()
         .map(|line| {
             let station = stage
-                .stations_of(line.team, line.row)
+                .stations_of(line.team, line.pattern)
                 .first()
                 .copied()
-                .expect("a row that does damage takes a station");
-            ship(line.team.0, line.row, station)
+                .expect("a pattern that does damage takes a station");
+            ship(line.team.0, line.pattern, station)
         })
         .collect();
 
@@ -486,10 +473,10 @@ fn fight_scene() -> Scene {
             sector(
                 0,
                 vec![
-                    row(FRIGATE, vec![Entry::Present(1)]),
-                    row(LANCER, vec![Entry::Present(1)]),
-                    row(
-                        RAIDER,
+                    strip(P::Frigate, vec![Entry::Present(1)]),
+                    strip(P::Lancer, vec![Entry::Present(1)]),
+                    strip(
+                        P::Raider,
                         vec![
                             Entry::Present(1),
                             Entry::Arriving {
@@ -504,8 +491,8 @@ fn fight_scene() -> Scene {
             sector(
                 1,
                 vec![
-                    row(FRIGATE, vec![Entry::Present(1)]),
-                    row(RAIDER, vec![Entry::Present(1)]),
+                    strip(P::Frigate, vec![Entry::Present(1)]),
+                    strip(P::Raider, vec![Entry::Present(1)]),
                 ],
                 arc(1, 0.3, 0.55),
             ),
@@ -551,8 +538,8 @@ fn stockpile_scene() -> Scene {
     let entities = vec![
         ship(0, METALS_EXTRACTOR, Vec3::new(-5.0, 0.0, 3.0)),
         ship(0, ENERGY_EXTRACTOR, Vec3::new(5.0, 0.0, 3.0)),
-        ship(0, SHIPYARD, Vec3::new(0.0, 0.0, -6.0)),
-        ship(0, FRIGATE, Vec3::new(6.0, 0.0, -3.0)),
+        ship(0, P::Shipyard, Vec3::new(0.0, 0.0, -6.0)),
+        ship(0, P::Frigate, Vec3::new(6.0, 0.0, -3.0)),
         ship(1, ENERGY_EXTRACTOR, Vec3::new(344.0, 0.0, -118.0)),
     ];
 
@@ -561,11 +548,11 @@ fn stockpile_scene() -> Scene {
         vec![sector(
             0,
             vec![
-                row(SHIPYARD, vec![Entry::Present(1)]),
-                row(METALS_EXTRACTOR, vec![Entry::Present(1)]),
-                row(ENERGY_EXTRACTOR, vec![Entry::Present(1)]),
-                row(
-                    FRIGATE,
+                strip(P::Shipyard, vec![Entry::Present(1)]),
+                strip(METALS_EXTRACTOR, vec![Entry::Present(1)]),
+                strip(ENERGY_EXTRACTOR, vec![Entry::Present(1)]),
+                strip(
+                    P::Frigate,
                     vec![
                         Entry::Present(1),
                         Entry::Building(Building {
@@ -662,7 +649,7 @@ fn draft_scene() -> (Scene, Drafting, Watched) {
         session.state().tick(),
         Command::Want {
             asteroid: TAKEN,
-            row: first.row,
+            pattern: first.pattern,
             count: 1,
         },
     );
@@ -679,10 +666,9 @@ fn draft_scene() -> (Scene, Drafting, Watched) {
         .find(|stage| stage.seat == YOU && stage.placed.is_none())
         .expect("your second stage waits");
     let bare = nearest_free(&watched.state);
-    let button = Posting::of(bare, YOU, waiting.row);
+    let button = Posting::of(bare, YOU, waiting.pattern);
     let scene = Scene::from_view(
         view,
-        session.state().roster(),
         Client {
             selection: Some(bare),
             asked: vec![bare],

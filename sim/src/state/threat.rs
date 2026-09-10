@@ -58,7 +58,7 @@ impl Threats {
                     let target = state.entities.at(at);
                     Ranked {
                         at: at as u32,
-                        threat: state[target.row()].dps_through(shooter.plating.0) / target.hp(),
+                        threat: target.pattern().dps_through(shooter.plating.0) / target.hp(),
                     }
                 })
                 .collect();
@@ -164,10 +164,10 @@ impl Ranking {
 fn shooters(state: &State, standing: Range<usize>) -> Vec<Shooter> {
     let mut shooters: Vec<Shooter> = standing
         .map(|at| state.entities.at(at))
-        .filter(|entity| state[entity.row()].does_damage())
+        .filter(|entity| entity.pattern().does_damage())
         .map(|entity| Shooter {
             team: state[entity.seat()].team(),
-            plating: state[entity.row()].plating,
+            plating: entity.pattern().plating(),
         })
         .collect();
     shooters.sort_unstable_by(|first, second| {
@@ -187,7 +187,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::{AsteroidId, EntityId};
     use crate::orbit::body::Gravity;
-    use crate::roster::{CONSTRUCTOR, FRIGATE, RAIDER};
+    use crate::pattern::EntityPattern as P;
     use crate::state::Rolls;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
@@ -202,7 +202,7 @@ mod tests {
         let entity = state.entity(shooter);
         Shooter {
             team: state[entity.seat()].team(),
-            plating: state[entity.row()].plating,
+            plating: entity.pattern().plating(),
         }
     }
 
@@ -241,9 +241,9 @@ mod tests {
     #[test]
     fn the_highest_threat_through_the_shooters_plating_is_the_target() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        world.hold(1, CONSTRUCTOR, HOME, 2.0);
-        let dangerous = world.hold(1, RAIDER, HOME, 4.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        world.hold(1, P::Constructor, HOME, 2.0);
+        let dangerous = world.hold(1, P::Raider, HOME, 4.0);
 
         assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(dangerous));
     }
@@ -251,8 +251,8 @@ mod tests {
     #[test]
     fn a_teammate_is_never_prey() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        world.hold(0, RAIDER, HOME, 2.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        world.hold(0, P::Raider, HOME, 2.0);
 
         assert_eq!(aimed(&world, hunter), None);
     }
@@ -260,8 +260,8 @@ mod tests {
     #[test]
     fn an_enemy_at_another_asteroid_is_never_prey() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        world.hold(1, RAIDER, AsteroidId(1), 0.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        world.hold(1, P::Raider, AsteroidId(1), 0.0);
 
         assert_eq!(aimed(&world, hunter), None);
     }
@@ -269,8 +269,8 @@ mod tests {
     #[test]
     fn a_target_beyond_the_range_is_never_taken() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let far = world.hold(1, RAIDER, HOME, 8.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let far = world.hold(1, P::Raider, HOME, 8.0);
 
         assert_eq!(aimed_within(&world, hunter, 4.0), None);
         assert_eq!(
@@ -282,9 +282,9 @@ mod tests {
     #[test]
     fn damage_already_assigned_this_tick_passes_over_a_dead_target() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let dangerous = world.hold(1, RAIDER, HOME, 2.0);
-        let harmless = world.hold(1, CONSTRUCTOR, HOME, 4.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let dangerous = world.hold(1, P::Raider, HOME, 2.0);
+        let harmless = world.hold(1, P::Constructor, HOME, 4.0);
         let rolls = Rolls::called(&world.state);
         let from = world.state.body_of(world.state.entity(hunter)).pos;
         let shooter = shooting(&world.state, hunter);
@@ -303,9 +303,9 @@ mod tests {
     #[test]
     fn ties_break_by_the_nearer_target_then_the_lower_id() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let near = world.hold(1, CONSTRUCTOR, HOME, 2.0);
-        world.hold(1, CONSTRUCTOR, HOME, 6.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let near = world.hold(1, P::Constructor, HOME, 2.0);
+        world.hold(1, P::Constructor, HOME, 6.0);
 
         assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(near));
     }
@@ -313,9 +313,9 @@ mod tests {
     #[test]
     fn a_kept_target_in_reach_is_taken_over_a_nearer_higher_threat() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let dangerous = world.hold(1, RAIDER, HOME, 2.0);
-        let kept = world.hold(1, CONSTRUCTOR, HOME, 4.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let dangerous = world.hold(1, P::Raider, HOME, 2.0);
+        let kept = world.hold(1, P::Constructor, HOME, 4.0);
         assert_eq!(aimed(&world, hunter).map(|aim| aim.target), Some(dangerous));
 
         let aim = kept_within(
@@ -333,9 +333,9 @@ mod tests {
     #[test]
     fn a_kept_target_out_of_reach_is_dropped_for_the_highest_threat_in_it() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let dangerous = world.hold(1, RAIDER, HOME, 2.0);
-        let far = world.hold(1, CONSTRUCTOR, HOME, 8.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let dangerous = world.hold(1, P::Raider, HOME, 2.0);
+        let far = world.hold(1, P::Constructor, HOME, 8.0);
 
         let aim = kept_within(&world, hunter, 4.0, far, &AssignedDamage::default());
 
@@ -345,9 +345,9 @@ mod tests {
     #[test]
     fn a_kept_target_this_ticks_damage_already_kills_is_passed_over() {
         let mut world = world();
-        let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-        let doomed = world.hold(1, RAIDER, HOME, 2.0);
-        let other = world.hold(1, CONSTRUCTOR, HOME, 4.0);
+        let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+        let doomed = world.hold(1, P::Raider, HOME, 2.0);
+        let other = world.hold(1, P::Constructor, HOME, 4.0);
         let mut dealt = AssignedDamage::default();
         dealt.take(doomed, world.state.entity(doomed).hp());
 
@@ -359,9 +359,9 @@ mod tests {
     #[test]
     fn the_whole_zone_reaches_an_enemy_no_damage_range_would() {
         let mut world = world();
-        let hunter = world.hold(0, RAIDER, HOME, 0.0);
-        let far = world.hold(1, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
-        let strayed = world.hold(1, RAIDER, HOME, 2.0 * Belt::ZONE_RADIUS_METERS);
+        let hunter = world.hold(0, P::Raider, HOME, 0.0);
+        let far = world.hold(1, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+        let strayed = world.hold(1, P::Raider, HOME, 2.0 * Belt::ZONE_RADIUS_METERS);
         let rolls = Rolls::called(&world.state);
         let from = world.state.body_of(world.state.entity(hunter)).pos;
         let shooter = shooting(&world.state, hunter);
@@ -393,15 +393,15 @@ mod tests {
     #[test]
     fn a_tie_at_one_point_breaks_by_the_lower_id() {
         let mut coincident = world();
-        let hunter = coincident.hold(0, FRIGATE, HOME, 0.0);
-        let first = coincident.hold(1, CONSTRUCTOR, HOME, 3.0);
-        let second = coincident.hold(1, CONSTRUCTOR, HOME, 3.0);
+        let hunter = coincident.hold(0, P::Frigate, HOME, 0.0);
+        let first = coincident.hold(1, P::Constructor, HOME, 3.0);
+        let second = coincident.hold(1, P::Constructor, HOME, 3.0);
         assert!(first < second);
 
         assert_eq!(
             aimed(&coincident, hunter).map(|aim| aim.target),
             Some(first),
-            "two enemies of one row at one point: the lower id"
+            "two enemies of one pattern at one point: the lower id"
         );
     }
 }

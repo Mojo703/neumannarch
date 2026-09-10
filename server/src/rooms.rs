@@ -267,7 +267,7 @@ impl Outbound {
 #[cfg(test)]
 mod tests {
     use neumannarch_protocol::{Bot, CLOCK_RANGE, Holder, Lobby};
-    use neumannarch_sim::roster::SHIPYARD;
+    use neumannarch_sim::pattern::EntityPattern;
     use neumannarch_sim::state::{Command, Issued, State};
     use neumannarch_sim::{
         AsteroidId, Batch, SeatId, Setup, Stamped, TICKS_PER_SECOND, TeamId, Tick,
@@ -285,7 +285,7 @@ mod tests {
                 seq: 0,
                 command: Command::Want {
                     asteroid: AsteroidId(0),
-                    row: SHIPYARD,
+                    pattern: EntityPattern::Shipyard,
                     count: 1,
                 },
             },

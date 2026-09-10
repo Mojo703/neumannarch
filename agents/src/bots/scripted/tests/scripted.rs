@@ -1,14 +1,11 @@
-use neumannarch_sim::roster::CONSTRUCTOR;
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::{Command, State, view::View};
 use neumannarch_sim::step::fire::Shots;
 use neumannarch_sim::{AsteroidId, Materials, Post, SeatId, Setup};
 
-use neumannarch_sim::roster::Roster;
-
 use crate::Agent;
 use crate::bots::scripted::Scripted;
 use crate::bots::scripted::personality::Personality;
-use crate::bots::scripted::roles::Roles;
 use crate::harness::fixture::Fixture;
 use crate::harness::played_match::{free_for_all, minutes};
 
@@ -18,16 +15,12 @@ const OPENING_SECONDS: u64 = 8;
 
 const SETTLED_SECONDS: u64 = 240;
 
-fn scripted(personality: Personality) -> Scripted {
-    Scripted::new(personality, Roster::shipped())
-}
-
 fn opening(state: &State, seat: SeatId) -> Vec<Command> {
-    scripted(Personality::turtle()).decide(&View::of(state, seat, &Shots::default()))
+    Scripted::new(Personality::turtle()).decide(&View::of(state, seat, &Shots::default()))
 }
 
 #[test]
-fn an_agent_asks_for_one_reserve_row_at_a_free_asteroid_only_once_its_window_is_open() {
+fn an_agent_asks_for_one_reserve_pattern_at_a_free_asteroid_only_once_its_window_is_open() {
     let fixture = Fixture::seating([None, None]);
     let state = fixture.state();
     let picking = state.draft().stages()[0].seat;
@@ -38,13 +31,13 @@ fn an_agent_asks_for_one_reserve_row_at_a_free_asteroid_only_once_its_window_is_
     assert_eq!(placing.len(), 1, "one structure, not the whole reserve");
     let Command::Want {
         asteroid,
-        row,
+        pattern,
         count,
     } = placing[0];
     assert_eq!(count, 1);
     assert!(
-        state[picking].reserved(row) > 0,
-        "a row it holds in reserve"
+        state[picking].reserved(pattern) > 0,
+        "a pattern it holds in reserve"
     );
     assert!(!state.is_taken(asteroid), "an asteroid no seat has taken");
     assert_eq!(
@@ -62,7 +55,11 @@ fn two_agents_draft_four_asteroids_and_no_seat_takes_a_asteroid_another_took() {
     let mine = fixture.standing(0);
     let theirs = fixture.standing(1);
 
-    assert_eq!(mine.len(), 2, "a seat drafts one asteroid per reserve row");
+    assert_eq!(
+        mine.len(),
+        2,
+        "a seat drafts one asteroid per reserve pattern"
+    );
     assert_eq!(theirs.len(), 2);
     assert!(
         mine.iter().all(|asteroid| !theirs.contains(asteroid)),
@@ -83,7 +80,7 @@ fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
     let state = fixture.state();
     let asteroid = state
         .entities()
-        .find(|entity| entity.seat() == SeatId(0) && entity.row() == CONSTRUCTOR)
+        .find(|entity| entity.seat() == SeatId(0) && entity.pattern() == EntityPattern::Constructor)
         .map(|entity| entity.home())
         .expect("it drafted its constructor somewhere");
     let post = Post {
@@ -92,7 +89,7 @@ fn a_bot_keeps_the_constructor_it_drafted_where_it_stands_and_builds_there() {
     };
 
     assert_eq!(
-        state.count(post, CONSTRUCTOR),
+        state.count(post, EntityPattern::Constructor),
         1,
         "it stayed where it landed"
     );
@@ -131,7 +128,7 @@ fn an_agent_holds_more_than_the_asteroid_it_opened_on_by_mid_match() {
 fn an_agent_with_nothing_of_its_own_on_the_map_asks_for_nothing() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
 
-    let asking = scripted(Personality::expand()).decide(&fixture.view(1));
+    let asking = Scripted::new(Personality::expand()).decide(&fixture.view(1));
 
     assert!(
         fixture.standing(1).is_empty(),
@@ -142,12 +139,11 @@ fn an_agent_with_nothing_of_its_own_on_the_map_asks_for_nothing() {
 
 #[test]
 fn a_bots_first_draft_pick_is_the_asteroid_richest_in_the_mix_it_means_to_build() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
-    let shares = personality.weights(&roster, &Roles::of(&roster), 0.0, 0.0);
+    let shares = personality.weights(0.0, 0.0);
     let mix = shares
         .iter()
-        .map(|(row, share)| roster[*row].cost * *share)
+        .map(|(pattern, share)| pattern.cost() * *share)
         .fold(Materials::ZERO, |mix, cost| mix + cost);
 
     for seed in 0..SEEDS {
@@ -171,7 +167,7 @@ fn a_bots_first_draft_pick_is_the_asteroid_richest_in_the_mix_it_means_to_build(
             .max_by(|one, other| fit(*one).total_cmp(&fit(*other)).then(other.cmp(one)))
             .expect("a belt of asteroids");
 
-        let picked = scripted(personality.clone()).decide(&view);
+        let picked = Scripted::new(personality.clone()).decide(&view);
 
         let Command::Want { asteroid, .. } = *picked.first().expect("a pick");
         assert_eq!(

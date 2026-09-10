@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::roster::{Kind, Roster};
+use neumannarch_sim::pattern::{EntityPattern, Kind};
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, MAX_WANT};
-use neumannarch_sim::{AsteroidId, Posting, RowId};
+use neumannarch_sim::{AsteroidId, Posting};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sending {
@@ -14,29 +14,29 @@ pub struct Sending {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Moving {
-    pub row: RowId,
+    pub pattern: EntityPattern,
     pub count: u32,
 }
 
 impl Sending {
-    pub fn present(view: &View, asteroid: AsteroidId, roster: &Roster) -> u32 {
-        standing_units(view, asteroid, roster)
+    pub fn present(view: &View, asteroid: AsteroidId) -> u32 {
+        standing_units(view, asteroid)
             .iter()
             .map(|moving| moving.count)
             .sum()
     }
 
-    pub fn rows(&self, view: &View, roster: &Roster) -> Vec<Moving> {
+    pub fn patterns(&self, view: &View) -> Vec<Moving> {
         let mut left = self.count;
         let mut moving: Vec<Moving> = Vec::new();
-        for standing in standing_units(view, self.from, roster).into_iter().rev() {
+        for standing in standing_units(view, self.from).into_iter().rev() {
             if left == 0 {
                 break;
             }
             let count = standing.count.min(left);
             left -= count;
             moving.push(Moving {
-                row: standing.row,
+                pattern: standing.pattern,
                 count,
             });
         }
@@ -44,23 +44,23 @@ impl Sending {
         moving
     }
 
-    pub fn commands(&self, view: &View, roster: &Roster) -> Vec<Command> {
-        self.rows(view, roster)
+    pub fn commands(&self, view: &View) -> Vec<Command> {
+        self.patterns(view)
             .into_iter()
             .flat_map(|moving| {
-                let Moving { row, count } = moving;
+                let Moving { pattern, count } = moving;
                 [
                     Command::Want {
                         asteroid: self.from,
-                        row,
+                        pattern,
                         count: view
-                            .want_of(Posting::of(self.from, view.seat, row))
+                            .want_of(Posting::of(self.from, view.seat, pattern))
                             .saturating_sub(count),
                     },
                     Command::Want {
                         asteroid: self.to,
-                        row,
-                        count: (view.want_of(Posting::of(self.to, view.seat, row)) + count)
+                        pattern,
+                        count: (view.want_of(Posting::of(self.to, view.seat, pattern)) + count)
                             .min(MAX_WANT),
                     },
                 ]
@@ -69,36 +69,35 @@ impl Sending {
     }
 }
 
-fn standing_units(view: &View, asteroid: AsteroidId, roster: &Roster) -> Vec<Moving> {
-    let mut held: BTreeMap<RowId, u32> = BTreeMap::new();
+fn standing_units(view: &View, asteroid: AsteroidId) -> Vec<Moving> {
+    let mut held: BTreeMap<EntityPattern, u32> = BTreeMap::new();
     for unit in view
         .present
         .iter()
         .filter(|unit| unit.seat == view.seat && unit.at.standing() == Some(asteroid))
         .filter(|unit| unit.home == asteroid)
-        .filter(|unit| roster[unit.row].kind() == Kind::Unit)
+        .filter(|unit| unit.pattern.kind() == Kind::Unit)
     {
-        *held.entry(unit.row).or_insert(0) += 1;
+        *held.entry(unit.pattern).or_insert(0) += 1;
     }
-    let mut rows: Vec<Moving> = held
+    let mut moving: Vec<Moving> = held
         .into_iter()
-        .map(|(row, count)| Moving { row, count })
+        .map(|(pattern, count)| Moving { pattern, count })
         .collect();
-    rows.sort_by(|a, b| {
-        roster[b.row]
-            .cost
+    moving.sort_by(|a, b| {
+        b.pattern
+            .cost()
             .total()
-            .total_cmp(&roster[a.row].cost.total())
-            .then(a.row.cmp(&b.row))
+            .total_cmp(&a.pattern.cost().total())
+            .then(a.pattern.cmp(&b.pattern))
     });
-    rows
+    moving
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::display::local::Local;
-    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
 
     fn asteroid(at: u32) -> AsteroidId {
         AsteroidId(at)
@@ -106,22 +105,21 @@ mod tests {
 
     fn placed() -> Local {
         let mut local = Local::start(1);
-        local.want(&[(asteroid(0), CONSTRUCTOR, 1)]);
-        local.want(&[(asteroid(2), SHIPYARD, 1)]);
+        local.want(&[(asteroid(0), EntityPattern::Constructor, 1)]);
+        local.want(&[(asteroid(2), EntityPattern::Shipyard, 1)]);
         local
     }
     #[test]
     fn a_drag_starts_out_moving_every_unit_but_no_structure() {
         let local = placed();
-        let roster = local.session().state().roster();
 
         assert_eq!(
-            Sending::present(&local.view(), asteroid(0), roster),
+            Sending::present(&local.view(), asteroid(0)),
             1,
             "the constructor moves"
         );
         assert_eq!(
-            Sending::present(&local.view(), asteroid(2), roster),
+            Sending::present(&local.view(), asteroid(2)),
             0,
             "the shipyard never moves"
         );
@@ -130,7 +128,6 @@ mod tests {
     #[test]
     fn a_send_takes_the_source_want_down_and_the_destination_up() {
         let local = placed();
-        let roster = local.session().state().roster();
         let sending = Sending {
             from: asteroid(0),
             to: asteroid(1),
@@ -138,16 +135,16 @@ mod tests {
         };
 
         assert_eq!(
-            sending.commands(&local.view(), roster),
+            sending.commands(&local.view()),
             vec![
                 Command::Want {
                     asteroid: asteroid(0),
-                    row: CONSTRUCTOR,
+                    pattern: EntityPattern::Constructor,
                     count: 0,
                 },
                 Command::Want {
                     asteroid: asteroid(1),
-                    row: CONSTRUCTOR,
+                    pattern: EntityPattern::Constructor,
                     count: 1,
                 },
             ]
@@ -157,7 +154,6 @@ mod tests {
     #[test]
     fn a_drag_of_more_than_the_source_holds_moves_what_it_holds() {
         let local = placed();
-        let roster = local.session().state().roster();
         let sending = Sending {
             from: asteroid(0),
             to: asteroid(1),
@@ -165,9 +161,9 @@ mod tests {
         };
 
         assert_eq!(
-            sending.rows(&local.view(), roster),
+            sending.patterns(&local.view()),
             vec![Moving {
-                row: CONSTRUCTOR,
+                pattern: EntityPattern::Constructor,
                 count: 1
             }]
         );
@@ -176,20 +172,19 @@ mod tests {
     #[test]
     fn a_send_from_a_place_holding_nothing_issues_nothing() {
         let local = placed();
-        let roster = local.session().state().roster();
         let sending = Sending {
             from: asteroid(7),
             to: asteroid(1),
             count: 3,
         };
 
-        assert!(sending.commands(&local.view(), roster).is_empty());
+        assert!(sending.commands(&local.view()).is_empty());
     }
 
     #[test]
     fn a_unit_the_seat_no_longer_wants_there_can_still_be_sent() {
         let mut local = placed();
-        local.want(&[(asteroid(0), CONSTRUCTOR, 0)]);
+        local.want(&[(asteroid(0), EntityPattern::Constructor, 0)]);
         let sending = Sending {
             from: asteroid(0),
             to: asteroid(1),
@@ -197,9 +192,9 @@ mod tests {
         };
 
         assert_eq!(
-            sending.rows(&local.view(), local.session().state().roster()),
+            sending.patterns(&local.view()),
             vec![Moving {
-                row: CONSTRUCTOR,
+                pattern: EntityPattern::Constructor,
                 count: 1
             }],
             "a surplus unit is still on the run, so a drag can move it"

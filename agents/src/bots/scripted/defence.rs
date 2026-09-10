@@ -7,7 +7,7 @@ pub struct Defence;
 impl Defence {
     pub fn proposals(survey: &Survey, personality: &Personality) -> Vec<Proposal> {
         let weights = personality.shares(survey);
-        let unit_cost = personality.damage_unit_cost(survey.roster, &weights);
+        let unit_cost = Personality::damage_unit_cost(&weights);
         if unit_cost <= 0.0 {
             return Vec::new();
         }
@@ -18,12 +18,12 @@ impl Defence {
                 continue;
             }
             let units = personality.garrison(threat, unit_cost) / unit_cost;
-            for (row, share) in &weights {
+            for (pattern, share) in &weights {
                 proposals.push(Proposal::rounded(
                     survey,
                     Reason::Defence,
                     asteroid,
-                    *row,
+                    *pattern,
                     share * units,
                 ));
             }

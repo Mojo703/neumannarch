@@ -1,5 +1,3 @@
-use neumannarch_sim::roster::Roster;
-
 use neumannarch_sim::AsteroidId;
 
 use crate::bots::scripted::commitments::Commitments;
@@ -11,17 +9,16 @@ use crate::harness::fixture::{Fixture, surveyed};
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn a_free_asteroid_is_claimed_where_the_held_ones_run_short_of_cap_and_only_up_to_the_claims() {
-    let roster = Roster::shipped();
     let personality = Personality::expand();
     let short_of_room = |fixture: &Fixture| {
         let view = fixture.view(0);
-        let survey = surveyed(&view, &roster);
+        let survey = surveyed(&view);
         survey.home().is_some() && survey.short_of_room(personality.demand(&survey))
     };
     let mut fixture = Fixture::drafted([Some(personality.clone()), None]);
     fixture.until(short_of_room);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     let mut commitments = Commitments::default();
     let mut dice = Dice::new(personality.seed);
 

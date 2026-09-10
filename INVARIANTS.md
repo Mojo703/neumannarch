@@ -80,14 +80,14 @@ adds it here in the same change; a unit that deletes one removes it.
   results a start, since the lobby the room broadcasts is the truth about
   what took and a machine is welcomed once. A notice type per screen would
   delete the arms.
-- `label::refusal` answers with no phrase for five of `Rejected`'s seven.
+- `label::refusal` answers with no phrase for four of `Rejected`'s six.
   `TooMany` wants none, since the button is simply drawn spent; the other
-  four cannot reach a drawn button, because a wheel asks only about the
+  three cannot reach a drawn button, because a wheel asks only about the
   viewer's own seat, an asteroid the view listed and a row of the roster,
   and a viewer whose seat is out draws no button at all. Splitting
   `Rejected` into the faults of an address the state does not hold and
   the refusals of a rule, and carrying only the second to the view, would
-  delete the four arms; it was left because the split ripples through
+  delete the three arms; it was left because the split ripples through
   every crate that reads an `Outcome`.
 - `Play::previewed` takes a `Rejected` from `State::preview` as an empty
   preview. No hover can raise one: `Wheel::button_at` never answers with a
@@ -96,6 +96,12 @@ adds it here in the same change; a unit that deletes one removes it.
   units at. A `Preview` of a want and a refusal of it in one type, so the
   display could not hold the first without answering the second, would
   delete the arm.
+- A ready place names a slot of its entity's pattern's effects and nothing
+  checks that the slot holds a damage effect, so a place at a slot holding
+  no gun is representable; a shot from such a place lapses. Only `State::spawn`
+  mints places, and it mints one per gun of the entity's own pattern. A ready
+  store whose arity is the pattern's own, so a place could not name a slot the
+  pattern lacks, would delete it, at the price of a store typed per pattern.
 - `FightStage::of` takes its lateral by normalising the asteroid's
   position and its axis by normalising what is left of the asteroid's
   velocity once that lateral is taken out of it, and answers the zero
@@ -126,7 +132,7 @@ adds it here in the same change; a unit that deletes one removes it.
   delete it, at the price of a unit that changed its circle whenever
   another arrived or died.
 - `Threats::best` answers with no target where the shooter's team and
-  plating name no ranking of the roll. A ranking is built for every row
+  plating name no ranking of the roll. A ranking is built for every pattern
   that does damage standing at the asteroid, and only a unit standing
   there that does damage ever asks, so the arm cannot be reached. A
   ranking read by the asking entity rather than by a pair of values
@@ -148,17 +154,17 @@ adds it here in the same change; a unit that deletes one removes it.
   plan, refuses the thirty-third and panics the process. A controller handing
   over a type that cannot hold more than one tick's commands would delete
   it, since the refusal would have no arm left to reach.
-- A ready damage place carries a hitscan copied out of a row, and the
-  store cannot say it is the row of the entity that holds the place, so
-  a place minted from another row is representable and nothing checks
-  it. Only `State::spawn` mints places, from the entity's own row. The
-  entity refactor would delete it: a hitscan becomes a constant of the
-  pattern the entity carries and the place stops copying it.
+- A ready place names a slot of its entity's pattern's effects and nothing checks that the slot holds a damage effect, so a place at a slot holding no gun is representable; a shot from such a place lapses. Only `State::spawn` mints places, and it mints one per gun of the entity's own pattern. A ready store whose arity is the pattern's own, so a place could not name a slot the pattern lacks, would delete it, at the price of a store typed per pattern.
 - A relayed command a machine refuses as late or as early is dropped
   without a word, so that machine's history lacks it for good and its
   next hash disagrees, which ends the match. Nothing reads the refusal. A
   relay that could carry only a command the receiving tick can still
   take would delete it.
+- A message or a record carrying a pattern byte the roster does not name fails
+  at decode as a whole: `EntityPattern` crosses the wire as its `u8` code and
+  `TryFrom<u8>` refuses any other, so one unknown byte discards the frame or the
+  file around it. A wire whose pattern was typed by the roster it was written
+  against would delete it, which no self-describing encoding gives.
 
 ## Dependencies
 

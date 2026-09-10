@@ -1,5 +1,5 @@
 use crate::materials::Material;
-use crate::roster::row::{Effect, Kind, Row};
+use crate::pattern::{EntityPattern, Kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Glyph {
@@ -42,29 +42,22 @@ impl Tier {
     pub const TWO: Tier = Tier(2);
 
     pub const THREE: Tier = Tier(3);
-
-    pub const fn new(tier: u8) -> Option<Tier> {
-        match tier {
-            1..=3 => Some(Tier(tier)),
-            _ => None,
-        }
-    }
 }
 
-impl Row {
-    pub fn glyph(&self) -> Glyph {
+impl EntityPattern {
+    pub fn glyph(self) -> Glyph {
         Glyph {
             frame: match (self.kind(), self.does_damage()) {
                 (Kind::Unit, _) => Frame::Unit,
                 (Kind::Structure, false) => Frame::Structure,
                 (Kind::Structure, true) => Frame::Defence,
             },
-            role: self.role,
-            material: self.effects.iter().find_map(|effect| match effect {
-                Effect::Extract { material, .. } => Some(*material),
-                _ => None,
-            }),
-            tier: self.tier,
+            role: self.role(),
+            material: self
+                .extractions()
+                .next()
+                .map(|extraction| extraction.material),
+            tier: self.tier(),
         }
     }
 }
@@ -72,14 +65,11 @@ impl Row {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::roster::{METALS_EXTRACTOR, RAIDER, Roster, SHIPYARD};
 
     #[test]
-    fn a_rows_glyph_is_its_kind_its_role_its_extract_material_and_its_tier() {
-        let roster = Roster::shipped();
-        let glyph = |row| roster[row].glyph();
+    fn a_patterns_glyph_is_its_kind_its_role_its_extract_material_and_its_tier() {
         assert_eq!(
-            glyph(SHIPYARD),
+            EntityPattern::Shipyard.glyph(),
             Glyph {
                 frame: Frame::Structure,
                 role: Role::Build,
@@ -87,8 +77,10 @@ mod tests {
                 tier: Tier::ONE
             }
         );
-        assert_eq!(glyph(METALS_EXTRACTOR).material, Some(Material::Metals));
-        assert_eq!(glyph(RAIDER).frame, Frame::Unit);
-        assert_eq!(Tier::new(4), None);
+        assert_eq!(
+            EntityPattern::Extractor(Material::Metals).glyph().material,
+            Some(Material::Metals)
+        );
+        assert_eq!(EntityPattern::Raider.glyph().frame, Frame::Unit);
     }
 }

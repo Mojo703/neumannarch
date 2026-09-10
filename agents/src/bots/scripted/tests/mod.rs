@@ -8,5 +8,4 @@ mod offence;
 mod personality;
 mod plan;
 mod ranking;
-mod roles;
 mod scripted;

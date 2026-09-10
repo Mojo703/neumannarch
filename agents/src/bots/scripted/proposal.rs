@@ -1,5 +1,6 @@
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::MAX_WANT;
-use neumannarch_sim::{AsteroidId, Posting, RowId};
+use neumannarch_sim::{AsteroidId, Posting};
 
 use super::survey::Survey;
 
@@ -23,11 +24,11 @@ impl Proposal {
         survey: &Survey,
         reason: Reason,
         asteroid: AsteroidId,
-        row: RowId,
+        pattern: EntityPattern,
         count: u32,
     ) -> Proposal {
         Proposal {
-            posting: survey.posting(asteroid, row),
+            posting: survey.posting(asteroid, pattern),
             count: count.min(MAX_WANT),
             reason,
         }
@@ -37,7 +38,7 @@ impl Proposal {
         survey: &Survey,
         reason: Reason,
         asteroid: AsteroidId,
-        row: RowId,
+        pattern: EntityPattern,
         count: f64,
     ) -> Proposal {
         let rounded = count.round();
@@ -45,6 +46,6 @@ impl Proposal {
             true => rounded as u32,
             false => MAX_WANT,
         };
-        Proposal::at(survey, reason, asteroid, row, whole)
+        Proposal::at(survey, reason, asteroid, pattern, whole)
     }
 }

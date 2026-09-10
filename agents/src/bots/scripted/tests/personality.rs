@@ -1,25 +1,24 @@
-use neumannarch_sim::roster::{FRIGATE, LANCER, RAIDER, Roster};
-use neumannarch_sim::{Material, Materials, RowId};
+use neumannarch_sim::pattern::EntityPattern;
+use neumannarch_sim::pattern::EntityPattern as P;
+use neumannarch_sim::{Material, Materials};
 
 use crate::bots::scripted::personality::*;
 use crate::bots::scripted::proposal::Reason;
-use crate::bots::scripted::roles::Roles;
 use crate::harness::fixture::{Fixture, surveyed};
 
-fn weights(personality: &Personality, plating: f64, range: f64) -> Vec<(RowId, f64)> {
-    let roster = Roster::shipped();
-    personality.weights(&roster, &Roles::of(&roster), plating, range)
+fn weights(personality: &Personality, plating: f64, range: f64) -> Vec<(EntityPattern, f64)> {
+    personality.weights(plating, range)
 }
 
-fn of(weights: &[(RowId, f64)], row: RowId) -> f64 {
+fn of(weights: &[(EntityPattern, f64)], pattern: EntityPattern) -> f64 {
     weights
         .iter()
-        .find(|(id, _)| *id == row)
+        .find(|(held, _)| *held == pattern)
         .map_or(0.0, |(_, weight)| *weight)
 }
 
 #[test]
-fn every_mix_is_a_set_of_shares_over_the_rows_that_do_damage() {
+fn every_mix_is_a_set_of_shares_over_the_patterns_that_do_damage() {
     for personality in [Personality::turtle(), Personality::expand()] {
         let weights = weights(&personality, 0.0, 0.0);
         assert_eq!(weights.len(), 3);
@@ -29,46 +28,46 @@ fn every_mix_is_a_set_of_shares_over_the_rows_that_do_damage() {
 }
 
 #[test]
-fn plating_shifts_the_mix_off_the_row_it_blunts() {
+fn plating_shifts_the_mix_off_the_pattern_it_blunts() {
     let personality = Personality::expand();
     let unplated = weights(&personality, 0.0, 0.0);
     let plated = weights(&personality, 2.0, 0.0);
     assert!(
-        of(&plated, RAIDER) < of(&unplated, RAIDER),
+        of(&plated, P::Raider) < of(&unplated, P::Raider),
         "the fastest, weakest hit loses most to plating"
     );
-    assert!(of(&plated, LANCER) > of(&unplated, LANCER));
+    assert!(of(&plated, P::Lancer) > of(&unplated, P::Lancer));
 }
 
 #[test]
-fn a_taste_for_reach_shifts_the_mix_toward_the_longer_row() {
+fn a_taste_for_reach_shifts_the_mix_toward_the_longer_pattern() {
     let mut personality = Personality::expand();
     let flat = weights(&personality, 0.0, 6.0);
     personality.range_taste = 1.0;
     let keen = weights(&personality, 0.0, 6.0);
-    assert!(of(&keen, LANCER) > of(&flat, LANCER));
-    assert!(of(&keen, RAIDER) < of(&flat, RAIDER));
+    assert!(of(&keen, P::Lancer) > of(&flat, P::Lancer));
+    assert!(of(&keen, P::Raider) < of(&flat, P::Raider));
 }
 
 #[test]
-fn a_taste_for_durability_shifts_the_mix_toward_the_plated_row() {
+fn a_taste_for_durability_shifts_the_mix_toward_the_plated_pattern() {
     let mut personality = Personality::expand();
     let flat = weights(&personality, 0.0, 0.0);
     personality.armour_taste = 2.0;
     let tough = weights(&personality, 0.0, 0.0);
-    assert!(of(&tough, FRIGATE) > of(&flat, FRIGATE));
+    assert!(of(&tough, P::Frigate) > of(&flat, P::Frigate));
 }
 
 #[test]
-fn a_pinned_mix_plays_only_the_rows_it_names() {
+fn a_pinned_mix_plays_only_the_patterns_it_names() {
     let personality = Personality {
-        mix: Mix::Pinned(vec![(FRIGATE, 1.0)]),
+        mix: Mix::Pinned(vec![(P::Frigate, 1.0)]),
         ..Personality::turtle()
     };
 
     let weights = weights(&personality, 0.0, 0.0);
 
-    assert_eq!(weights, vec![(FRIGATE, 1.0)]);
+    assert_eq!(weights, vec![(P::Frigate, 1.0)]);
 }
 
 #[test]
@@ -115,10 +114,9 @@ fn defence_and_offence_stand_above_the_economy_while_an_enemy_stands_and_the_arm
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn the_shares_a_pick_is_weighed_by_discount_what_the_asteroids_already_drafted_supply() {
     let personality = Personality::expand();
-    let roster = Roster::shipped();
     let fixture = Fixture::drafted([Some(personality.clone()), None]);
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     let caps = survey
         .held()
         .into_iter()

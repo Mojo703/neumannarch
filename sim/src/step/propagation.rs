@@ -1,3 +1,4 @@
+use crate::belt::Belt;
 use crate::ids::EntityId;
 use crate::orbit::body::Body;
 use crate::state::{Entity, State};
@@ -60,7 +61,8 @@ impl<'a> Propagation<'a> {
         let destination = self.state[entity.home()]
             .orbit()
             .at(self.over.ends_at(self.state.time()), gravity);
-        Transfer::of(body, destination, self.state.roster().movement_limit().0).arrived()
+        let limit = Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED;
+        Transfer::of(body, destination, limit).arrived()
     }
 }
 

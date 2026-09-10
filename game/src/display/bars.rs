@@ -166,9 +166,9 @@ fn stacked(asteroid: &AsteroidView, placed: Placed, largest: f64) -> Vec<Bar> {
         .filter(|(_, cap)| *cap > 0.0)
         .collect();
     let height = wheel::SECTION_HEIGHT * scale;
-    let step = (wheel::SECTION_HEIGHT + wheel::ROW_GAP) * scale;
-    let total =
-        rows.len() as f32 * height + rows.len().saturating_sub(1) as f32 * wheel::ROW_GAP * scale;
+    let step = (wheel::SECTION_HEIGHT + wheel::SECTION_GAP) * scale;
+    let total = rows.len() as f32 * height
+        + rows.len().saturating_sub(1) as f32 * wheel::SECTION_GAP * scale;
     rows.into_iter()
         .enumerate()
         .map(|(index, (material, cap))| {

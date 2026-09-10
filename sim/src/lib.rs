@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 pub use history::{Retention, Rewound, Session, Unseated, WINDOW_SECONDS};
-pub use ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
+pub use ids::{AsteroidId, EntityId, SeatId, TeamId};
 pub use materials::{Material, Materials, Stockpile};
 pub use post::Post;
 pub use posting::Posting;
@@ -25,10 +25,10 @@ mod ids;
 mod materials;
 mod noise;
 pub mod orbit;
+pub mod pattern;
 mod post;
 mod posting;
 mod real;
-pub mod roster;
 mod setup;
 pub mod state;
 pub mod step;

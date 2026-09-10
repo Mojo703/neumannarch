@@ -6,8 +6,9 @@ use super::circle::Circle;
 use super::entities::{Entities, Entity};
 use super::stage::{FightStage, Line};
 use super::threat::{Aim, AssignedDamage, Reach, Shooter, Threats};
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
+use crate::ids::{AsteroidId, EntityId, SeatId, TeamId};
 use crate::orbit::body::Body;
+use crate::pattern::EntityPattern;
 use crate::vec3::Vec3;
 
 pub(crate) struct Rolls<'a>(Vec<Roll<'a>>);
@@ -50,23 +51,22 @@ impl<'a> Roll<'a> {
         let stage = FightStage::of(
             body,
             state[asteroid].radius(),
-            state.roster(),
             &Line::standing_at(state, asteroid),
         );
         let mut stations: BTreeMap<EntityId, Vec3> = manned
             .iter()
-            .flat_map(|((team, row), ids)| {
+            .flat_map(|((team, pattern), ids)| {
                 ids.iter()
                     .copied()
-                    .zip(stage.stations_of(*team, *row).iter().copied())
+                    .zip(stage.stations_of(*team, *pattern).iter().copied())
             })
             .collect();
-        for ((_, row), ids) in &manned {
-            if state[*row].standoff().is_some() {
+        for ((_, pattern), ids) in &manned {
+            if pattern.standoff().is_some() {
                 continue;
             }
             for id in ids {
-                let circle = Circle::of(*id, &state[*row], &state[asteroid], body);
+                let circle = Circle::of(*id, *pattern, &state[asteroid], body);
                 stations.insert(*id, circle.station(state.time()));
             }
         }
@@ -136,14 +136,14 @@ impl<'a> Index<AsteroidId> for Rolls<'a> {
     }
 }
 
-fn manned(state: &State, asteroid: AsteroidId) -> BTreeMap<(TeamId, RowId), Vec<EntityId>> {
-    let mut lines: BTreeMap<(TeamId, RowId), Vec<EntityId>> = BTreeMap::new();
+fn manned(state: &State, asteroid: AsteroidId) -> BTreeMap<(TeamId, EntityPattern), Vec<EntityId>> {
+    let mut lines: BTreeMap<(TeamId, EntityPattern), Vec<EntityId>> = BTreeMap::new();
     for entity in state.entities.standing_at(asteroid) {
         if entity.steered().is_none() {
             continue;
         }
         lines
-            .entry((state[entity.seat()].team(), entity.row()))
+            .entry((state[entity.seat()].team(), entity.pattern()))
             .or_default()
             .push(entity.id());
     }
@@ -174,7 +174,6 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::TeamId;
     use crate::orbit::body::Gravity;
-    use crate::roster::{FRIGATE, LANCER};
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
 
@@ -183,10 +182,10 @@ mod tests {
     #[test]
     fn a_rolls_seats_read_in_ascending_order_and_each_answers_with_its_own_units() {
         let mut world = World::ring(GRAVITY, 2, &[TeamId(0), TeamId(1), TeamId(0)]);
-        let last_seat = world.hold(2, LANCER, HOME, 0.0);
-        let first_seat = world.hold(0, FRIGATE, HOME, 1.0);
-        let also_first_seat = world.hold(0, LANCER, HOME, 2.0);
-        world.hold(1, FRIGATE, AsteroidId(1), 0.0);
+        let last_seat = world.hold(2, EntityPattern::Lancer, HOME, 0.0);
+        let first_seat = world.hold(0, EntityPattern::Frigate, HOME, 1.0);
+        let also_first_seat = world.hold(0, EntityPattern::Lancer, HOME, 2.0);
+        world.hold(1, EntityPattern::Frigate, AsteroidId(1), 0.0);
 
         let rolls = Rolls::called(&world.state);
         let roll = &rolls[HOME];

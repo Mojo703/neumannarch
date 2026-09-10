@@ -45,7 +45,8 @@ impl Log {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{AsteroidId, RowId, SeatId};
+    use crate::ids::{AsteroidId, SeatId};
+    use crate::pattern::EntityPattern;
     use crate::state::{Command, Issued};
 
     fn stamped(tick: u64, seat: u8, seq: u32) -> Stamped {
@@ -56,7 +57,7 @@ mod tests {
                 seq,
                 command: Command::Want {
                     asteroid: AsteroidId(0),
-                    row: RowId(0),
+                    pattern: EntityPattern::Constructor,
                     count: seq,
                 },
             },

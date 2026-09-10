@@ -1,12 +1,14 @@
+use crate::pattern::EntityPattern as P;
 use core::f64::consts::TAU;
 
 use super::*;
 use crate::TICKS_PER_SECOND;
 use crate::belt::Belt;
 use crate::fixture::World;
-use crate::ids::{AsteroidId, RowId, TeamId};
+use crate::ids::{AsteroidId, TeamId};
+use crate::materials::Material;
 use crate::orbit::body::Gravity;
-use crate::roster::{CONSTRUCTOR, FRIGATE, Kind, LANCER, METALS_EXTRACTOR, RAIDER};
+use crate::pattern::{EntityPattern, Kind};
 use crate::state::Rolls;
 use crate::time::{Tick, Time};
 
@@ -48,13 +50,10 @@ fn circle_radius(world: &World, asteroid: AsteroidId) -> f64 {
     world.state[asteroid].radius() + Belt::SPACING_METERS + Belt::STATION_SPACING_METERS
 }
 
-fn unit_rows() -> Vec<(RowId, &'static str)> {
-    World::ring(FAST, 1, &[TeamId(0)])
-        .state
-        .roster()
-        .iter()
-        .filter(|(_, row)| row.kind() == Kind::Unit)
-        .map(|(id, row)| (id, row.name))
+fn unit_patterns() -> Vec<EntityPattern> {
+    P::EVERY
+        .into_iter()
+        .filter(|pattern| pattern.kind() == Kind::Unit)
         .collect()
 }
 
@@ -85,14 +84,12 @@ fn plane(world: &mut World, unit: EntityId) -> Vec3 {
     first.cross(then).normalized().expect("a plane it turns in")
 }
 
-fn reload_ticks(world: &World, row: RowId) -> u64 {
-    let rate = world.state[row]
-        .damage_places()
+fn reload_ticks(pattern: EntityPattern) -> u64 {
+    let (_, hitscan) = pattern
+        .hitscans()
         .next()
-        .expect("a row that does damage")
-        .hitscan
-        .rate
-        .0;
+        .expect("a pattern that does damage");
+    let rate = hitscan.rate.0;
     (f64::from(TICKS_PER_SECOND) / rate) as u64
 }
 
@@ -108,7 +105,7 @@ fn apart(state: &State, from: AsteroidId, to: AsteroidId) -> f64 {
 }
 
 fn least_seconds(state: &State, from: AsteroidId, to: AsteroidId) -> f64 {
-    2.0 * (apart(state, from, to) / state.roster().movement_limit().0).sqrt()
+    2.0 * (apart(state, from, to) / Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED).sqrt()
 }
 
 fn pairs(state: &State) -> Vec<(AsteroidId, AsteroidId)> {
@@ -133,8 +130,8 @@ fn farthest(state: &State) -> (AsteroidId, AsteroidId) {
         .expect("the belt holds two asteroids")
 }
 
-fn flying(world: &mut World, row: RowId, from: AsteroidId, to: AsteroidId) -> EntityId {
-    let unit = world.hold(0, row, from, 0.0);
+fn flying(world: &mut World, pattern: EntityPattern, from: AsteroidId, to: AsteroidId) -> EntityId {
+    let unit = world.hold(0, pattern, from, 0.0);
     world.send(unit, to);
     unit
 }
@@ -151,7 +148,7 @@ fn arrival(world: &mut World, unit: EntityId) -> Time {
 
 fn crossing_seconds(world: &mut World, from: AsteroidId, to: AsteroidId) -> f64 {
     let started = world.state.time();
-    let unit = flying(world, FRIGATE, from, to);
+    let unit = flying(world, P::Frigate, from, to);
     let arrived = arrival(world, unit);
     Time(arrived.0 - started.0).seconds()
 }
@@ -166,7 +163,7 @@ fn middle(world: &World, force: &[EntityId]) -> Vec3 {
 #[test]
 fn a_lone_unit_stays_inside_the_zone_for_a_whole_asteroid_period() {
     let mut world = world();
-    let unit = world.hold(0, FRIGATE, HOME, 2.0);
+    let unit = world.hold(0, P::Frigate, HOME, 2.0);
     let period = world.period(HOME);
 
     for _ in 0..100 {
@@ -185,7 +182,7 @@ fn a_force_held_for_a_asteroid_period_never_has_a_ship_inside_the_asteroid() {
                 (0..3)
                     .map(|_| {
                         let body = world.state.spawn_body(HOME, world.state.time());
-                        world.free(seat, FRIGATE, HOME, body)
+                        world.free(seat, P::Frigate, HOME, body)
                     })
                     .collect::<Vec<EntityId>>()
             })
@@ -209,7 +206,7 @@ fn a_force_held_for_a_asteroid_period_never_has_a_ship_inside_the_asteroid() {
 #[test]
 fn a_lone_unit_is_never_still_for_a_whole_second() {
     let mut world = world();
-    let unit = world.hold(0, FRIGATE, HOME, 0.0);
+    let unit = world.hold(0, P::Frigate, HOME, 0.0);
     world.steers(seconds(10));
 
     for _ in 0..60 {
@@ -224,7 +221,7 @@ fn a_lone_unit_is_never_still_for_a_whole_second() {
 fn a_force_released_together_settles_inside_the_zone_at_the_spacing() {
     let mut world = world();
     let force: Vec<EntityId> = (0..20)
-        .map(|at| world.hold(0, FRIGATE, HOME, f64::from(at) * 0.01))
+        .map(|at| world.hold(0, P::Frigate, HOME, f64::from(at) * 0.01))
         .collect();
 
     world.steers(seconds(60));
@@ -246,8 +243,8 @@ fn a_force_released_together_settles_inside_the_zone_at_the_spacing() {
 #[test]
 fn a_unit_never_leaves_its_zone_for_an_enemy_outside_it() {
     let mut world = world();
-    let hunter = world.hold(0, FRIGATE, HOME, 0.0);
-    let strayed = world.hold(1, RAIDER, HOME, Belt::ZONE_RADIUS_METERS + 5.0);
+    let hunter = world.hold(0, P::Frigate, HOME, 0.0);
+    let strayed = world.hold(1, P::Raider, HOME, Belt::ZONE_RADIUS_METERS + 5.0);
 
     for _ in 0..seconds(30) {
         let asteroid = world.state.asteroid_body(HOME);
@@ -272,9 +269,9 @@ fn a_unit_never_leaves_its_zone_for_an_enemy_outside_it() {
 #[test]
 fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_passes() {
     let mut world = world();
-    let chaser = world.hold(0, FRIGATE, HOME, 0.0);
-    let quarry = world.hold(1, RAIDER, HOME, 1.0);
-    let struck = world.fix(1, METALS_EXTRACTOR, HOME);
+    let chaser = world.hold(0, P::Frigate, HOME, 0.0);
+    let quarry = world.hold(1, P::Raider, HOME, 1.0);
+    let struck = world.fix(1, P::Extractor(Material::Metals), HOME);
     let whole = world.state.entity(struck).hp();
     let station = {
         let rolls = Rolls::called(&world.state);
@@ -285,7 +282,7 @@ fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_p
     let asteroid = world.state.asteroid_body(HOME);
     world.state.steer(chaser, Body::new(station, asteroid.vel));
     assert!(
-        station.distance(world.body(struck).pos) > world.state[FRIGATE].max_damage_range(),
+        station.distance(world.body(struck).pos) > P::Frigate.max_damage_range(),
         "the chaser reaches the structure from its own station, without running anywhere"
     );
     let across = (asteroid.pos - station)
@@ -313,11 +310,11 @@ fn a_unit_that_chases_a_faster_enemy_across_the_zone_strikes_the_structures_it_p
 #[test]
 fn a_unit_that_does_no_damage_is_steered_by_no_enemy_in_its_zone() {
     let mut world = world();
-    let builder = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
+    let builder = world.hold(0, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
     let mut alone = World {
         state: world.state.clone(),
     };
-    world.fix(1, METALS_EXTRACTOR, HOME);
+    world.fix(1, P::Extractor(Material::Metals), HOME);
 
     for _ in 0..60 {
         world.steers(seconds(1));
@@ -337,7 +334,7 @@ fn an_arrival_that_does_no_damage_comes_in_from_the_rim_to_its_own_circle() {
         .first()
         .copied()
         .expect("the belt holds two kilometer hops");
-    let unit = flying(&mut world, CONSTRUCTOR, from, to);
+    let unit = flying(&mut world, P::Constructor, from, to);
 
     arrival(&mut world, unit);
     let landed = world.off_asteroid(unit, to);
@@ -367,10 +364,11 @@ fn an_arrival_that_does_no_damage_comes_in_from_the_rim_to_its_own_circle() {
 
 #[test]
 fn no_unit_of_the_shipped_roster_ever_enters_the_asteroid() {
-    for (row, name) in unit_rows() {
+    for pattern in unit_patterns() {
+        let name = pattern.name();
         let mut world = world();
         let units: Vec<EntityId> = (0..3)
-            .map(|at| world.hold(0, row, HOME, Belt::ZONE_RADIUS_METERS - f64::from(at)))
+            .map(|at| world.hold(0, pattern, HOME, Belt::ZONE_RADIUS_METERS - f64::from(at)))
             .collect();
         let radius = world.state[HOME].radius();
 
@@ -387,7 +385,7 @@ fn no_unit_of_the_shipped_roster_ever_enters_the_asteroid() {
 #[test]
 fn a_unit_that_does_no_damage_circles_its_asteroid_within_a_minute_on_its_own_radius() {
     let mut world = world();
-    let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    let unit = world.hold(0, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
     world.steers(seconds(SETTLING_SECONDS));
     let radius = circle_radius(&world, HOME);
 
@@ -408,10 +406,10 @@ fn a_unit_that_does_no_damage_circles_its_asteroid_within_a_minute_on_its_own_ra
 }
 
 #[test]
-fn two_units_of_a_row_that_does_no_damage_circle_on_two_planes_and_never_share_a_point() {
+fn two_units_of_a_pattern_that_does_no_damage_circle_on_two_planes_and_never_share_a_point() {
     let mut world = world();
-    let one = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
-    let other = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
+    let one = world.hold(0, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    let other = world.hold(0, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 2.0);
     world.steers(seconds(SETTLING_SECONDS));
 
     let mut closest = f64::MAX;
@@ -434,7 +432,7 @@ fn two_units_of_a_row_that_does_no_damage_circle_on_two_planes_and_never_share_a
 #[test]
 fn the_circling_of_a_unit_that_does_no_damage_is_reproduced_by_a_rewind_to_the_same_tick() {
     let mut world = world();
-    let unit = world.hold(0, CONSTRUCTOR, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
+    let unit = world.hold(0, P::Constructor, HOME, Belt::ZONE_RADIUS_METERS - 1.0);
     let start = world.state.clone();
     world.steers(seconds(30));
     let once = world.body(unit).pos;
@@ -453,7 +451,7 @@ fn two_sides_form_two_lines_facing_across_the_stage() {
     let sides: Vec<Vec<EntityId>> = (0..2)
         .map(|seat| {
             (0..4)
-                .map(|at| world.hold(seat, LANCER, HOME, f64::from(at) * 0.3))
+                .map(|at| world.hold(seat, P::Lancer, HOME, f64::from(at) * 0.3))
                 .collect()
         })
         .collect();
@@ -461,9 +459,7 @@ fn two_sides_form_two_lines_facing_across_the_stage() {
     world.steers(seconds(60));
 
     let rolls = Rolls::called(&world.state);
-    let standoff = world.state[LANCER]
-        .standoff()
-        .expect("a row that does damage");
+    let standoff = P::Lancer.standoff().expect("a pattern that does damage");
     for one in sides.iter().flatten() {
         let station = rolls[HOME]
             .station(*one)
@@ -489,13 +485,13 @@ fn two_sides_form_two_lines_facing_across_the_stage() {
 }
 
 #[test]
-fn a_long_range_row_stands_behind_a_short_range_one() {
+fn a_long_range_pattern_stands_behind_a_short_range_one() {
     let mut world = world();
     let near: Vec<EntityId> = (0..3)
-        .map(|at| world.hold(0, RAIDER, HOME, f64::from(at) * 0.3))
+        .map(|at| world.hold(0, P::Raider, HOME, f64::from(at) * 0.3))
         .collect();
     let far: Vec<EntityId> = (0..3)
-        .map(|at| world.hold(0, LANCER, HOME, 2.0 + f64::from(at) * 0.3))
+        .map(|at| world.hold(0, P::Lancer, HOME, 2.0 + f64::from(at) * 0.3))
         .collect();
 
     world.steers(seconds(60));
@@ -518,8 +514,8 @@ fn an_arrival_walks_from_the_rim_to_its_station() {
         .first()
         .copied()
         .expect("the belt holds two kilometer hops");
-    world.hold(1, LANCER, to, 0.0);
-    let unit = flying(&mut world, LANCER, from, to);
+    world.hold(1, P::Lancer, to, 0.0);
+    let unit = flying(&mut world, P::Lancer, from, to);
 
     arrival(&mut world, unit);
     let landed = world.off_asteroid(unit, to);
@@ -542,9 +538,9 @@ fn an_arrival_walks_from_the_rim_to_its_station() {
 fn a_short_range_unit_turns_for_its_station_no_sooner_than_its_prey_reloads_and_stays_in_the_zone()
 {
     let mut world = world();
-    let runner = world.hold(0, FRIGATE, HOME, 0.0);
-    world.hold(1, FRIGATE, HOME, 5.0);
-    let reload = reload_ticks(&world, FRIGATE);
+    let runner = world.hold(0, P::Frigate, HOME, 0.0);
+    world.hold(1, P::Frigate, HOME, 5.0);
+    let reload = reload_ticks(P::Frigate);
 
     let mut turns: Vec<u64> = Vec::new();
     let mut was = Pass::Running;
@@ -581,8 +577,8 @@ fn a_short_range_unit_turns_for_its_station_no_sooner_than_its_prey_reloads_and_
 #[test]
 fn a_short_range_unit_stays_on_a_prey_that_never_fires_back_until_it_kills_it() {
     let mut world = world();
-    let runner = world.hold(0, RAIDER, HOME, 0.0);
-    let prey = world.fix(1, METALS_EXTRACTOR, HOME);
+    let runner = world.hold(0, P::Raider, HOME, 0.0);
+    let prey = world.fix(1, P::Extractor(Material::Metals), HOME);
 
     for _ in 0..seconds(60) {
         if !world.still_holds(prey) {
@@ -600,17 +596,17 @@ fn a_short_range_unit_stays_on_a_prey_that_never_fires_back_until_it_kills_it() 
 }
 
 #[test]
-fn a_thrust_never_exceeds_the_rows_manoeuvring_limit() {
+fn a_thrust_never_exceeds_the_patterns_manoeuvring_limit() {
     let mut world = world();
     for at in 0..12 {
-        world.hold(0, RAIDER, HOME, f64::from(at) * 0.05);
-        world.hold(1, LANCER, HOME, 20.0 + f64::from(at) * 0.05);
+        world.hold(0, P::Raider, HOME, f64::from(at) * 0.05);
+        world.hold(1, P::Lancer, HOME, 20.0 + f64::from(at) * 0.05);
     }
 
     for _ in 0..seconds(5) {
         let steering = steering(&world);
         for entity in world.state.entities() {
-            let limit = world.state[entity.row()].manoeuvring.0;
+            let limit = entity.pattern().manoeuvring().0;
             let asked = steering.thrusts.of(entity.id()).length();
             assert!(asked <= limit + 1e-12, "{asked} against {limit}");
         }
@@ -622,8 +618,8 @@ fn a_thrust_never_exceeds_the_rows_manoeuvring_limit() {
 fn the_rule_reads_only_the_tick_it_is_given() {
     let mut world = world();
     for at in 0..6 {
-        world.hold(0, FRIGATE, HOME, f64::from(at) * 0.7);
-        world.hold(1, RAIDER, HOME, 9.0 + f64::from(at) * 0.7);
+        world.hold(0, P::Frigate, HOME, f64::from(at) * 0.7);
+        world.hold(1, P::Raider, HOME, 9.0 + f64::from(at) * 0.7);
     }
     world.steers(seconds(3));
 
@@ -637,8 +633,8 @@ fn the_rule_reads_only_the_tick_it_is_given() {
 #[test]
 fn a_structure_is_never_given_a_thrust() {
     let mut world = world();
-    let fixed = world.fix(0, FRIGATE, HOME);
-    let steered = world.hold(0, FRIGATE, HOME, 0.2);
+    let fixed = world.fix(0, P::Frigate, HOME);
+    let steered = world.hold(0, P::Frigate, HOME, 0.2);
 
     let steering = steering(&world);
 
@@ -653,7 +649,7 @@ fn a_structure_is_never_given_a_thrust() {
 #[test]
 fn the_drift_is_reproduced_by_a_rewind_to_the_same_tick() {
     let mut world = world();
-    let unit = world.hold(0, FRIGATE, HOME, 1.0);
+    let unit = world.hold(0, P::Frigate, HOME, 1.0);
     let start = world.state.clone();
     world.steers(seconds(4));
     let once = world.body(unit).pos;
@@ -703,7 +699,7 @@ fn a_flier_arrives_at_rest_and_never_passes_its_destination() {
         .first()
         .copied()
         .expect("the belt holds two kilometer hops");
-    let unit = flying(&mut world, FRIGATE, from, to);
+    let unit = flying(&mut world, P::Frigate, from, to);
 
     let mut near = false;
     for _ in 0..LONGEST_CROSSING {
@@ -722,7 +718,7 @@ fn a_flier_arrives_at_rest_and_never_passes_its_destination() {
     let landed = Transfer::of(
         world.body(unit),
         world.state.asteroid_body(to),
-        world.state.roster().movement_limit().0,
+        Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED,
     );
     assert!(landed.arrived(), "it stopped flying before it arrived");
     assert_eq!(world.state.entity(unit).standing(), Some(to));
@@ -735,8 +731,8 @@ fn no_thrust_of_a_flier_exceeds_the_movement_limit() {
         .first()
         .copied()
         .expect("the belt holds two kilometer hops");
-    let unit = flying(&mut world, FRIGATE, from, to);
-    let limit = world.state.roster().movement_limit().0;
+    let unit = flying(&mut world, P::Frigate, from, to);
+    let limit = Belt::MOVEMENT_LIMIT_METERS_PER_SECOND_SQUARED;
 
     for _ in 0..LONGEST_CROSSING {
         if !world.state.entity(unit).is_flying() {
@@ -755,11 +751,11 @@ fn an_arrived_force_holds_inside_its_destinations_zone() {
         .first()
         .copied()
         .expect("the belt holds two kilometer hops");
-    let force: Vec<EntityId> = [FRIGATE, CONSTRUCTOR, LANCER]
+    let force: Vec<EntityId> = [P::Frigate, P::Constructor, P::Lancer]
         .into_iter()
         .enumerate()
-        .map(|(at, row)| {
-            let unit = world.hold(0, row, from, at as f64 * 3.0);
+        .map(|(at, pattern)| {
+            let unit = world.hold(0, pattern, from, at as f64 * 3.0);
             world.send(unit, to);
             unit
         })

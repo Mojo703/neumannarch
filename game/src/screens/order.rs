@@ -1,5 +1,5 @@
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
-use neumannarch_sim::roster::{Glyph, Roster};
+use neumannarch_sim::pattern::Glyph;
 use neumannarch_sim::state::{Draft, GRACE, STAGE_SPAN};
 use neumannarch_sim::{AsteroidId, SeatId, Tick};
 
@@ -57,14 +57,7 @@ pub enum Standing {
 }
 
 impl Order {
-    pub fn over(
-        window: Rect,
-        draft: &Draft,
-        tick: Tick,
-        roster: &Roster,
-        names: &[String],
-        alpha: f32,
-    ) -> Order {
+    pub fn over(window: Rect, draft: &Draft, tick: Tick, names: &[String], alpha: f32) -> Order {
         let stages = draft.stages();
         let running = stages
             .iter()
@@ -91,7 +84,7 @@ impl Order {
             .enumerate()
             .map(|(at, stage)| Row {
                 rect: row_at(at),
-                stage: Some((stage.seat, roster[stage.row].glyph())),
+                stage: Some((stage.seat, stage.pattern.glyph())),
                 name: names[usize::from(stage.seat.0)].clone(),
                 standing: match (stage.placed, running) {
                     (Some(asteroid), _) => Standing::Placed(asteroid),
@@ -250,7 +243,7 @@ mod tests {
             session.state().tick(),
             Command::Want {
                 asteroid,
-                row: stage.row,
+                pattern: stage.pattern,
                 count: 1,
             },
         );
@@ -266,14 +259,7 @@ mod tests {
 
     fn order(session: &Session, names: &[String]) -> Order {
         let state = session.state();
-        Order::over(
-            WINDOW,
-            state.draft(),
-            state.tick(),
-            state.roster(),
-            names,
-            1.0,
-        )
+        Order::over(WINDOW, state.draft(), state.tick(), names, 1.0)
     }
 
     #[test]

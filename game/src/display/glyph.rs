@@ -5,7 +5,7 @@ use mirage_engine::egui::{self, Color32, Pos2, Shape, Stroke};
 use mirage_engine::math::UVec2;
 use mirage_engine::{Color, TextureData};
 use neumannarch_sim::Material;
-use neumannarch_sim::roster::{Frame, Glyph, Role, Tier};
+use neumannarch_sim::pattern::{Frame, Glyph, Role, Tier};
 
 use crate::display::hue;
 use crate::display::scene::Fill;
@@ -488,7 +488,7 @@ pub(crate) fn even_odd_mesh(rings: &[Vec<Pos2>], colour: Color32) -> Mesh {
 
 #[cfg(test)]
 mod tests {
-    use neumannarch_sim::roster::Roster;
+    use neumannarch_sim::pattern::EntityPattern;
 
     use super::*;
 
@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn a_cut_is_a_hole_in_the_frame_and_the_notches_cut_the_base() {
-        let yard = Drawing::of(Roster::shipped()[neumannarch_sim::roster::SHIPYARD].glyph());
+        let yard = Drawing::of(EntityPattern::Shipyard.glyph());
         assert!(yard.covers(10.0, 10.0));
         assert!(!yard.covers(30.0, 29.0), "the plus is cut out");
         assert!(
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn a_texture_is_the_silhouette_in_the_colour_and_the_colour_changes_no_shape() {
-        let glyph = Roster::shipped()[neumannarch_sim::roster::FRIGATE].glyph();
+        let glyph = EntityPattern::Frigate.glyph();
         let opaque = |texture: &TextureData| {
             texture
                 .pixels()

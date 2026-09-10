@@ -2,7 +2,6 @@ use mirage_engine::egui;
 use mirage_engine::mesh::{Holds, Sphere};
 use mirage_engine::prelude::{FrameCtx, Game};
 use neumannarch_protocol::Lobby;
-use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::state::{Command, Preview};
 use neumannarch_sim::{AsteroidId, SeatId, Session, Vec3};
@@ -93,7 +92,6 @@ impl Play {
         let view = machine.view();
         let opening = Scene::from_view(
             &view,
-            machine.session().state().roster(),
             Client {
                 selection: None,
                 asked: Vec::new(),
@@ -154,7 +152,7 @@ impl Play {
     }
 
     fn previewed_send(&self, sending: Sending) -> WheelGesture {
-        let edits = sending.commands(&self.view, self.roster());
+        let edits = sending.commands(&self.view);
         WheelGesture::Send(sending, self.previewed(&edits))
     }
 
@@ -309,7 +307,6 @@ impl Play {
     fn scene(&self) -> Scene {
         Scene::from_view(
             &self.view,
-            self.roster(),
             Client {
                 selection: self.selection,
                 asked: self
@@ -321,10 +318,6 @@ impl Play {
                 fights: &self.fights,
             },
         )
-    }
-
-    fn roster(&self) -> &Roster {
-        self.machine.session().state().roster()
     }
 
     fn order_target(&self) -> f64 {
@@ -340,7 +333,6 @@ impl Play {
                 window,
                 &self.view.draft,
                 self.view.tick,
-                self.roster(),
                 &self.names,
                 self.order_alpha as f32,
             )
@@ -353,13 +345,7 @@ impl Play {
         pointer: Option<egui::Pos2>,
         ease: &mut impl Ease,
     ) -> Wheels {
-        Wheels::over(
-            &self.scene(),
-            self.roster(),
-            viewport,
-            &self.aim(pointer),
-            ease,
-        )
+        Wheels::over(&self.scene(), viewport, &self.aim(pointer), ease)
     }
 
     fn easing_wheels(&mut self, viewport: &Viewport, pointer: egui::Pos2) -> Wheels {
@@ -374,13 +360,7 @@ impl Play {
         pointer: egui::Pos2,
     ) -> Wheels {
         let mut motion = core::mem::take(&mut self.motion);
-        let wheels = Wheels::over(
-            scene,
-            self.roster(),
-            viewport,
-            &self.aim(Some(pointer)),
-            &mut motion,
-        );
+        let wheels = Wheels::over(scene, viewport, &self.aim(Some(pointer)), &mut motion);
         self.motion = motion;
         wheels
     }
@@ -400,7 +380,7 @@ impl Play {
         let (at, spoken) = wheels.spoken_at(pointer)?;
         let beside =
             egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * crate::display::glyph::HALF));
-        Some((beside, spoken.phrase(self.roster())))
+        Some((beside, spoken.phrase()))
     }
 
     fn holds(&mut self, pace: Allowed) {
@@ -534,7 +514,7 @@ impl Play {
                     edits: 1,
                 })
             }
-            (None, Some(from)) => match Drag::off(&self.view, from, self.roster()) {
+            (None, Some(from)) => match Drag::off(&self.view, from) {
                 Some(drag) => Gesture::Sending(drag),
                 None => {
                     self.focuses(from);
@@ -557,7 +537,7 @@ impl Play {
                         to,
                         count: drag.count,
                     };
-                    for command in sending.commands(&self.view, self.roster()) {
+                    for command in sending.commands(&self.view) {
                         self.issue(command);
                     }
                 }
@@ -615,8 +595,8 @@ impl Mode {
 }
 
 impl Drag {
-    fn off(view: &View, from: AsteroidId, roster: &Roster) -> Option<Drag> {
-        let count = Sending::present(view, from, roster);
+    fn off(view: &View, from: AsteroidId) -> Option<Drag> {
+        let count = Sending::present(view, from);
         (count > 0).then_some(Drag {
             from,
             count,

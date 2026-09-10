@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use super::State;
 use super::seat::Seat;
 use crate::belt::Belt;
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId, TeamId};
+use crate::ids::{AsteroidId, EntityId, SeatId, TeamId};
 use crate::materials::{Material, Materials, Stockpile};
 use crate::orbit::body::{Body, Gravity};
 use crate::orbit::elements::Orbit;
+use crate::pattern::EntityPattern;
 use crate::post::Post;
 use crate::posting::Posting;
 pub use crate::state::Berth;
@@ -20,7 +21,7 @@ use crate::time::{Tick, Time};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Present {
     pub id: EntityId,
-    pub row: RowId,
+    pub pattern: EntityPattern,
     pub seat: SeatId,
     pub body: Body,
     pub hp: f64,
@@ -46,7 +47,7 @@ pub struct Building {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Composition {
     pub builder: bool,
-    pub rows: BTreeMap<RowId, Held>,
+    pub patterns: BTreeMap<EntityPattern, Held>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -66,7 +67,7 @@ pub struct View {
     pub stockpile: Stockpile,
     pub income: Materials,
     pub spend: Materials,
-    pub reserve: BTreeMap<RowId, u32>,
+    pub reserve: BTreeMap<EntityPattern, u32>,
     pub compositions: BTreeMap<Post, Composition>,
     pub plans: BTreeMap<Posting, Plan>,
     pub present: Vec<Present>,
@@ -147,8 +148,8 @@ fn compositions(state: &State, seat: SeatId) -> BTreeMap<Post, Composition> {
         compositions
             .entry(posting.post())
             .or_default()
-            .rows
-            .insert(posting.row(), held);
+            .patterns
+            .insert(posting.pattern(), held);
     }
     for (post, _) in state.posts().filter(|(post, _)| post.seat == seat) {
         compositions.entry(post).or_default();
@@ -158,8 +159,8 @@ fn compositions(state: &State, seat: SeatId) -> BTreeMap<Post, Composition> {
         if post.seat != seat {
             continue;
         }
-        for (row, held) in &mut composition.rows {
-            held.surplus = state.surplus_at(Posting::new(*post, *row)).len() as u32;
+        for (pattern, held) in &mut composition.patterns {
+            held.surplus = state.surplus_at(Posting::new(*post, *pattern)).len() as u32;
         }
     }
     compositions
@@ -170,14 +171,14 @@ fn builds_at(state: &State, asteroid: AsteroidId, seat: SeatId) -> bool {
         .entities
         .standing_at(asteroid)
         .filter(|entity| entity.seat() == seat)
-        .any(|entity| state[entity.row()].builds().next().is_some())
+        .any(|entity| entity.pattern().build_rate() > 0.0)
 }
 
 fn plans(state: &State, seat: SeatId) -> BTreeMap<Posting, Plan> {
     let mut plans: BTreeMap<Posting, Plan> = BTreeMap::new();
     for (post, wants) in state.posts().filter(|(post, _)| post.seat == seat) {
-        for (row, want) in wants.iter() {
-            planned(&mut plans, Posting::new(post, row)).want = want;
+        for (pattern, want) in wants.iter() {
+            planned(&mut plans, Posting::new(post, pattern)).want = want;
         }
     }
     for frame in state
@@ -185,7 +186,7 @@ fn plans(state: &State, seat: SeatId) -> BTreeMap<Posting, Plan> {
         .iter()
         .filter(|frame| frame.post().seat == seat)
     {
-        planned(&mut plans, Posting::new(frame.post(), frame.row())).building =
+        planned(&mut plans, Posting::new(frame.post(), frame.pattern())).building =
             Some(building(state, frame));
     }
     plans
@@ -197,7 +198,7 @@ fn planned(plans: &mut BTreeMap<Posting, Plan>, posting: Posting) -> &mut Plan {
 
 fn building(state: &State, frame: &Frame) -> Building {
     Building {
-        progress: frame.fraction(state[frame.row()].cost.total()),
+        progress: frame.fraction(),
         starved_of: frame.starved_material(state.time()),
     }
 }
@@ -208,7 +209,7 @@ fn present(state: &State) -> Vec<Present> {
         .in_id_order()
         .map(|entity| Present {
             id: entity.id(),
-            row: entity.row(),
+            pattern: entity.pattern(),
             seat: entity.seat(),
             body: state.body_of(entity),
             hp: entity.hp(),
@@ -237,9 +238,7 @@ mod tests {
     use crate::TICKS_PER_SECOND;
     use crate::fixture::World;
     use crate::ids::TeamId;
-    use crate::roster::{
-        CONSTRUCTOR, FRIGATE, METALS_EXTRACTOR, SHIPYARD, STORAGE, VOLATILES_EXTRACTOR,
-    };
+    use crate::pattern::EntityPattern as P;
     use crate::state::Issued;
 
     const ASTEROID: AsteroidId = AsteroidId(0);
@@ -259,11 +258,9 @@ mod tests {
     fn extracted(world: &World, extractors: u32) -> Materials {
         let caps = world.state[ASTEROID].caps();
         let mut pulled = Materials::ZERO;
-        for (row, material) in [
-            (METALS_EXTRACTOR, Material::Metals),
-            (VOLATILES_EXTRACTOR, Material::Volatiles),
-        ] {
-            let rate = f64::from(extractors) * world.state[row].extracts_of(material);
+        for material in [Material::Metals, Material::Volatiles] {
+            let pattern = P::Extractor(material);
+            let rate = f64::from(extractors) * pattern.extracts(material);
             pulled[material] = rate.min(caps[material]);
         }
         pulled
@@ -277,43 +274,43 @@ mod tests {
             .pull
     }
 
-    fn holding(view: &View, asteroid: AsteroidId, seat: u8, row: RowId) -> Held {
+    fn holding(view: &View, asteroid: AsteroidId, seat: u8, pattern: EntityPattern) -> Held {
         view.compositions
             .get(&Post {
                 asteroid,
                 seat: SeatId(seat),
             })
-            .and_then(|composition| composition.rows.get(&row).copied())
+            .and_then(|composition| composition.patterns.get(&pattern).copied())
             .unwrap_or_default()
     }
 
-    fn sent(seat: u8, from: AsteroidId, to: AsteroidId, row: RowId) -> [Issued; 2] {
+    fn sent(seat: u8, from: AsteroidId, to: AsteroidId, pattern: EntityPattern) -> [Issued; 2] {
         [
-            Issued::numbered(seat, 0, from, row, 0),
-            Issued::numbered(seat, 1, to, row, 1),
+            Issued::numbered(seat, 0, from, pattern, 0),
+            Issued::numbered(seat, 1, to, pattern, 1),
         ]
     }
 
     #[test]
     fn a_view_carries_every_seats_holdings_and_only_its_own_plans() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ASTEROID);
-        world.fix(1, STORAGE, AWAY);
+        world.fix(0, P::Shipyard, ASTEROID);
+        world.fix(1, P::Storage, AWAY);
         world.tick(&[
-            Issued::want(0, ASTEROID, FRIGATE, 2),
-            Issued::want(1, AWAY, FRIGATE, 3),
+            Issued::want(0, ASTEROID, P::Frigate, 2),
+            Issued::want(1, AWAY, P::Frigate, 3),
         ]);
 
         let view = world.view(0);
 
-        assert_eq!(holding(&view, ASTEROID, 0, SHIPYARD).present, 1);
+        assert_eq!(holding(&view, ASTEROID, 0, P::Shipyard).present, 1);
         assert_eq!(
-            holding(&view, AWAY, 1, STORAGE).present,
+            holding(&view, AWAY, 1, P::Storage).present,
             1,
             "another seat's holdings are visible"
         );
         assert_eq!(
-            view.plan_of(Posting::of(ASTEROID, SeatId(0), FRIGATE))
+            view.plan_of(Posting::of(ASTEROID, SeatId(0), P::Frigate))
                 .map(|plan| plan.want),
             Some(2),
             "the viewer's own want is in the view"
@@ -324,38 +321,38 @@ mod tests {
                 .all(|posting| posting.asteroid() == ASTEROID),
             "another seat's wants are its own to see"
         );
-        assert_eq!(view.reserve[&SHIPYARD], 1);
+        assert_eq!(view.reserve[&P::Shipyard], 1);
     }
 
     #[test]
     fn a_surplus_is_what_stands_at_the_asteroid_above_the_want_its_frames_leave_uncovered() {
         let mut world = world();
-        world.hold(0, FRIGATE, ASTEROID, 0.0);
+        world.hold(0, P::Frigate, ASTEROID, 0.0);
         world.tick(&[]);
 
         assert_eq!(
-            holding(&world.view(0), ASTEROID, 0, FRIGATE).surplus,
+            holding(&world.view(0), ASTEROID, 0, P::Frigate).surplus,
             1,
             "a unit no want covers is surplus where it stands"
         );
         assert_eq!(
-            holding(&world.view(1), ASTEROID, 0, FRIGATE).present,
+            holding(&world.view(1), ASTEROID, 0, P::Frigate).present,
             1,
             "what stands there is visible to every seat"
         );
         assert_eq!(
-            holding(&world.view(1), ASTEROID, 0, FRIGATE).surplus,
+            holding(&world.view(1), ASTEROID, 0, P::Frigate).surplus,
             0,
             "a surplus would tell another seat the want behind it"
         );
 
-        world.tick(&[Issued::want(0, AWAY, FRIGATE, 1)]);
-        world.tick(&[Issued::want(0, AWAY, FRIGATE, 0)]);
+        world.tick(&[Issued::want(0, AWAY, P::Frigate, 1)]);
+        world.tick(&[Issued::want(0, AWAY, P::Frigate, 0)]);
         let flying = world.view(0);
 
-        assert_eq!(holding(&flying, AWAY, 0, FRIGATE).arriving, 1);
+        assert_eq!(holding(&flying, AWAY, 0, P::Frigate).arriving, 1);
         assert_eq!(
-            holding(&flying, AWAY, 0, FRIGATE).surplus,
+            holding(&flying, AWAY, 0, P::Frigate).surplus,
             0,
             "a unit still on its way stands nowhere to be surplus"
         );
@@ -364,8 +361,8 @@ mod tests {
     #[test]
     fn a_composition_says_whether_a_builder_of_its_seat_stands_at_the_asteroid() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ASTEROID);
-        world.fix(0, STORAGE, AWAY);
+        world.fix(0, P::Shipyard, ASTEROID);
+        world.fix(0, P::Storage, AWAY);
         world.tick(&[]);
 
         let view = world.view(0);
@@ -385,32 +382,36 @@ mod tests {
     #[test]
     fn a_send_leaves_its_source_holding_nothing_from_the_tick_it_is_re_homed() {
         let mut world = world();
-        world.hold(0, FRIGATE, ASTEROID, 0.0);
-        world.tick(&sent(0, ASTEROID, AWAY, FRIGATE));
+        world.hold(0, P::Frigate, ASTEROID, 0.0);
+        world.tick(&sent(0, ASTEROID, AWAY, P::Frigate));
 
         let view = world.view(0);
 
-        assert_eq!(holding(&view, ASTEROID, 0, FRIGATE), Held::default());
-        assert_eq!(holding(&view, AWAY, 0, FRIGATE).arriving, 1);
+        assert_eq!(holding(&view, ASTEROID, 0, P::Frigate), Held::default());
+        assert_eq!(holding(&view, AWAY, 0, P::Frigate).arriving, 1);
         assert_eq!(view.present[0].at, Berth::Flying { from: ASTEROID });
         assert_eq!(view.present[0].home, AWAY);
     }
 
     #[test]
-    fn a_plan_carries_the_one_frame_its_row_is_building() {
+    fn a_plan_carries_the_one_frame_its_pattern_is_building() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ASTEROID);
-        world.tick(&[Issued::want(0, ASTEROID, FRIGATE, 3)]);
+        world.fix(0, P::Shipyard, ASTEROID);
+        world.tick(&[Issued::want(0, ASTEROID, P::Frigate, 3)]);
         world.run(60);
 
         let plan = world
             .view(0)
-            .plan_of(Posting::of(ASTEROID, SeatId(0), FRIGATE))
+            .plan_of(Posting::of(ASTEROID, SeatId(0), P::Frigate))
             .copied()
             .expect("the frigate is wanted");
 
         assert_eq!(plan.want, 3);
-        assert_eq!(world.frames(0, ASTEROID, FRIGATE), 1, "one frame at a time");
+        assert_eq!(
+            world.frames(0, ASTEROID, P::Frigate),
+            1,
+            "one frame at a time"
+        );
         let building = plan.building.expect("the shipyard is building one");
         assert!(building.progress > 0.0 && building.progress < 1.0);
     }
@@ -418,9 +419,9 @@ mod tests {
     #[test]
     fn every_seat_holds_every_entity_of_the_match() {
         let mut world = world();
-        let mine = world.fix(0, SHIPYARD, ASTEROID);
-        let near = world.fix(1, STORAGE, ASTEROID);
-        let far = world.fix(1, STORAGE, AsteroidId(9));
+        let mine = world.fix(0, P::Shipyard, ASTEROID);
+        let near = world.fix(1, P::Storage, ASTEROID);
+        let far = world.fix(1, P::Storage, AsteroidId(9));
 
         for seat in [0, 1, 9] {
             let held: Vec<EntityId> = world.view(seat).present.iter().map(|it| it.id).collect();
@@ -428,9 +429,9 @@ mod tests {
         }
         let theirs = world.present(0, far).expect("an enemy a belt away");
         assert_eq!(theirs.seat, SeatId(1));
-        assert_eq!(theirs.row, STORAGE);
+        assert_eq!(theirs.pattern, P::Storage);
         assert_eq!(theirs.home, AsteroidId(9));
-        assert_eq!(theirs.hp, world.state[STORAGE].hp.0);
+        assert_eq!(theirs.hp, P::Storage.hp().0);
         assert_eq!(theirs.body, world.state.asteroid_body(AsteroidId(9)));
         assert_eq!(theirs.at, Berth::Standing(AsteroidId(9)));
     }
@@ -438,13 +439,13 @@ mod tests {
     #[test]
     fn a_flying_unit_names_the_asteroid_it_left_and_the_one_it_flies_to() {
         let mut world = world();
-        let mine = world.hold(0, FRIGATE, ASTEROID, 0.0);
-        let theirs = world.hold(1, FRIGATE, ASTEROID, 0.0);
+        let mine = world.hold(0, P::Frigate, ASTEROID, 0.0);
+        let theirs = world.hold(1, P::Frigate, ASTEROID, 0.0);
         world.tick(&[
-            Issued::numbered(0, 0, ASTEROID, FRIGATE, 0),
-            Issued::numbered(0, 1, AWAY, FRIGATE, 1),
-            Issued::numbered(1, 0, ASTEROID, FRIGATE, 0),
-            Issued::numbered(1, 1, AWAY, FRIGATE, 1),
+            Issued::numbered(0, 0, ASTEROID, P::Frigate, 0),
+            Issued::numbered(0, 1, AWAY, P::Frigate, 1),
+            Issued::numbered(1, 0, ASTEROID, P::Frigate, 0),
+            Issued::numbered(1, 1, AWAY, P::Frigate, 1),
         ]);
 
         for unit in [mine, theirs] {
@@ -459,7 +460,7 @@ mod tests {
     #[test]
     fn the_standings_are_in_every_view_and_say_whether_the_clock_has_run() {
         let mut world = world();
-        world.fix(0, SHIPYARD, ASTEROID);
+        world.fix(0, P::Shipyard, ASTEROID);
 
         let standings = world.view(1).standings;
 
@@ -480,7 +481,7 @@ mod tests {
     #[test]
     fn a_seat_the_match_lacks_holds_no_composition_of_its_own() {
         let mut world = world();
-        world.fix(0, CONSTRUCTOR, ASTEROID);
+        world.fix(0, P::Constructor, ASTEROID);
 
         let view = world.view(9);
 
@@ -526,8 +527,8 @@ mod tests {
     #[test]
     fn a_seats_income_is_what_its_extractors_pulled_whether_the_store_kept_it_or_not() {
         let mut world = world();
-        world.fix(0, METALS_EXTRACTOR, ASTEROID);
-        world.fix(0, VOLATILES_EXTRACTOR, ASTEROID);
+        world.fix(0, P::Extractor(Material::Metals), ASTEROID);
+        world.fix(0, P::Extractor(Material::Volatiles), ASTEROID);
         let full = world.view(0).stockpile.stock();
         world.run(SECOND);
 
@@ -540,7 +541,7 @@ mod tests {
         );
         assert_eq!(world.view(1).income, Materials::ZERO, "its own extractors");
 
-        world.fix(0, STORAGE, ASTEROID);
+        world.fix(0, P::Storage, ASTEROID);
         world.run(SECOND);
         let before = world.view(0).stockpile.stock();
         world.run(SECOND);
@@ -560,9 +561,9 @@ mod tests {
     #[test]
     fn a_seats_spend_over_the_last_second_is_what_its_frames_drained() {
         let mut world = world();
-        world.fix(0, CONSTRUCTOR, ASTEROID);
+        world.fix(0, P::Constructor, ASTEROID);
         let before = world.view(0).stockpile.stock();
-        world.tick(&[Issued::want(0, ASTEROID, FRIGATE, 1)]);
+        world.tick(&[Issued::want(0, ASTEROID, P::Frigate, 1)]);
         world.run(SECOND - 1);
 
         let view = world.view(0);
@@ -575,8 +576,8 @@ mod tests {
     fn a_asteroids_pull_over_the_last_second_sums_every_seat_and_stays_inside_its_cap() {
         let mut world = world();
         for seat in [0, 1] {
-            world.fix(seat, METALS_EXTRACTOR, ASTEROID);
-            world.fix(seat, VOLATILES_EXTRACTOR, ASTEROID);
+            world.fix(seat, P::Extractor(Material::Metals), ASTEROID);
+            world.fix(seat, P::Extractor(Material::Volatiles), ASTEROID);
         }
         world.run(SECOND);
 
@@ -594,7 +595,7 @@ mod tests {
     #[test]
     fn the_view_reports_the_last_completed_second_and_holds_it_until_the_next_closes() {
         let mut world = world();
-        world.fix(0, METALS_EXTRACTOR, ASTEROID);
+        world.fix(0, P::Extractor(Material::Metals), ASTEROID);
 
         assert_eq!(world.view(0).income, Materials::ZERO, "none completed");
         world.run(SECOND - 1);
@@ -612,8 +613,8 @@ mod tests {
     #[test]
     fn an_exchange_names_the_asteroid_the_shooter_fired_from_and_the_target_was_hit_at() {
         let mut world = world();
-        let shooter = world.hold(0, FRIGATE, ASTEROID, 0.0);
-        let target = world.fix(1, STORAGE, ASTEROID);
+        let shooter = world.hold(0, P::Frigate, ASTEROID, 0.0);
+        let target = world.fix(1, P::Storage, ASTEROID);
         let shots = world.shots();
         assert!(
             shots

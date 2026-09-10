@@ -5,7 +5,7 @@ use crate::belt::Belt;
 use crate::ids::EntityId;
 use crate::noise;
 use crate::orbit::body::Body;
-use crate::roster::Row;
+use crate::pattern::EntityPattern;
 use crate::time::Time;
 use crate::vec3::Vec3;
 
@@ -28,7 +28,12 @@ pub(crate) struct Circle {
 }
 
 impl Circle {
-    pub(crate) fn of(id: EntityId, row: &Row, asteroid: &Asteroid, body: Body) -> Circle {
+    pub(crate) fn of(
+        id: EntityId,
+        pattern: EntityPattern,
+        asteroid: &Asteroid,
+        body: Body,
+    ) -> Circle {
         let drawn = |what: Drawn| noise::fraction(&(what, id));
         let rise = 2.0 * drawn(Drawn::Tilt) - 1.0;
         let turn = TAU * drawn(Drawn::Turn);
@@ -41,7 +46,8 @@ impl Circle {
             across,
             along: normal.cross(across),
             radius_meters,
-            turns_per_second: TURNS_OF_THE_LIMIT * (row.manoeuvring.0 / radius_meters).sqrt() / TAU,
+            turns_per_second: TURNS_OF_THE_LIMIT * (pattern.manoeuvring().0 / radius_meters).sqrt()
+                / TAU,
             phase_at_the_start: drawn(Drawn::Phase),
         }
     }
@@ -63,7 +69,7 @@ mod tests {
     use crate::fixture::World;
     use crate::ids::{AsteroidId, TeamId};
     use crate::orbit::body::Gravity;
-    use crate::roster::{CONSTRUCTOR, Kind, Roster};
+    use crate::pattern::Kind;
     use crate::state::State;
 
     const GRAVITY: Gravity = Gravity::new(4.0e13);
@@ -79,7 +85,7 @@ mod tests {
     fn circle(state: &State, id: EntityId) -> Circle {
         Circle::of(
             id,
-            &state[CONSTRUCTOR],
+            EntityPattern::Constructor,
             &state[HOME],
             state.asteroid_body(HOME),
         )
@@ -109,7 +115,7 @@ mod tests {
 
     #[test]
     fn the_circle_clears_the_rock_it_turns_about_and_stands_inside_the_fight_stage() {
-        let roster = Roster::shipped();
+        let reach = EntityPattern::LONGEST_DAMAGE_RANGE_METERS;
         let state = state();
         let circle = circle(&state, EntityId(0));
         let floor = state[HOME].floor_meters();
@@ -120,10 +126,10 @@ mod tests {
             circle.radius_meters
         );
         assert!(
-            circle.radius_meters < 0.5 * roster.longest_damage_range(),
+            circle.radius_meters < 0.5 * reach,
             "a circle of {} reaches the stage standing {} out",
             circle.radius_meters,
-            0.5 * roster.longest_damage_range()
+            0.5 * reach
         );
         assert!(
             circle.radius_meters < Belt::ZONE_RADIUS_METERS,
@@ -144,7 +150,8 @@ mod tests {
         };
 
         let over = turned(Time::ZERO).dot(turned(Time(u64::from(crate::TICKS_PER_SECOND))));
-        let held = (state[CONSTRUCTOR].manoeuvring.0 * circle.radius_meters).sqrt();
+        let limit = EntityPattern::Constructor.manoeuvring().0;
+        let held = (limit * circle.radius_meters).sqrt();
         let wanted = TURNS_OF_THE_LIMIT * held / circle.radius_meters;
 
         assert!(
@@ -155,30 +162,36 @@ mod tests {
     }
 
     #[test]
-    fn every_unit_that_does_no_damage_circles_a_radius_a_row_of_its_limit_can_hold() {
+    fn every_unit_that_does_no_damage_circles_a_radius_a_pattern_of_its_limit_can_hold() {
         let state = state();
-        for (id, row) in Roster::shipped().iter() {
-            if row.kind() != Kind::Unit || row.does_damage() {
+        for pattern in EntityPattern::EVERY {
+            if pattern.kind() != Kind::Unit || pattern.does_damage() {
                 continue;
             }
-            let circle = Circle::of(EntityId(0), row, &state[HOME], state.asteroid_body(HOME));
+            let circle = Circle::of(
+                EntityId(0),
+                pattern,
+                &state[HOME],
+                state.asteroid_body(HOME),
+            );
             let speed = TAU * circle.turns_per_second * circle.radius_meters;
             assert!(
-                speed * speed / circle.radius_meters < row.manoeuvring.0,
+                speed * speed / circle.radius_meters < pattern.manoeuvring().0,
                 "a {} cannot hold {speed} on a circle of {}",
-                row.name,
+                pattern.name(),
                 circle.radius_meters
             );
             assert_eq!(
-                id, CONSTRUCTOR,
+                pattern,
+                EntityPattern::Constructor,
                 "{} is a second unit that does no damage",
-                row.name
+                pattern.name()
             );
         }
     }
 
     #[test]
-    fn two_units_of_one_row_take_two_planes_and_two_starting_phases() {
+    fn two_units_of_one_pattern_take_two_planes_and_two_starting_phases() {
         let state = state();
         let one = circle(&state, EntityId(3));
         let other = circle(&state, EntityId(4));

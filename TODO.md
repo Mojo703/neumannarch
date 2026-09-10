@@ -9,10 +9,13 @@ is the record. Agents see this file only through their briefs.
 
 ## In flight
 
-The next unit is 2a of the construction overhaul (below), the split
-of match-playing tests having landed: `cargo test --workspace` is 43
-seconds, the ignored tests play in release in the gate. Rulings with
-it (owner, 2026-09-09): the two tests in `agents/src/tests.rs` that
+The construction overhaul's unit 2, the pattern enum, is committed
+(a0cc88a). Next is the design conversation on the rulings unit 3 waits
+on (listed under the overhaul below), then unit 3's brief; before
+either, the crash measurement below. The split of match-playing tests
+landed before the enum: `cargo test --workspace` is 43 seconds, the
+ignored tests play in release in the gate. Rulings with the split
+(owner, 2026-09-09): the two tests in `agents/src/tests.rs` that
 advance a hand-rolled session through the draft stay in the ordinary
 run, and the gate keeps proving the three contract guarantees twice,
 in `contracts.rs` at four minutes and in `harness verify 11`; the
@@ -52,6 +55,34 @@ window" in `Session::insert` and "past the tick this match ends by" in
 `Log::take`. Both refusals also remain indistinguishable from outside
 the room, and deciding what a room says about a refusal it now swallows
 is that unit's question.
+
+From the owner's play (2026-09-10), a unit before the tree fills: the
+game locked up at twelve minutes of an intense match, no panic, the
+window unresponsive until the desktop offered to kill it and still
+hung five minutes later, with lag spikes through the minutes before.
+Not the command-cap panic below. The two readings: a tick cost that
+outruns the frame so far the engine's eight-ticks-a-frame catch-up
+never catches up (the spikes say so, and the tick grows about
+quadratically with entities), or a loop with no exit. First
+measurement: `harness time 15` with two expand bots, milliseconds per
+tick and entity count per minute, and the resident memory of the
+process, on the committed tree. If the tick is under budget at twelve
+minutes the fault is in the windowed game and not the sim (the owner's
+own reading, 2026-09-10): the frame at a thousand ships, the HUD's
+per-entity painting, or the engine's catch-up, and the next play runs
+under a profiler with the game's frame timed beside the tick.
+
+Measured 2026-09-10 on a0cc88a, `harness time 15`, expand against
+expand in release: the tick is 0.05 ms at one minute and 48 entities,
+1.24 ms median and 2.65 ms at worst at twelve minutes and 1947
+entities, 1.83 ms median and 4.41 ms at worst at fifteen minutes and
+2934 entities, against a budget of 8.33. The sim is under half its
+budget at the minute the game locked up, so the fault is in the
+windowed game: the frame at two thousand bodies, the HUD's per-entity
+painting, or the engine's catch-up. The next play runs under a
+profiler with the game's frame timed beside the tick, and the
+display's own measurements (0.4 ms empty, 5.8 at 400 ships, 7.6 at the
+whole belt, offscreen) are the baseline it is read against.
 
 Two holes open, neither fixed:
 - `game/src/net/machine.rs` expects its own controller's command to be
@@ -107,7 +138,12 @@ Rulings of 2026-09-09, so they are not re-raised:
   correcting. Both land with the dead arc.
 - Factions are built on top of the entity refactor, not before it, and
   the refactor's const stats are not reopened for them.
-- The refactor's type is `EntityPattern` as ruled.
+- The refactor's type is `EntityPattern` as ruled, and the word row
+  goes with the type (owner, 2026-09-09: "row is very confusing"):
+  every `row` field, parameter, method and local becomes `pattern`,
+  and DESIGN.md and DISPLAY.md say pattern where they say row, under a
+  register review. Lands in unit 3, the leaf renames to a sub-agent
+  after the shape compiles.
 - One lane: a unit lands and commits before the next begins, and no
   second working tree is opened to run two at once.
 - `agents` stays undocumented until rating settles the bot, so its
@@ -129,8 +165,8 @@ Rulings of 2026-09-09, so they are not re-raised:
   produce. About 400 lines out of `look.rs`.
 
 Lifted from the twelve research files on 2026-09-09, the overseer
-having read all of them; nine are deleted and three stay untracked in
-`research/` until their units dispatch. Ordered by the owner's
+having read all of them; all twelve are folded into this file and
+deleted. Ordered by the owner's
 priority (2026-09-09): the content refactor, then the art refactor,
 before any code fix. Line numbers in the survivors are b2ff0a3's and
 are re-derived from `cargo check`, never trusted.
@@ -184,10 +220,43 @@ four teams' nearest enemy pair 0.7071 m to 1.4142 m; the frigate's
 four-team line 18 stations to 6, the lancer's 42 to 30. The test to
 write, from the guarantee: the nearest pair of two teams' stations is
 the pair standing at the centres of their lines; it fails unfixed at
-four teams. The INVARIANTS.md entry for two rows of one team holding
-the same stations, and the two DESIGN.md corrections, are drafted in
-`research/circle-division.md` §5 and are the one part of that file a
-brief should carry verbatim.
+four teams. The three texts the arc lands with, verbatim:
+
+INVARIANTS.md, under "Tolerated runtime failures":
+
+> Two rows of one team hold the same stations where their stand-offs
+> differ by a whole number of station spacings. A row's ranks step out
+> from its stand-off by that spacing and every rank puts a station at
+> the centre of the line, so the frigate's third rank and the lancer's
+> front rank stand at one point, and sixteen pairs coincide at four
+> teams. Separation parts the ships that take them, as it parts any
+> pair that meets, and no rule reads the distance. A roster refused at
+> boot for two rows whose stand-offs differ by a whole number of
+> station spacings would delete it, at the price of a roster that
+> cannot state two damage ranges a multiple of twice the station
+> spacing apart; ranks stepping by a distance the row itself states
+> would delete it too, at the price of a stage whose depth no longer
+> reads off one constant of the belt.
+
+DESIGN.md, replacing the stand-off sentence at 306-309:
+
+> The stand-off is half the row's damage range less half a stated
+> distance, one constant of the belt, so two teams' lines of one row
+> stand that distance inside their range and a long-range row's front
+> rank stands behind a short-range row's. The ranks behind are not
+> ordered so: two rows of one team whose stand-offs differ by a whole
+> number of station spacings hold the same stations, and separation
+> parts the ships that take them.
+
+DESIGN.md, replacing the "three or more sides" sentence at 312-315:
+
+> Where three or more sides divide the circle a line spreads no
+> further each way than its side's own share of the circle less a
+> stated arc between two sides, one constant of the belt, and the wrap
+> below carries what will not fit into the ranks behind, so that arc
+> stands empty between two sides' lines, no station stands nearer
+> another team's side than its own, and the nearest pair of two teams'
+> stations is the pair standing at the centres of their lines.
 
 The relayed command, mechanism, ruled: `Session::oldest()` becomes
 `settled()`, since the retention span is a rewind-cost budget standing
@@ -204,33 +273,35 @@ or a recorded reason. Four tests: a refused relayed command ends the
 match, a member's desync reaches everyone, only a tick below settled is
 refused and an honest peer never sends one (a `Delaying` transport
 that parts an acknowledgement from the command after it by 133 ms),
-and the pace's window stays inside the retention ring.
+and the pace's window stays inside the retention ring. The sites, by
+file and function: `Session::oldest` and `Session::insert` in
+`sim/src/history/session.rs`; `Refused` and `Batch::insert` in
+`sim/src/state/command.rs`; `Machine::apply` in
+`game/src/net/machine.rs`; `Pace::shipped` in `game/src/net/pace.rs`;
+the ledger's dedupe and `Log::take` in `server/src/records.rs`; the
+room's drop of a member's own desync in `server/src/rooms.rs`; the
+peer broadcast of `Relayed::Desync` in `server/src/forwarding.rs`.
 
-The entity refactor, sequenced: 2a `Row::effects` becomes
-`&'static [Effect]` (a `const fn` cannot build a `Vec`), with the
-effect folds on `[Effect]` rather than on the enum so `in_row` stays
-testable above zero; 2b the movement limit leaves the roster for
-`Belt`; 3 the enum, atomic and red-state: deletes `RowId`, `Roster`,
-the nine constants, both `Index` impls, `units_by`,
-`Rejected::NoSuchRow`, the roster's place in `State` and its hash, and
-`harness sweep` whole (about 200 lines); no wildcard arm at the root of
-any stat's match; `#[repr(u8)]` with `serde(into, try_from)` as `u8`
-so the wire stays three bytes and the hash's discriminant width is
-pinned; an unknown row byte then fails a whole `Record` at decode,
-which wants an INVARIANTS.md entry; `Roster::check` becomes a
-`const { assert! }` over `EntityPattern::EVERY`; 38 `Roster` positions
-and 83 `Roster::shipped()` calls go; 4 the three relations empty; 5
-the tree. Variant names: `Constructor`, `MetalsExtractor`,
-`Storage`, `Shipyard`, `Raider`, `Frigate`, `Lancer`, and one
-`Extractor(Material)` in place of three extractor variants (owner,
-2026-09-09: the wire conversion is hand-written either way, so keep
-the variants few). Lessons from the effect rename: price the
-shape before the rename; the hash moves on any shape change while
-behaviour does not, and a baseline is `git archive HEAD` into a scratch
-tree with the engine symlinked two directories up, then
-`harness replay` on both; a sub-agent gets only leaf renames, never a
-file whose type changes shape, and is told the tree is red and not to
-run cargo; take leaf sites from `cargo check`, not grep.
+The effect names (`Build`, `FastBuild`, `ShortFire`, `PlatedFire`,
+`LongFire`) are placeholders the owner will rewrite thematically; a
+variant rename is a leaf change. Lessons kept from the enum unit: price the shape before the rename (unit 2a built a
+static slice the const fn could not fill from a binding and was
+absorbed); the overseer writes the type, its table and the store keyed
+on it, and every call site is an agent's; a read-only Opus critique
+after the build found twelve substitutions the builders left, so that
+pass is part of every refactor from now.
+
+Recorded from that critique for the hygiene pass, each a deletion:
+`Shooter.plating` is a copied stat and the threat cache's key
+(INVARIANTS names the fix); `Buttons`' maps are always full in play and
+optional only for two tests that build partial ones; `Work` is a bag of
+a frame's two facts; the holding terms take `Weights` and `Real` where
+the caller holds the pattern, kept because their test wants synthetic
+weights; the `*ByCode` shadow structs in protocol's record test forge
+one bad byte; three pattern-module tests restate the tables they
+check; `furthest_station_meters` is `#[cfg(test)]` with one test
+caller; `harness sweep` and its steering-weight matrix are gone with
+runtime-varied rosters and have no replacement.
 
 The tree, design input for unit 5: no shipped game read (OpenRA,
 Zero-K, Warzone 2100, Beyond All Reason) gates tech per place, and all
@@ -253,19 +324,62 @@ match, a fourth resource. A retrofit at full cost has no precedent
 (Zero-K charges the difference), so the harness must show a seat ever
 retrofits.
 
+The candidate table, §3 of the research file, kept as the one table
+this document holds:
+
+| pattern | tier | requires | excludes | replaces | what it is for |
+|---|---|---|---|---|---|
+| constructor | 1 | — | — | — | The unit that builds; every asteroid a seat works has one standing. |
+| engineer | 2 | shipyard, storage | — | constructor | The tier a seat carries in its hands: a retrofitted constructor, and the row every tier-two structure names. |
+| metals extractor | 1 | — | — | — | Pulls metals against the asteroid's cap. |
+| volatiles extractor | 1 | — | — | — | Pulls volatiles against the asteroid's cap. |
+| energy extractor | 1 | — | — | — | Pulls energy against the asteroid's cap. |
+| metals sink | 2 | engineer | — | metals extractor | Pulls metals near a rich asteroid's whole cap, so a rich rock is worth an engineer. |
+| volatiles sink | 2 | engineer | — | volatiles extractor | The same for volatiles. |
+| energy sink | 2 | engineer | — | energy extractor | The same for energy. |
+| storage | 1 | — | — | — | Raises the seat's capacity, and is the cheap second half of the engineer's conjunction. |
+| shipyard | 1 | — | — | — | Builds far faster than a constructor; one to an asteroid, whoever finished first. |
+| yard | 2 | engineer | — | shipyard | Builds faster again and holds more; retrofitting it keeps the asteroid's one claim. |
+| gun lab | 1 | shipyard | hull lab | — | Grants the rows that reach: an asteroid runs one lab, so a lab rock is a specialised rock. |
+| hull lab | 2 | engineer | gun lab | — | Grants the rows that take hits. |
+| battery | 2 | gun lab | — | — | A structure that fires: the thing an attacker must kill before it can stand on the rock, and the reason a lab rock defends itself. |
+| raider | 1 | shipyard | — | — | The first row that does damage: cheap, fast, runs passes, and kills builders. |
+| lancer | 2 | gun lab | — | — | Reaches across the stage and stands behind everything. |
+| frigate | 2 | hull lab | — | raider | Plated, holds a station in the line, and is what a raider becomes. |
+| monitor | 3 | yard, gun lab | — | lancer | The longest reach in the roster; it needs the yard and the lab at one asteroid. |
+| bulwark | 3 | yard, hull lab | — | frigate | Runs at a lancer line and survives the crossing. |
+
+Notes on the shape, each one a choice the owner can delete:
+
+- The engineer is the only row that gates the whole tier-two economy, and it is a unit. Send it away and six rows fall out of the asteroid at once. That is BAR's armack and it is the fragility the ruling asks for.
+- Requiring `shipyard, storage` for the engineer makes the cheapest structure in the roster load-bearing. OpenRA's ATEK does the same with `weap, dome`.
+- The two labs exclude each other at an asteroid. This is the one place `excludes` earns its keep, and the evidence says one place is the right number: `!` appears twice in the whole RA mod and Warzone has no exclusion field at all. Delete this and `excludes` has no user; that is a real argument for deleting the field.
+- The battery is the only new structure that fires. It exists so that killing a lab is work, and because a defence row is the standard reward for a tech building in every game read (RA's TSLA, AGUN, GAP; BAR's armanni, armamb).
+- Three tier-two extractors is three rows for one idea. BAR spends three rows on that idea too — armmoho for metal, armfus for energy, armgmm to turn one into the other — and prices the tier-two extractor at 12× the tier one (armmex 50 metal, armmoho 620). If eighteen is too many, these three are the first to cut to one and let the asteroid's caps do the work.
+- No row here needs an effect kind that does not exist. Every one carries `Damage(Hitscan)`, `Build` or `Extract`, and otherwise states hp, plating, capacity and cost.
+
+The five measurements, §4: spread counts the asteroids where the seat
+has an entity homed, and fortressing is a curve that climbs to one or
+two and flattens for the rest of the match; trees paid for counts the
+asteroids where the seat has completed a shipyard, and separately a
+lab, and a median of one at the clock says the tree is too dear to
+replicate and the map is decoration; concentration of spend is the
+share of the seat's cumulative build spend that went to its single
+busiest asteroid, and a share that stays high late says the second
+rock never got funded, a different failure from never being taken;
+contact is the fraction of ticks in which entities of two seats stand
+in one zone, and a fortressing match can end with it near zero, which
+the game must not reach; what decided it is whether the win came from
+the asteroid count or the tiebreak on total build cost, and a seat
+that holds one rock winning on count anyway means the win rule is not
+pushing hard enough to be the counterweight.
+
 For register reviews, the checklist a brief carries: when a concrete noun becomes an abstract one, read every sentence where
 the old noun was the subject of a physical verb; grep the whole
 document for a second phrasing of the renamed thing; diff grammatical
 number, since a plural possessive collapsed to a singular changes what
 the sentence claims; watch for a measurement made the subject of the
 verb its thing used to take.
-
-Three research files stay untracked in `research/` until their units
-dispatch, each read at b2ff0a3: `circle-division.md`, whose §5 drafts
-the INVARIANTS.md entry and the two DESIGN.md corrections the dead arc
-owes and whose §6 script re-derives every figure; `relayed-command.md`,
-the brief for that unit; and `roster-tree-study.md`, whose §3 table is
-the eighteen-row candidate and whose §4 is the fortressing measurement.
 
 Everything below this line is the history of units already committed;
 prune it in the next session that has the budget.
@@ -695,20 +809,71 @@ plus 110 reads through the roster or state index. `.weapons` is read in
 hashed `State` and `Draft::of` reads it during construction, so taking
 it out re-baselines every hash the repo pins.
 
-The units, in order, each ending green but the second:
-1. `Weapon` to `Effect`. Eight sites.
-2. The enum, atomic. Deletes `RowId`, `Roster`, the nine row
-   constants, `get`, `len`, `Index<RowId>`, `units_by`, `NoSuchRow`,
-   and the roster's place in `State` and its hash. Every one of the 41
-   files breaks the moment the row stops being indexable, so it cannot
-   be staged gradually.
-3. The three relations and `satisfies`, with every relation empty, plus
-   the gate in `apply` and the retrofit at frame completion. Ends green
-   with behaviour unchanged, because an empty tree refuses nothing.
+The units, in order; the first two have landed in the tree:
+1. `Weapon` to `Effect`. Landed.
+2. The enum. Landed, see In flight.
+3. The relations and the gate, with the smallest true edge (a raider
+   requires a shipyard) and its test rather than empty relations, and
+   the bot's generic rule that a wanted pattern's requirements are
+   wanted too, so the balance matrices can run with the tree on.
 4. Fill the tree. Roster design, not code, and not started.
 5. The wheel becomes asteroid-dependent; the glyph gains the mark; the
    asteroid-state glyph lands.
-6. The bot learns the tree.
+6. The bot learns the tree beyond the generic rule.
+
+Ruled 2026-09-10, each argued as mechanism from the player's side, and
+the units they make, in the order the owner ruled (2026-09-10):
+build-and-fly first since the controls are why the bots win, then
+slots since the filled tree needs them, then the relations.
+
+- Build and fly (a unit of its own: sim, display, bot). A unit wanted
+  at an asteroid where the seat has no builder opens its frame at the
+  seat's asteroid where it arrives soonest: build time, the pattern's
+  cost over the share of that asteroid's effort a new frame would get
+  (effort splits evenly, so cost times frames there plus one over the
+  seat's build rate there), plus flight time, two root of the distance
+  over the movement limit; chosen once when the frame opens, ties by
+  asteroid id; a rock where a builder stands competes with zero flight.
+  The frame carries `built_at` beside its post; construction groups by
+  `built_at`; the completed unit spawns there homed at its post and
+  flies at once. A structure is always built where posted. The front's
+  wheel shows such a frame as the arriving arrow drawn hollow and
+  filling with progress, so one unit reads hollow mark, filling arrow,
+  full arrow in flight, dot; hover "Raider building at Asteroid 3". The
+  yard's wheel gains a line after its own wanted line for frames it
+  builds for elsewhere, boxes each with the arrow pointing away from
+  the asteroid, hover "Raider for Asteroid 7". The drag stays for
+  moving a standing force. Deletes the dashed no-builder mark for
+  units, the bot's arm-at-every-building-asteroid pass and the
+  guarantee that every frame has a builder standing or arriving,
+  replaced by: every unit frame is built where the seat's estimate
+  says it arrives soonest. Why (owner's play, 2026-09-10): moving one
+  unit precisely takes three edits, raise at the yard, raise at the
+  target, lower at the yard, and the bots are unbeatable by a human
+  because the controls cost that; the bot's wave is that dance
+  automated, so the sim takes it over.
+- Extractor slots replace the cap (a unit of its own: belt, extraction,
+  bars, bot economy). The belt gives each asteroid a count per material
+  from the smooth field that gives the cap today, one to a few; an
+  extractor takes a slot, across seats whoever fills it first, and
+  pulls its own rate; extraction's split and redistribution go; a want
+  past the free slots opens no frame by the tree's own gate; the yield
+  mark and the bars read filled slots against slots. Why: a rock filled
+  by stacking cheap tier ones is the 437 extractors measured, and a
+  tier two extractor is overwhelming only when the slot is the scarce
+  thing, which is BAR's mex and moho (files read 2026-09-10: 50 against
+  620 metal for four times the pull, on one spot). The retrofit
+  opposition was withdrawn on those files.
+- Requires reads the seat's own standing entities at the asteroid;
+  excludes the same. Teammates share nothing but a side, and a rock's
+  tree state is one seat's fact the wheel shows in that seat's sector.
+- A frame that loses its gate cancels and refunds on the tick, as first
+  ruled; the pause was offered and refused.
+- Excludes and the variant mark land empty in unit 3, as first ruled.
+- Tier two combat patterns are meaningful by threshold plating, range
+  and a role the tier below lacks, never by per-cost efficiency (BAR's
+  files: the bull is worse per metal than the stump everywhere; the
+  fatboy and annihilator win on range, the spider on a role).
 
 Open inside it: what the construction turret is, since builder and
 constructor are both taken; and which visual channel carries the mark,

@@ -1,5 +1,3 @@
-use neumannarch_sim::roster::Roster;
-
 use crate::bots::scripted::commitments::*;
 use crate::bots::scripted::personality::Personality;
 use crate::harness::fixture::{Fixture, surveyed};
@@ -7,10 +5,9 @@ use crate::harness::fixture::{Fixture, surveyed};
 #[test]
 #[ignore = "plays a match: cargo test -p neumannarch-agents --release -- --ignored"]
 fn an_army_counts_as_ahead_only_once_it_passes_the_saving_ratio_and_stays_ahead_to_the_lower_one() {
-    let roster = Roster::shipped();
     let ratio = |fixture: &Fixture| {
         let view = fixture.view(0);
-        let survey = surveyed(&view, &roster);
+        let survey = surveyed(&view);
         match survey.enemy() > 0.0 {
             true => survey.army() / survey.enemy(),
             false => 0.0,
@@ -20,7 +17,7 @@ fn an_army_counts_as_ahead_only_once_it_passes_the_saving_ratio_and_stays_ahead_
     fixture.until(|fixture| ratio(fixture) > AHEAD_BEGINS);
     let mut kept = Commitments::default();
     let ahead = fixture.view(0);
-    kept.settle(&surveyed(&ahead, &roster));
+    kept.settle(&surveyed(&ahead));
     assert!(
         kept.army_ahead,
         "it passed the ratio without counting itself ahead"
@@ -31,7 +28,7 @@ fn an_army_counts_as_ahead_only_once_it_passes_the_saving_ratio_and_stays_ahead_
         ratio > AHEAD_ENDS && ratio < AHEAD_BEGINS
     });
     let view = fixture.view(0);
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
     kept.settle(&survey);
     let mut fresh = Commitments::default();
     fresh.settle(&survey);

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::ids::{AsteroidId, EntityId, SeatId};
+use crate::pattern::Slot;
 use crate::post::Post;
 use crate::state::{AssignedDamage, Reach, Ready, Rolls, Shooter, State};
 use crate::time::{Moment, RunningSpan};
@@ -8,7 +9,7 @@ use crate::time::{Moment, RunningSpan};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit {
     pub(crate) shooter: EntityId,
-    pub(crate) place: u8,
+    pub(crate) slot: Slot,
     pub(crate) target: EntityId,
     pub damage: f64,
 }
@@ -48,12 +49,15 @@ impl<'a> Fire<'a> {
                 shots.lapse(&ready);
                 continue;
             };
-            let hitscan = ready.place().hitscan;
+            let Some(hitscan) = shooter.pattern().effect_at(ready.slot()).hitscan() else {
+                shots.lapse(&ready);
+                continue;
+            };
             let roll = &self.rolls[here];
             let Some(aim) = roll.best(
                 Shooter {
                     team: self.state[shooter.seat()].team(),
-                    plating: self.state[shooter.row()].plating,
+                    plating: shooter.pattern().plating(),
                 },
                 roll.body_of(shooter).pos,
                 Reach::WithinMeters(hitscan.range.0),
@@ -63,7 +67,7 @@ impl<'a> Fire<'a> {
                 shots.lapse(&ready);
                 continue;
             };
-            let plating = self.state[self.state.entity(aim.target).row()].plating.0;
+            let plating = self.state.entity(aim.target).pattern().plating().0;
             let dealt = (hitscan.damage.0
                 * (1.0 - hitscan.falloff.0 * aim.distance / hitscan.range.0)
                 - plating)
@@ -71,13 +75,13 @@ impl<'a> Fire<'a> {
             assigned.take(aim.target, dealt);
             shots.hits.push(Hit {
                 shooter: shooter.id(),
-                place: ready.place().in_row,
+                slot: ready.slot(),
                 target: aim.target,
                 damage: dealt,
             });
             shots.ready.push(Ready::new(
                 ready.entity(),
-                ready.place(),
+                ready.slot(),
                 self.next_ready(ready.at(), hitscan.rate.0),
                 Some(aim.target),
             ));
@@ -103,7 +107,7 @@ impl<'a> Fire<'a> {
             a.at()
                 .cmp(&b.at())
                 .then(a.entity().cmp(&b.entity()))
-                .then(a.place().in_row.cmp(&b.place().in_row))
+                .then(a.slot().cmp(&b.slot()))
         });
         due
     }
@@ -125,9 +129,11 @@ impl<'a> Fire<'a> {
         if target.standing() != Some(here) {
             return false;
         }
+        let Some(hitscan) = shooter.pattern().effect_at(ready.slot()).hitscan() else {
+            return false;
+        };
         let roll = &self.rolls[here];
-        roll.body_of(target).pos.distance(roll.body_of(shooter).pos)
-            <= ready.place().hitscan.range.0
+        roll.body_of(target).pos.distance(roll.body_of(shooter).pos) <= hitscan.range.0
     }
 
     fn next_ready(&self, at: Moment, rate: f64) -> Moment {
@@ -140,7 +146,7 @@ impl Shots {
     fn lapse(&mut self, ready: &Ready) {
         if ready.kept().is_some() {
             self.ready
-                .push(Ready::new(ready.entity(), ready.place(), ready.at(), None));
+                .push(Ready::new(ready.entity(), ready.slot(), ready.at(), None));
         }
     }
 

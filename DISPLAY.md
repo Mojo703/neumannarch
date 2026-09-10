@@ -27,7 +27,7 @@ sim has it.
 
 The belt is drawn in 3D, through the engine: asteroids as meshes at their
 bodies, and ships and structures as billboarded textured quads showing
-the row's glyph, one draw each. It changes only as the sim moves a body,
+the pattern's glyph, one draw each. It changes only as the sim moves a body,
 every tick. Every body is drawn at world scale with a floor in pixels: its
 drawn size is a soft maximum of its world size on screen and the floor,
 one sharpness constant, so zooming out shrinks a body until it settles as
@@ -66,15 +66,15 @@ on screen plus a small gap, floored at the size a body is drawn at its
 smallest, so far out, the wheel and the bars draw tight against the
 asteroid and clear of its bodies, and near in, they stand outside its
 zone. A section is one upright strip for
-one row, of the glyph's height, never a box: the row's glyph at its
+one pattern, of the glyph's height, never a box: the pattern's glyph at its
 left, then its counted lines side by side along the strip, each a small
 mark and a numeral in the seat's colour, packed left to right so the
 strip holds no blank. A wide count widens its cell and the strip with
 it; nothing is cut. A line with a count of zero is not drawn. The
 lines, left to right:
 
-- **Present:** a dot mark and the count of the row's units here.
-- **Surplus:** a hollow dot and the count of the row's units here or
+- **Present:** a dot mark and the count of the pattern's units here.
+- **Surplus:** a hollow dot and the count of the pattern's units here or
   arriving above the want. Nothing complete is ever scrapped, so
   lowering a want moves units from the dot to the hollow dot and they
   stay until a shortfall elsewhere wants them.
@@ -90,10 +90,10 @@ lines, left to right:
   A dashed mark when no builder is at the asteroid.
 
 Sections stand in a fixed order down the column, structures first and
-then units, each by cost. A section is drawn only where the row can be
-edited or stands here: the selected asteroid's own sector shows every row, a
-row with nothing here as its hollow glyph alone, dimmed, and every other
-sector shows only rows with a line to draw. When more than one seat
+then units, each by cost. A section is drawn only where the pattern can be
+edited or stands here: the selected asteroid's own sector shows every pattern, a
+pattern with nothing here as its hollow glyph alone, dimmed, and every other
+sector shows only patterns with a line to draw. When more than one seat
 holds a composition at an asteroid, the column stacks one sector per seat,
 seats in seat order from the top, each sector as tall as its own
 sections with a gap between sectors. A sector taller than a stated
@@ -124,7 +124,7 @@ pointer leaves its full extent by a margin of a button's width or more, so
 growing under the pointer never changes which wheel is hovered, an
 overshoot past an edge closes nothing, and nothing jitters. A bare
 asteroid under the pointer carries the seat's own wheel as a selected
-one does, every row hollow, so what an asteroid could hold shows before
+one does, every pattern hollow, so what an asteroid could hold shows before
 it is clicked. A viewer whose seat is out of the match carries no sector
 of its own anywhere and so draws no buttons: an eliminated player
 watches, with pan, zoom, the selection and the pause screen's Leave and
@@ -133,25 +133,25 @@ nothing else.
 The wheels' numerals, the stockpile's and the clock's are the only
 numerals on the HUD. Ownership is colour, and colour is the team's; a
 team's seats share it. Hovering any line shows one short phrase beside
-it naming the row and saying what the line is and why: "Frigate here",
+it naming the pattern and saying what the line is and why: "Frigate here",
 "Frigate building", "Frigate short of metals", "No builder for Frigate",
 "Frigate wanted", "Frigate arriving from Asteroid 3". Hovering a glyph
-shows the row's name alone.
+shows the pattern's name alone.
 
 ## The glyph
 
 A glyph is a solid silhouette in the owner's colour with no outline, in
 the language of strategic icons: three parts in three fixed places, so
 the player learns it once and reads it at every size down to the belt's
-floor. The row names two of the parts and its stats give the rest.
+floor. The pattern names two of the parts and its stats give the rest.
 
-- **The frame** is the row's kind: a triangle for a unit, a square for
+- **The frame** is the pattern's kind: a triangle for a unit, a square for
   a structure, and a shield, a square with a rounded point at its base,
   for a structure that fights.
 - **The role** is one bold pictogram cut out of the frame as a hole, the
-  row's own: a plus for build, the material's icon for extract, two
+  pattern's own: a plus for build, the material's icon for extract, two
   rings for store, a dot for short-range fire, a bar for long-range
-  fire, and the drawings for the roles no shipped row has yet, a scout's
+  fire, and the drawings for the roles no shipped pattern has yet, a scout's
   arrow, a brawler's dot over a belt, an arch for artillery, two bars
   for carry, a plus over a belt for tend, a bowtie for sense, a double
   ring for shield and three bars for refine.
@@ -194,7 +194,7 @@ tip, in place of the spend projection, and a minus button marks the
 refund as the fainter segment past the tip, in place of the income
 projection, so what a want costs is read where it is paid and never as a
 numeral. The cost is the sim's preview: the units the hover would have
-built, times their rows' costs, so what the reserve or a surplus fills
+built, times their patterns' costs, so what the reserve or a surplus fills
 is free and the bar marks nothing. The refund is what the frames the
 hover would cancel have consumed. A cost longer than the fill is clipped
 at the bar's left. A send drag marks neither bar, since it both spends

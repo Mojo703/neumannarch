@@ -1,20 +1,17 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::roster::{Kind, Roster};
+use neumannarch_sim::pattern::{EntityPattern, Kind};
 use neumannarch_sim::state::Held;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, Material, Materials, Posting, RowId};
+use neumannarch_sim::{AsteroidId, Material, Materials, Posting};
 
 use super::ranking::Ranking;
-use super::roles::Roles;
 
 pub const REACH_METERS: f64 = 2_000.0;
 
 pub struct Survey<'a> {
     pub view: &'a View,
-    pub roster: &'a Roster,
-    pub roles: &'a Roles,
-    pub mine: BTreeMap<AsteroidId, BTreeMap<RowId, Held>>,
+    pub mine: BTreeMap<AsteroidId, BTreeMap<EntityPattern, Held>>,
     pub taken: Vec<AsteroidId>,
     pub enemy_asteroids: Vec<AsteroidId>,
     pub threats: BTreeMap<AsteroidId, f64>,
@@ -23,8 +20,8 @@ pub struct Survey<'a> {
 }
 
 impl<'a> Survey<'a> {
-    pub fn of(view: &'a View, roster: &'a Roster, roles: &'a Roles) -> Survey<'a> {
-        let mut mine: BTreeMap<AsteroidId, BTreeMap<RowId, Held>> = BTreeMap::new();
+    pub fn of(view: &'a View) -> Survey<'a> {
+        let mut mine: BTreeMap<AsteroidId, BTreeMap<EntityPattern, Held>> = BTreeMap::new();
         let mut taken: Vec<AsteroidId> = Vec::new();
         let mut enemy_asteroids: Vec<AsteroidId> = Vec::new();
         let mut threats: BTreeMap<AsteroidId, f64> = BTreeMap::new();
@@ -32,7 +29,7 @@ impl<'a> Survey<'a> {
         let mut enemy_range = 0.0f64;
         for (post, composition) in &view.compositions {
             let homed: u32 = composition
-                .rows
+                .patterns
                 .values()
                 .map(|held| held.present + held.arriving)
                 .sum();
@@ -40,28 +37,25 @@ impl<'a> Survey<'a> {
                 taken.push(post.asteroid);
             }
             if post.seat == view.seat {
-                mine.insert(post.asteroid, composition.rows.clone());
+                mine.insert(post.asteroid, composition.patterns.clone());
                 continue;
             }
             if !view.is_enemy(post.seat) {
                 continue;
             }
-            for (row, held) in &composition.rows {
-                let Some(stats) = roster.get(*row) else {
-                    continue;
-                };
+            for (pattern, held) in &composition.patterns {
                 let count = held.present + held.arriving;
                 if count == 0 {
                     continue;
                 }
-                enemy_plating = enemy_plating.max(stats.plating.0);
-                enemy_range = enemy_range.max(stats.max_damage_range());
-                if stats.kind() == Kind::Structure {
+                enemy_plating = enemy_plating.max(pattern.plating().0);
+                enemy_range = enemy_range.max(pattern.max_damage_range());
+                if pattern.kind() == Kind::Structure {
                     enemy_asteroids.push(post.asteroid);
                 }
-                if stats.does_damage() {
+                if pattern.does_damage() {
                     *threats.entry(post.asteroid).or_default() +=
-                        stats.cost.total() * f64::from(count);
+                        pattern.cost().total() * f64::from(count);
                 }
             }
         }
@@ -71,8 +65,6 @@ impl<'a> Survey<'a> {
         enemy_asteroids.dedup();
         Survey {
             view,
-            roster,
-            roles,
             mine,
             taken,
             enemy_asteroids,
@@ -82,12 +74,12 @@ impl<'a> Survey<'a> {
         }
     }
 
-    pub fn posting(&self, asteroid: AsteroidId, row: RowId) -> Posting {
-        Posting::of(asteroid, self.view.seat, row)
+    pub fn posting(&self, asteroid: AsteroidId, pattern: EntityPattern) -> Posting {
+        Posting::of(asteroid, self.view.seat, pattern)
     }
 
-    pub fn count(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row)
+    pub fn count(&self, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
+        self.holding(asteroid, pattern)
             .map_or(0, |held| held.present + held.arriving)
     }
 
@@ -95,7 +87,11 @@ impl<'a> Survey<'a> {
         let mut postings: Vec<Posting> = self
             .mine
             .iter()
-            .flat_map(|(asteroid, rows)| rows.keys().map(|row| self.posting(*asteroid, *row)))
+            .flat_map(|(asteroid, patterns)| {
+                patterns
+                    .keys()
+                    .map(|pattern| self.posting(*asteroid, *pattern))
+            })
             .chain(self.view.plans.keys().copied())
             .collect();
         postings.sort_unstable();
@@ -103,16 +99,18 @@ impl<'a> Survey<'a> {
         postings
     }
 
-    pub fn want(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.view.want_of(self.posting(asteroid, row))
+    pub fn want(&self, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
+        self.view.want_of(self.posting(asteroid, pattern))
     }
 
-    pub fn standing(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row).map_or(0, |held| held.present)
+    pub fn standing(&self, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
+        self.holding(asteroid, pattern)
+            .map_or(0, |held| held.present)
     }
 
-    pub fn arriving(&self, asteroid: AsteroidId, row: RowId) -> u32 {
-        self.holding(asteroid, row).map_or(0, |held| held.arriving)
+    pub fn arriving(&self, asteroid: AsteroidId, pattern: EntityPattern) -> u32 {
+        self.holding(asteroid, pattern)
+            .map_or(0, |held| held.arriving)
     }
 
     pub fn between(&self, from: AsteroidId, to: AsteroidId) -> f64 {
@@ -122,39 +120,27 @@ impl<'a> Survey<'a> {
         }
     }
 
-    pub fn is_structure(&self, row: RowId) -> bool {
-        self.roster
-            .get(row)
-            .is_some_and(|row| row.kind() == Kind::Structure)
-    }
-
-    pub fn builds(&self, row: RowId) -> bool {
-        self.roster
-            .get(row)
-            .is_some_and(|row| row.builds().next().is_some())
-    }
-
     pub fn held(&self) -> Vec<AsteroidId> {
         self.mine
             .keys()
             .copied()
             .filter(|asteroid| {
-                self.rows(*asteroid)
-                    .any(|(row, held)| held.present > 0 && self.is_structure(*row))
+                self.patterns(*asteroid)
+                    .any(|(pattern, held)| held.present > 0 && pattern.kind() == Kind::Structure)
             })
             .collect()
     }
 
     pub fn builders(&self, asteroid: AsteroidId) -> u32 {
-        self.rows(asteroid)
-            .filter(|(row, _)| self.builds(**row))
+        self.patterns(asteroid)
+            .filter(|(pattern, _)| pattern.build_rate() > 0.0)
             .map(|(_, held)| held.present)
             .sum()
     }
 
     pub fn builder_arriving(&self, asteroid: AsteroidId) -> bool {
-        self.rows(asteroid)
-            .any(|(row, held)| self.builds(*row) && held.arriving > 0)
+        self.patterns(asteroid)
+            .any(|(pattern, held)| pattern.build_rate() > 0.0 && held.arriving > 0)
     }
 
     pub fn builds_at(&self, asteroid: AsteroidId) -> bool {
@@ -196,12 +182,8 @@ impl<'a> Survey<'a> {
     }
 
     pub fn build_rate_at(&self, asteroid: AsteroidId) -> f64 {
-        self.rows(asteroid)
-            .filter_map(|(row, held)| {
-                self.roster
-                    .get(*row)
-                    .map(|stats| stats.builds().sum::<f64>() * f64::from(held.present))
-            })
+        self.patterns(asteroid)
+            .map(|(pattern, held)| pattern.build_rate() * f64::from(held.present))
             .sum()
     }
 
@@ -213,11 +195,9 @@ impl<'a> Survey<'a> {
     }
 
     pub fn damage_value(&self, asteroid: AsteroidId) -> f64 {
-        self.rows(asteroid)
-            .filter_map(|(row, held)| {
-                let stats = self.roster.get(*row).filter(|stats| stats.does_damage())?;
-                Some(stats.cost.total() * f64::from(held.present + held.arriving))
-            })
+        self.patterns(asteroid)
+            .filter(|(pattern, _)| pattern.does_damage())
+            .map(|(pattern, held)| pattern.cost().total() * f64::from(held.present + held.arriving))
             .sum()
     }
 
@@ -229,19 +209,21 @@ impl<'a> Survey<'a> {
         self.threats.get(&asteroid).copied().unwrap_or_default()
     }
 
-    pub fn frame_open(&self, asteroid: AsteroidId, row: RowId) -> bool {
+    pub fn frame_open(&self, asteroid: AsteroidId, pattern: EntityPattern) -> bool {
         self.view
-            .plan_of(self.posting(asteroid, row))
+            .plan_of(self.posting(asteroid, pattern))
             .is_some_and(|plan| plan.building.is_some())
     }
 
-    pub fn short_of(&self, asteroid: AsteroidId, rows: &[RowId]) -> bool {
-        rows.iter()
-            .any(|row| self.want(asteroid, *row) > self.count(asteroid, *row))
+    pub fn short_of(&self, asteroid: AsteroidId, patterns: &[EntityPattern]) -> bool {
+        patterns
+            .iter()
+            .any(|pattern| self.want(asteroid, *pattern) > self.count(asteroid, *pattern))
     }
 
     pub fn frame_no_builder_fills(&self, posting: Posting) -> bool {
-        self.frame_open(posting.asteroid(), posting.row()) && !self.builds_at(posting.asteroid())
+        self.frame_open(posting.asteroid(), posting.pattern())
+            && !self.builds_at(posting.asteroid())
     }
 
     pub fn spare_cap_at(&self, asteroid: AsteroidId, material: Material) -> f64 {
@@ -276,11 +258,7 @@ impl<'a> Survey<'a> {
         self.mine
             .values()
             .flatten()
-            .filter_map(|(row, held)| {
-                self.roster
-                    .get(*row)
-                    .map(|stats| stats.cost * f64::from(held.present + held.arriving))
-            })
+            .map(|(pattern, held)| pattern.cost() * f64::from(held.present + held.arriving))
             .fold(Materials::ZERO, |standing, cost| standing + cost)
     }
 
@@ -319,11 +297,11 @@ impl<'a> Survey<'a> {
             .plans
             .iter()
             .filter(|(posting, _)| posting.asteroid() == asteroid)
-            .any(|(posting, plan)| plan.want > self.standing(asteroid, posting.row()))
+            .any(|(posting, plan)| plan.want > self.standing(asteroid, posting.pattern()))
     }
 
     pub fn homed_at(&self, asteroid: AsteroidId) -> u32 {
-        self.rows(asteroid)
+        self.patterns(asteroid)
             .map(|(_, held)| held.present + held.arriving)
             .sum()
     }
@@ -342,11 +320,17 @@ impl<'a> Survey<'a> {
         .or_else(|| self.home())
     }
 
-    fn rows(&self, asteroid: AsteroidId) -> impl Iterator<Item = (&RowId, &Held)> {
-        self.mine.get(&asteroid).into_iter().flatten()
+    fn patterns(&self, asteroid: AsteroidId) -> impl Iterator<Item = (EntityPattern, &Held)> {
+        self.mine
+            .get(&asteroid)
+            .into_iter()
+            .flatten()
+            .map(|(pattern, held)| (*pattern, held))
     }
 
-    fn holding(&self, asteroid: AsteroidId, row: RowId) -> Option<&Held> {
-        self.mine.get(&asteroid).and_then(|rows| rows.get(&row))
+    fn holding(&self, asteroid: AsteroidId, pattern: EntityPattern) -> Option<&Held> {
+        self.mine
+            .get(&asteroid)
+            .and_then(|patterns| patterns.get(&pattern))
     }
 }

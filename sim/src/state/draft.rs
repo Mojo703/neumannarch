@@ -1,6 +1,6 @@
 use crate::TICKS_PER_SECOND;
-use crate::ids::{AsteroidId, RowId, SeatId};
-use crate::roster::Roster;
+use crate::ids::{AsteroidId, SeatId};
+use crate::pattern::EntityPattern;
 use crate::state::hash;
 use crate::state::seat::Seat;
 use crate::time::Tick;
@@ -14,7 +14,7 @@ pub const STAGES_PER_SEAT: usize = 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlacementStage {
     pub seat: SeatId,
-    pub row: RowId,
+    pub pattern: EntityPattern,
     pub placed: Option<AsteroidId>,
 }
 
@@ -27,25 +27,20 @@ pub struct Draft {
 }
 
 impl Draft {
-    pub(crate) fn of(seed: u64, seats: &[Seat], roster: &Roster) -> Draft {
+    pub(crate) fn of(seed: u64, seats: &[Seat]) -> Draft {
         let mut order: Vec<SeatId> = (0..seats.len())
             .filter_map(|at| u8::try_from(at).ok())
             .map(SeatId)
             .collect();
         order.sort_by_key(|seat| (hash::digest(&(seed, seat.0)), seat.0));
-        let builds = |row: &RowId| {
-            roster
-                .get(*row)
-                .map_or(0.0, |row| row.builds().sum::<f64>())
-        };
         let held = |seat: SeatId, round: usize| {
-            let mut rows: Vec<RowId> = seats[usize::from(seat.0)]
+            let mut patterns: Vec<EntityPattern> = seats[usize::from(seat.0)]
                 .reserve()
                 .keys()
                 .copied()
                 .collect();
-            rows.sort_by(|a, b| builds(b).total_cmp(&builds(a)).then(a.cmp(b)));
-            rows.get(round).copied()
+            patterns.sort_by(|a, b| b.build_rate().total_cmp(&a.build_rate()).then(a.cmp(b)));
+            patterns.get(round).copied()
         };
         let mut stages = Vec::new();
         for round in 0..STAGES_PER_SEAT {
@@ -54,10 +49,10 @@ impl Draft {
                     0 => at,
                     _ => order.len() - 1 - at,
                 }];
-                if let Some(row) = held(seat, round) {
+                if let Some(pattern) = held(seat, round) {
                     stages.push(PlacementStage {
                         seat,
-                        row,
+                        pattern,
                         placed: None,
                     });
                 }
@@ -91,8 +86,8 @@ impl Draft {
         self.ended
     }
 
-    pub fn awaits(&self, seat: SeatId, row: RowId) -> Option<bool> {
-        Some(self.waiting(seat, row)? <= self.running)
+    pub fn awaits(&self, seat: SeatId, pattern: EntityPattern) -> Option<bool> {
+        Some(self.waiting(seat, pattern)? <= self.running)
     }
 
     pub fn over(&self, tick: Tick) -> bool {
@@ -100,14 +95,20 @@ impl Draft {
             || (self.running >= self.stages.len() && tick.0 >= self.began.0 + GRACE.0)
     }
 
-    fn waiting(&self, seat: SeatId, row: RowId) -> Option<usize> {
-        self.stages
-            .iter()
-            .position(|stage| stage.seat == seat && stage.row == row && stage.placed.is_none())
+    fn waiting(&self, seat: SeatId, pattern: EntityPattern) -> Option<usize> {
+        self.stages.iter().position(|stage| {
+            stage.seat == seat && stage.pattern == pattern && stage.placed.is_none()
+        })
     }
 
-    pub fn place(&mut self, asteroid: AsteroidId, seat: SeatId, row: RowId, tick: Tick) {
-        let Some(at) = self.waiting(seat, row) else {
+    pub fn place(
+        &mut self,
+        asteroid: AsteroidId,
+        seat: SeatId,
+        pattern: EntityPattern,
+        tick: Tick,
+    ) {
+        let Some(at) = self.waiting(seat, pattern) else {
             return;
         };
         self.stages[at].placed = Some(asteroid);
@@ -131,13 +132,13 @@ impl Draft {
 
 #[cfg(test)]
 mod tests {
+    use crate::pattern::EntityPattern as P;
     use std::collections::BTreeMap;
 
     use super::*;
     use crate::fixture::{CLOCK, World};
     use crate::ids::TeamId;
     use crate::materials::Materials;
-    use crate::roster::STORAGE;
     use crate::state::{Entity, Issued, Rejected};
     use crate::time::Time;
 
@@ -154,14 +155,14 @@ mod tests {
 
     fn placing(world: &World, asteroid: AsteroidId) -> Issued {
         let stage = running(world);
-        Issued::want(stage.seat.0, asteroid, stage.row, 1)
+        Issued::want(stage.seat.0, asteroid, stage.pattern, 1)
     }
 
     #[test]
     fn two_seeds_draw_two_orders_and_one_seed_draws_one() {
         let seats = |seed| {
             let world = drafting(4);
-            let staged = Draft::of(seed, world.state.seats(), world.state.roster());
+            let staged = Draft::of(seed, world.state.seats());
             staged
                 .stages()
                 .iter()
@@ -199,10 +200,10 @@ mod tests {
             first.to_vec(),
             "the seat that went first goes last"
         );
-        let rows: Vec<u8> = stages.iter().map(|stage| stage.row.0 as u8).collect();
+        let patterns: Vec<EntityPattern> = stages.iter().map(|stage| stage.pattern).collect();
         assert_eq!(
-            rows.split_at(first.len()).0.iter().collect::<Vec<&u8>>(),
-            vec![&rows[0]; first.len()],
+            patterns.split_at(first.len()).0.to_vec(),
+            vec![patterns[0]; first.len()],
             "the first round places the same structure for every seat"
         );
     }
@@ -243,19 +244,24 @@ mod tests {
         let now = running(&world);
         assert_ne!(now.seat, missed.seat, "another seat is picking");
 
-        world.tick(&[Issued::want(missed.seat.0, AsteroidId(4), missed.row, 1)]);
+        world.tick(&[Issued::want(
+            missed.seat.0,
+            AsteroidId(4),
+            missed.pattern,
+            1,
+        )]);
 
         assert_eq!(world.state.draft().stages()[0].placed, Some(AsteroidId(4)));
         assert_eq!(running(&world), now, "the running stage is untouched");
         assert_eq!(
-            world.refusal(Issued::want(now.seat.0, AsteroidId(4), now.row, 1)),
+            world.refusal(Issued::want(now.seat.0, AsteroidId(4), now.pattern, 1)),
             Some(Rejected::AsteroidTaken),
             "the asteroid it took is spoken for"
         );
     }
 
     #[test]
-    fn a_want_of_a_reserve_row_at_a_taken_asteroid_is_refused_whatever_its_count() {
+    fn a_want_of_a_reserve_pattern_at_a_taken_asteroid_is_refused_whatever_its_count() {
         let mut world = drafting(2);
         world.tick(&[placing(&world, AsteroidId(0))]);
         let waiting = running(&world);
@@ -265,7 +271,7 @@ mod tests {
                 world.refusal(Issued::want(
                     waiting.seat.0,
                     AsteroidId(0),
-                    waiting.row,
+                    waiting.pattern,
                     count
                 )),
                 Some(Rejected::AsteroidTaken),
@@ -275,22 +281,22 @@ mod tests {
     }
 
     #[test]
-    fn a_seat_whose_reserve_is_spent_wants_one_row_where_something_stands() {
+    fn a_seat_whose_reserve_is_spent_wants_one_pattern_where_something_stands() {
         let stock = Materials::new(1e4, 1e4, 1e4);
-        let mut world = World::stocked(stock, BTreeMap::from([(STORAGE, 2)]));
+        let mut world = World::stocked(stock, BTreeMap::from([(P::Storage, 2)]));
 
-        world.tick(&[Issued::want(0, AsteroidId(0), STORAGE, 2)]);
+        world.tick(&[Issued::want(0, AsteroidId(0), P::Storage, 2)]);
 
         assert_eq!(
-            world.state[SeatId(0)].reserved(STORAGE),
+            world.state[SeatId(0)].reserved(P::Storage),
             0,
             "the want emptied the reserve"
         );
         assert!(world.state.is_taken(AsteroidId(0)));
         assert_eq!(
-            world.refusal(Issued::want(0, AsteroidId(0), STORAGE, 1)),
+            world.refusal(Issued::want(0, AsteroidId(0), P::Storage, 1)),
             None,
-            "a seat holding no reserve of the row wants one like any other"
+            "a seat holding no reserve of the pattern wants one like any other"
         );
     }
 
@@ -300,7 +306,12 @@ mod tests {
         let waiting = world.state.draft().stages()[1];
 
         assert_eq!(
-            world.refusal(Issued::want(waiting.seat.0, AsteroidId(0), waiting.row, 1)),
+            world.refusal(Issued::want(
+                waiting.seat.0,
+                AsteroidId(0),
+                waiting.pattern,
+                1
+            )),
             Some(Rejected::NotYet),
             "its stage has not begun"
         );
@@ -370,20 +381,20 @@ mod tests {
         let stage = running(&world);
         let seat = stage.seat.0;
         world.tick(&[
-            Issued::numbered(seat, 0, AsteroidId(0), STORAGE, 1),
-            Issued::numbered(seat, 1, AsteroidId(0), stage.row, 1),
+            Issued::numbered(seat, 0, AsteroidId(0), P::Storage, 1),
+            Issued::numbered(seat, 1, AsteroidId(0), stage.pattern, 1),
         ]);
         let stock = world.state[SeatId(seat)].stockpile().stock();
 
         world.run(STAGE_SPAN.0 - 1);
 
-        let standing: Vec<RowId> = world.state.entities().map(Entity::row).collect();
+        let standing: Vec<EntityPattern> = world.state.entities().map(Entity::pattern).collect();
         assert_eq!(
             standing,
-            vec![stage.row],
-            "the reserve row stands, complete"
+            vec![stage.pattern],
+            "the reserve pattern stands, complete"
         );
-        assert_eq!(world.state[SeatId(seat)].reserved(stage.row), 0);
+        assert_eq!(world.state[SeatId(seat)].reserved(stage.pattern), 0);
         assert!(world.state.is_taken(AsteroidId(0)));
         assert_eq!(world.state.frames().len(), 0, "nothing builds");
         assert_eq!(
@@ -396,7 +407,7 @@ mod tests {
             seat,
             2,
             AsteroidId(1),
-            running(&world).row,
+            running(&world).pattern,
             1,
         )]);
 

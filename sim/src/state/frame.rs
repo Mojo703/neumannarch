@@ -1,6 +1,6 @@
 use crate::TICKS_PER_SECOND;
-use crate::ids::RowId;
 use crate::materials::Material;
+use crate::pattern::EntityPattern;
 use crate::post::Post;
 use crate::real::Real;
 use crate::time::Time;
@@ -8,17 +8,17 @@ use crate::time::Time;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Frame {
     post: Post,
-    row: RowId,
+    pattern: EntityPattern,
     progress: Real,
     fed: Time,
     short: Option<Material>,
 }
 
 impl Frame {
-    pub fn new(post: Post, row: RowId, progress: f64, at: Time) -> Frame {
+    pub fn new(post: Post, pattern: EntityPattern, progress: f64, at: Time) -> Frame {
         Frame {
             post,
-            row,
+            pattern,
             progress: Real(progress),
             fed: at,
             short: None,
@@ -34,15 +34,16 @@ impl Frame {
         self.post
     }
 
-    pub(crate) fn row(&self) -> RowId {
-        self.row
+    pub(crate) fn pattern(&self) -> EntityPattern {
+        self.pattern
     }
 
     pub(crate) fn progress(&self) -> f64 {
         self.progress.0
     }
 
-    pub(crate) fn fraction(&self, cost: f64) -> f64 {
+    pub(crate) fn fraction(&self) -> f64 {
+        let cost = self.pattern.cost().total();
         match cost > 0.0 {
             true => (self.progress.0 / cost).clamp(0.0, 1.0),
             false => 1.0,

@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Pos2, Rect};
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::State;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, Material, Posting, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, Material, Posting, SeatId};
 
 use crate::display::bars::Bars;
 use crate::display::ease::{self, Span};
@@ -30,16 +30,16 @@ pub struct Aim<'a> {
 }
 
 impl Aim<'_> {
-    fn buttons_at(&self, asteroid: AsteroidId, roster: &Roster) -> Buttons {
+    fn buttons_at(&self, asteroid: AsteroidId) -> Buttons {
         let mut wants = BTreeMap::new();
         let mut refusals = BTreeMap::new();
-        for (row, _) in roster.iter() {
-            let posting = Posting::of(asteroid, self.viewer, row);
+        for pattern in EntityPattern::EVERY {
+            let posting = Posting::of(asteroid, self.viewer, pattern);
             let want = self.view.want_of(posting);
             let refused = |count: u32| self.state.admits_want(posting, count).err();
-            wants.insert(row, want);
+            wants.insert(pattern, want);
             refusals.insert(
-                row,
+                pattern,
                 ButtonRefusals {
                     adding: refused(WheelButton::Plus(self.step).wanted(want)),
                     removing: refused(WheelButton::Minus(self.step).wanted(want)),
@@ -143,8 +143,8 @@ impl Ease for Motion {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Spoken {
-    Row {
-        row: RowId,
+    Pattern {
+        pattern: EntityPattern,
         shown: Option<Shown>,
     },
     Bar {
@@ -158,10 +158,10 @@ pub enum Spoken {
 }
 
 impl Spoken {
-    pub fn phrase(&self, roster: &Roster) -> String {
+    pub fn phrase(&self) -> String {
         match self {
-            Spoken::Row { row, shown } => {
-                let name = titled(roster[*row].name);
+            Spoken::Pattern { pattern, shown } => {
+                let name = titled(pattern.name());
                 match shown {
                     Some(shown) => shown.entry.phrase(&name),
                     None => name,
@@ -189,14 +189,8 @@ pub struct Wheels {
 }
 
 impl Wheels {
-    pub fn over(
-        scene: &Scene,
-        roster: &Roster,
-        viewport: &Viewport,
-        aim: &Aim<'_>,
-        ease: &mut impl Ease,
-    ) -> Wheels {
-        let footprints = footprints(scene, roster, viewport, aim.viewer);
+    pub fn over(scene: &Scene, viewport: &Viewport, aim: &Aim<'_>, ease: &mut impl Ease) -> Wheels {
+        let footprints = footprints(scene, viewport, aim.viewer);
         let hovered = hovered(&footprints, aim);
         let asked =
             |asteroid: AsteroidId| Some(asteroid) == hovered || Some(asteroid) == scene.selection;
@@ -217,8 +211,8 @@ impl Wheels {
             .iter()
             .filter_map(|placed| {
                 let view = scene.wheel_of(placed.asteroid)?;
-                let buttons = aim.buttons_at(placed.asteroid, roster);
-                let wheel = Wheel::over(*placed, view, roster, aim.viewer, Some(buttons));
+                let buttons = aim.buttons_at(placed.asteroid);
+                let wheel = Wheel::over(*placed, view, aim.viewer, Some(buttons));
                 wheel.draws().then_some(wheel)
             })
             .collect();
@@ -302,12 +296,7 @@ fn button_of(gesture: Option<&WheelGesture>, asteroid: AsteroidId) -> Option<But
     }
 }
 
-fn footprints(
-    scene: &Scene,
-    roster: &Roster,
-    viewport: &Viewport,
-    viewer: SeatId,
-) -> Vec<Footprint> {
+fn footprints(scene: &Scene, viewport: &Viewport, viewer: SeatId) -> Vec<Footprint> {
     let asteroids: BTreeMap<AsteroidId, (Pos2, f32)> = scene
         .asteroids
         .iter()
@@ -332,7 +321,6 @@ fn footprints(
                 centre,
                 stand_off,
                 wheel,
-                roster,
                 viewer,
             ))
         })
@@ -389,7 +377,6 @@ mod tests {
 
     use std::sync::LazyLock;
 
-    use neumannarch_sim::roster::FRIGATE;
     use neumannarch_sim::state::view::View;
     use neumannarch_sim::state::{Command, Rejected};
     use neumannarch_sim::step::fire::Shots;
@@ -398,7 +385,8 @@ mod tests {
     use super::*;
     use crate::display::camera::BeltCamera;
     use crate::display::local::Local;
-    use crate::display::scene::{AsteroidView, Entry, RowView, SectorView, WheelView};
+    use crate::display::scene::{AsteroidView, Entry, PatternView, SectorView, WheelView};
+    use neumannarch_sim::pattern::EntityPattern as P;
 
     const A: AsteroidId = AsteroidId(0);
 
@@ -413,8 +401,8 @@ mod tests {
             asteroid,
             sectors: vec![SectorView {
                 seat,
-                rows: vec![RowView {
-                    row: FRIGATE,
+                patterns: vec![PatternView {
+                    pattern: P::Frigate,
                     entries: vec![Shown {
                         entry: Entry::Present(1),
                         previewed: false,
@@ -430,18 +418,10 @@ mod tests {
     }
 
     fn footprints(apart: f32) -> Vec<Footprint> {
-        let roster = Roster::shipped();
         [(A, egui::pos2(0.0, 0.0)), (B, egui::pos2(apart, 0.0))]
             .into_iter()
             .map(|(asteroid, centre)| {
-                Footprint::of(
-                    asteroid,
-                    centre,
-                    STAND_OFF,
-                    &view(asteroid),
-                    &roster,
-                    SeatId(0),
-                )
+                Footprint::of(asteroid, centre, STAND_OFF, &view(asteroid), SeatId(0))
             })
             .collect()
     }
@@ -548,7 +528,7 @@ mod tests {
             session.state().tick(),
             Command::Want {
                 asteroid: A,
-                row: first.row,
+                pattern: first.pattern,
                 count: 1,
             },
         );
@@ -568,19 +548,18 @@ mod tests {
             view: &view,
             state: session.state(),
         };
-        let roster = session.state().roster();
-
-        let taken = aim.buttons_at(A, roster);
-        let free = aim.buttons_at(B, roster);
+        let taken = aim.buttons_at(A);
+        let free = aim.buttons_at(B);
 
         assert_eq!(
-            taken.refusals[&next.row].adding,
+            taken.refusals[&next.pattern].adding,
             Some(Rejected::AsteroidTaken),
             "a pick at a taken asteroid is refused"
         );
-        assert_eq!(free.refusals[&next.row].adding, None);
+        assert_eq!(free.refusals[&next.pattern].adding, None);
         assert_eq!(
-            taken.refusals[&FRIGATE].adding, None,
+            taken.refusals[&P::Frigate].adding,
+            None,
             "a frigate is no pick and stands at a taken asteroid"
         );
     }
@@ -591,7 +570,6 @@ mod tests {
         assert_eq!(scaled(&laid, A), Some(1.0));
         assert_eq!(scaled(&laid, B), Some(1.0));
 
-        let roster = Roster::shipped();
         let viewport = viewport();
         let scene = |selection| scene(selection, vec![view(A), view(B)]);
         let centre = |asteroid: usize| {
@@ -605,7 +583,6 @@ mod tests {
         motion.begin(fast);
         let held = Wheels::over(
             &scene(Some(B)),
-            &roster,
             &viewport,
             &aim(centre(1), None),
             &mut motion,
@@ -619,7 +596,6 @@ mod tests {
         motion.begin(fast / 2.0);
         let turning = Wheels::over(
             &scene(Some(A)),
-            &roster,
             &viewport,
             &aim(centre(0), None),
             &mut motion,
@@ -637,13 +613,13 @@ mod tests {
         );
         let plus = |asteroid| {
             wheel(asteroid)
-                .button(FRIGATE, WheelButton::Plus(1))
+                .button(P::Frigate, WheelButton::Plus(1))
                 .expect("its buttons are drawn")
         };
         assert_eq!(
             wheel(A).button_at(plus(A)),
             Some(ButtonAt {
-                posting: Posting::of(A, SeatId(0), FRIGATE),
+                posting: Posting::of(A, SeatId(0), P::Frigate),
                 button: WheelButton::Plus(1),
             }),
             "the selected wheel takes the click"
@@ -754,23 +730,14 @@ mod tests {
 
     #[test]
     fn a_narrow_wheel_under_the_pointer_is_hovered_though_a_wider_one_reaches_it() {
-        let roster = Roster::shipped();
         let apart = footprints(0.0)[0].rect().width() / 2.0;
         let footprints = vec![
-            Footprint::of(
-                A,
-                egui::pos2(0.0, 0.0),
-                STAND_OFF,
-                &view(A),
-                &roster,
-                SeatId(0),
-            ),
+            Footprint::of(A, egui::pos2(0.0, 0.0), STAND_OFF, &view(A), SeatId(0)),
             Footprint::of(
                 B,
                 egui::pos2(apart, 0.0),
                 STAND_OFF,
                 &view_of(B, SeatId(1)),
-                &roster,
                 SeatId(0),
             ),
         ];

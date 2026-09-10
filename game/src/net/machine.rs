@@ -30,7 +30,7 @@ impl Machine {
         let (setup, seating) = started.parts();
         let session = Session::new(setup, Retention::shipped(), crew.seats())
             .expect("a crew's seats are the seats of the setup it was frozen with");
-        let controllers = Controller::of(&seating, crew, session.state().roster());
+        let controllers = Controller::of(&seating, crew);
         let peers = seating.peers_of(crew.player());
         transport.report(Tick::ZERO, session.state().hash());
         Machine {

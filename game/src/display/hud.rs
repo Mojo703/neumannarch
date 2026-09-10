@@ -84,7 +84,7 @@ pub fn paint(scene: &Scene, viewport: &Viewport, painter: &egui::Painter) {
     }
 
     for ship in &scene.entities {
-        let Some(range) = ship.range else {
+        let Some(range) = ship.reach() else {
             continue;
         };
         let alpha = resting_alpha(scene, viewport, ship.pos);
@@ -185,7 +185,7 @@ fn paint_yield_mark(
 }
 
 fn stand_off(zone_points: f32) -> f32 {
-    zoom::floored(zone_points + wheel::ROW_GAP, YIELD_MARK_FLOOR_POINTS)
+    zoom::floored(zone_points + wheel::SECTION_GAP, YIELD_MARK_FLOOR_POINTS)
 }
 
 fn sector(centre: Pos2, from: f32, inner: f32, outer: f32, colour: Color32) -> Shape {
@@ -193,8 +193,8 @@ fn sector(centre: Pos2, from: f32, inner: f32, outer: f32, colour: Color32) -> S
         let angle = from + SECTOR_RADIANS * step as f32 / YIELD_MARK_SEGMENTS as f32;
         let (sin, cos) = angle.sin_cos();
         let aside = match step {
-            0 => wheel::ROW_GAP / 2.0,
-            YIELD_MARK_SEGMENTS => -wheel::ROW_GAP / 2.0,
+            0 => wheel::SECTION_GAP / 2.0,
+            YIELD_MARK_SEGMENTS => -wheel::SECTION_GAP / 2.0,
             _ => 0.0,
         };
         centre + egui::vec2(radius * cos - aside * sin, radius * sin + aside * cos)
@@ -215,7 +215,7 @@ fn paint_fight_bars(
 ) {
     let length = wheel::BAR_LENGTH;
     for (at, arc) in arcs.iter().enumerate() {
-        let top = -length / 2.0 + (length + wheel::ROW_GAP) * at as f32;
+        let top = -length / 2.0 + (length + wheel::SECTION_GAP) * at as f32;
         let along = |fraction: f32| top + length * fraction.clamp(0.0, 1.0);
         let segment = |from: f32, to: f32, colour: Color32| {
             (to > from).then(|| {

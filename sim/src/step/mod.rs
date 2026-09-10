@@ -83,14 +83,14 @@ fn move_bodies(next: &mut State, moved: &Moved) {
 
 fn fulfil(next: &mut State, snap: &State, filled: &Assigned, closing: &mut Vec<usize>) {
     for posting in filled.placements.iter() {
-        next.place_from_reserve(posting.post(), posting.row(), snap.ran());
+        next.place_from_reserve(posting.post(), posting.pattern(), snap.ran());
     }
     next.re_home(&filled.sent_to);
     for opening in &filled.openings {
         next.add_frame(opening.clone());
     }
     for cancellation in &filled.cancellations {
-        next[cancellation.posting.seat()].refund(cancellation.refund(snap));
+        next[cancellation.posting.seat()].refund(cancellation.refund());
         closing.push(cancellation.frame);
     }
 }
@@ -108,12 +108,12 @@ fn build(next: &mut State, snap: &State, work: &Progress, closing: &mut Vec<usiz
             }
         }
         if spend.completed {
-            next.spawn_at(frame.post(), frame.row(), snap.ran());
+            next.spawn_at(frame.post(), frame.pattern(), snap.ran());
             closing.push(spend.frame);
         }
     }
     for repair in &work.repairs {
-        next.heal(repair.entity, repair.hp);
+        next.entities.heal(repair.entity, repair.hp);
     }
 }
 
@@ -122,7 +122,7 @@ fn resolve(next: &mut State, shots: &Shots) {
         next.entities.hurt(target, damage);
     }
     for ready in &shots.ready {
-        next.set_ready(ready.entity(), ready.place(), ready.at(), ready.kept());
+        next.set_ready(ready.entity(), ready.slot(), ready.at(), ready.kept());
     }
 }
 
@@ -170,29 +170,21 @@ mod tests {
     use super::*;
     use crate::belt::Belt;
     use crate::fixture::World;
-    use crate::ids::{AsteroidId, EntityId, RowId, TeamId};
+    use crate::ids::{AsteroidId, EntityId, TeamId};
     use crate::materials::Material;
     use crate::orbit::body::{Body, Gravity};
+    use crate::pattern::EntityPattern as P;
     use crate::post::Post;
     use crate::posting::Posting;
-    use crate::roster::Roster;
-    use crate::roster::{
-        CONSTRUCTOR, FRIGATE, LANCER, METALS_EXTRACTOR, RAIDER, SHIPYARD, STORAGE,
-    };
     use crate::state::{Entity, MAX_WANT, Ready, Seat};
     use crate::time::Time;
     use crate::transfer::Transfer;
     use crate::{Materials, TICKS_PER_SECOND};
 
+    const RICH: Materials = Materials::new(1e4, 1e4, 1e4);
+
     fn asteroid(at: u32) -> AsteroidId {
         AsteroidId(at)
-    }
-
-    fn stocked(roster: Roster, reserve: BTreeMap<RowId, u32>) -> World {
-        World::crewed(
-            roster,
-            vec![Seat::new(TeamId(0), Materials::new(1e4, 1e4, 1e4), reserve)],
-        )
     }
 
     #[test]
@@ -200,12 +192,12 @@ mod tests {
         let mut world = World::started(&[TeamId(0)]);
         let seconds = TICKS_PER_SECOND as u64;
 
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
 
-        assert_eq!(world.count(0, asteroid(0), SHIPYARD), 1);
+        assert_eq!(world.count(0, asteroid(0), P::Shipyard), 1);
         let state = &world.state;
-        assert_eq!(state[SeatId(0)].reserved(SHIPYARD), 0);
-        assert_eq!(state[SeatId(0)].reserved(CONSTRUCTOR), 1);
+        assert_eq!(state[SeatId(0)].reserved(P::Shipyard), 0);
+        assert_eq!(state[SeatId(0)].reserved(P::Constructor), 1);
         assert_eq!(state.frames().len(), 0, "the reserve needs no frame");
         let shipyard = state.entities().next().expect("the shipyard");
         assert_eq!(shipyard.steered(), None);
@@ -215,20 +207,20 @@ mod tests {
         let seat = &world.state[SeatId(0)];
         assert_eq!(
             seat.stockpile().capacity(),
-            seat.base_capacity() + world.state[SHIPYARD].capacity
+            seat.base_capacity() + P::Shipyard.capacity()
         );
     }
 
     #[test]
     fn a_frame_that_spends_nothing_for_a_second_names_the_material_it_wants() {
         let a_second_in = |stock| {
-            let mut world = World::stocked(stock, BTreeMap::from([(SHIPYARD, 1)]));
-            world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
-            world.tick(&[Issued::want(0, asteroid(0), LANCER, 1)]);
+            let mut world = World::stocked(stock, BTreeMap::from([(P::Shipyard, 1)]));
+            world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
+            world.tick(&[Issued::want(0, asteroid(0), P::Lancer, 1)]);
             world.run(TICKS_PER_SECOND as u64 + 1);
             world
                 .view(0)
-                .plan_of(Posting::of(asteroid(0), SeatId(0), LANCER))
+                .plan_of(Posting::of(asteroid(0), SeatId(0), P::Lancer))
                 .and_then(|plan| plan.building)
                 .expect("the lancer's frame is open")
         };
@@ -245,20 +237,20 @@ mod tests {
     #[test]
     fn a_shortfall_with_a_builder_opens_a_frame_and_completes_it() {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
         let stock = world.state[SeatId(0)].stockpile().stock();
 
-        world.tick(&[Issued::want(0, asteroid(0), STORAGE, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Storage, 1)]);
         assert_eq!(world.state.frames().len(), 1);
         world.run(10);
         assert_eq!(world.state.frames().len(), 1);
         assert!(world.state.frames()[0].progress() > 0.0);
 
-        let cost = world.state[STORAGE].cost;
+        let cost = P::Storage.cost();
         let seconds = cost.total() / 15.0;
         world.run((seconds * f64::from(TICKS_PER_SECOND)).ceil() as u64 + 2);
 
-        assert_eq!(world.count(0, asteroid(0), STORAGE), 1);
+        assert_eq!(world.count(0, asteroid(0), P::Storage), 1);
         assert_eq!(world.state.frames().len(), 0);
         let spent = stock - world.state[SeatId(0)].stockpile().stock();
         assert!(
@@ -270,11 +262,11 @@ mod tests {
     #[test]
     fn a_builder_reaches_the_frames_at_its_own_asteroid_and_no_others() {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), STORAGE, 1),
-            Issued::numbered(0, 1, asteroid(5), STORAGE, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Storage, 1),
+            Issued::numbered(0, 1, asteroid(5), P::Storage, 1),
         ]);
         world.run(u64::from(TICKS_PER_SECOND));
 
@@ -291,8 +283,8 @@ mod tests {
 
     fn a_shipyard_and_a_raider_hurt_by(damage: f64) -> (World, EntityId) {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
-        let raider = world.hold(0, RAIDER, asteroid(0), 5.0);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
+        let raider = world.hold(0, P::Raider, asteroid(0), 5.0);
         world.state.entities.hurt(raider, damage);
         (world, raider)
     }
@@ -306,7 +298,7 @@ mod tests {
 
         assert_eq!(
             world.state.entity(hurt).hp(),
-            world.state[RAIDER].hp.0,
+            P::Raider.hp().0,
             "two seconds of a shipyard's effort with nothing to build left the raider hurt"
         );
     }
@@ -315,8 +307,8 @@ mod tests {
     fn a_shortfall_takes_the_builders_effort_before_a_repair_does() {
         let (mut world, hurt) = a_shipyard_and_a_raider_hurt_by(20.0);
 
-        world.tick(&[Issued::want(0, asteroid(0), STORAGE, 1)]);
-        assert_eq!(world.frames(0, asteroid(0), STORAGE), 1);
+        world.tick(&[Issued::want(0, asteroid(0), P::Storage, 1)]);
+        assert_eq!(world.frames(0, asteroid(0), P::Storage), 1);
         let wounded = world.state.entity(hurt).hp();
 
         world.run(u64::from(TICKS_PER_SECOND) / 2);
@@ -333,25 +325,25 @@ mod tests {
     }
 
     #[test]
-    fn a_repair_never_heals_a_unit_past_its_rows_hit_points() {
+    fn a_repair_never_heals_a_unit_past_its_patterns_hit_points() {
         let (mut world, hurt) = a_shipyard_and_a_raider_hurt_by(0.05);
 
         world.run(u64::from(TICKS_PER_SECOND));
 
         assert_eq!(
             world.state.entity(hurt).hp(),
-            world.state[RAIDER].hp.0,
-            "a second of effort on a scratch carried the raider past its row's hit points"
+            P::Raider.hp().0,
+            "a second of effort on a scratch carried the raider past its pattern's hit points"
         );
     }
 
     #[test]
     fn a_builder_repairs_a_teammates_structure_and_never_an_enemys() {
         let mut world = World::started(&[TeamId(0), TeamId(0), TeamId(1)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
-        let teammates = world.fix(1, STORAGE, asteroid(0));
-        let enemys = world.fix(2, STORAGE, asteroid(0));
-        let whole = world.state[STORAGE].hp.0;
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
+        let teammates = world.fix(1, P::Storage, asteroid(0));
+        let enemys = world.fix(2, P::Storage, asteroid(0));
+        let whole = P::Storage.hp().0;
         world.state.entities.hurt(teammates, 20.0);
         world.state.entities.hurt(enemys, 20.0);
 
@@ -372,12 +364,12 @@ mod tests {
     #[test]
     fn a_builder_repairs_at_its_own_asteroid_and_nowhere_else() {
         let (mut world, near) = a_shipyard_and_a_raider_hurt_by(20.0);
-        let far = world.hold(0, RAIDER, asteroid(5), 5.0);
+        let far = world.hold(0, P::Raider, asteroid(5), 5.0);
         world.state.entities.hurt(far, 20.0);
 
         world.run(2 * u64::from(TICKS_PER_SECOND));
 
-        assert_eq!(world.state.entity(near).hp(), world.state[RAIDER].hp.0);
+        assert_eq!(world.state.entity(near).hp(), P::Raider.hp().0);
         assert_eq!(
             world.state.entity(far).hp(),
             20.0,
@@ -386,27 +378,27 @@ mod tests {
     }
 
     #[test]
-    fn a_surplus_of_two_rows_fills_the_nearest_shortfall_by_one_send() {
-        let mut world = stocked(Roster::shipped(), BTreeMap::from([(STORAGE, 1)]));
-        world.hold(0, CONSTRUCTOR, asteroid(0), 5.0);
-        world.hold(0, RAIDER, asteroid(0), 6.0);
-        assert_eq!(world.count(0, asteroid(0), CONSTRUCTOR), 1);
-        assert_eq!(world.count(0, asteroid(0), RAIDER), 1);
+    fn a_surplus_of_two_patterns_fills_the_nearest_shortfall_by_one_send() {
+        let mut world = World::stocked(RICH, BTreeMap::from([(P::Storage, 1)]));
+        world.hold(0, P::Constructor, asteroid(0), 5.0);
+        world.hold(0, P::Raider, asteroid(0), 6.0);
+        assert_eq!(world.count(0, asteroid(0), P::Constructor), 1);
+        assert_eq!(world.count(0, asteroid(0), P::Raider), 1);
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(0), RAIDER, 0),
-            Issued::numbered(0, 2, asteroid(1), CONSTRUCTOR, 1),
-            Issued::numbered(0, 3, asteroid(1), RAIDER, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Constructor, 0),
+            Issued::numbered(0, 1, asteroid(0), P::Raider, 0),
+            Issued::numbered(0, 2, asteroid(1), P::Constructor, 1),
+            Issued::numbered(0, 3, asteroid(1), P::Raider, 1),
         ]);
 
         assert_eq!(
-            world.count(0, asteroid(1), CONSTRUCTOR),
+            world.count(0, asteroid(1), P::Constructor),
             1,
             "it counts home"
         );
-        assert_eq!(world.count(0, asteroid(1), RAIDER), 1, "it counts home");
-        assert_eq!(world.count(0, asteroid(0), CONSTRUCTOR), 0);
+        assert_eq!(world.count(0, asteroid(1), P::Raider), 1, "it counts home");
+        assert_eq!(world.count(0, asteroid(0), P::Constructor), 0);
         assert_eq!(world.state.frames().len(), 0, "a send fills the shortfall");
         assert!(
             world.state.entities().all(Entity::is_flying),
@@ -416,19 +408,19 @@ mod tests {
 
     #[test]
     fn a_re_homed_unit_flies_from_that_tick_and_lands_in_its_destinations_zone() {
-        let mut world = stocked(Roster::shipped(), BTreeMap::from([(CONSTRUCTOR, 1)]));
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
+        let mut world = World::stocked(RICH, BTreeMap::from([(P::Constructor, 1)]));
+        world.tick(&[Issued::want(0, asteroid(0), P::Constructor, 1)]);
         let unit = world.state.entities().next().expect("the constructor").id();
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Constructor, 0),
+            Issued::numbered(0, 1, asteroid(1), P::Constructor, 1),
         ]);
 
         assert!(world.state.entity(unit).is_flying(), "it is still home");
         assert_eq!(world.state.entity(unit).home(), asteroid(1));
         assert_eq!(
-            world.count(0, asteroid(1), CONSTRUCTOR),
+            world.count(0, asteroid(1), P::Constructor),
             1,
             "it counts toward its destination from the tick it is re-homed"
         );
@@ -457,8 +449,8 @@ mod tests {
     #[test]
     fn a_surplus_unit_with_no_shortfall_is_never_scrapped() {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
-        let unit = world.hold(0, CONSTRUCTOR, asteroid(0), 5.0);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
+        let unit = world.hold(0, P::Constructor, asteroid(0), 5.0);
         let stock = world.state[SeatId(0)].stockpile().stock();
 
         world.run(8 * u64::from(TICKS_PER_SECOND));
@@ -470,32 +462,32 @@ mod tests {
             asteroid(0),
             "it left the asteroid it stands on"
         );
-        assert_eq!(state.entity(unit).hp(), state[CONSTRUCTOR].hp.0);
+        assert_eq!(state.entity(unit).hp(), P::Constructor.hp().0);
         let gained = state[SeatId(0)].stockpile().stock() - stock;
         assert!(
-            gained.total() < state[CONSTRUCTOR].cost.total(),
+            gained.total() < P::Constructor.cost().total(),
             "a whole cost came back: {gained:?}"
         );
     }
 
-    fn a_unit_and_a_frame_of_one_row_at_one_asteroid() -> (World, EntityId) {
-        let mut world = stocked(Roster::shipped(), BTreeMap::new());
-        world.fix(0, SHIPYARD, asteroid(0));
-        let unit = world.hold(0, CONSTRUCTOR, asteroid(0), 5.0);
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 2)]);
+    fn a_unit_and_a_frame_of_one_pattern_at_one_asteroid() -> (World, EntityId) {
+        let mut world = World::stocked(RICH, BTreeMap::new());
+        world.fix(0, P::Shipyard, asteroid(0));
+        let unit = world.hold(0, P::Constructor, asteroid(0), 5.0);
+        world.tick(&[Issued::want(0, asteroid(0), P::Constructor, 2)]);
         world.run(20);
-        assert_eq!(world.frames(0, asteroid(0), CONSTRUCTOR), 1);
+        assert_eq!(world.frames(0, asteroid(0), P::Constructor), 1);
         (world, unit)
     }
 
     #[test]
     fn lowering_a_want_a_shortfall_elsewhere_wants_sends_the_unit_and_keeps_the_frame() {
-        let (mut world, unit) = a_unit_and_a_frame_of_one_row_at_one_asteroid();
+        let (mut world, unit) = a_unit_and_a_frame_of_one_pattern_at_one_asteroid();
         let progress = world.progress(0, asteroid(0));
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), CONSTRUCTOR, 1),
-            Issued::numbered(0, 1, asteroid(1), CONSTRUCTOR, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Constructor, 1),
+            Issued::numbered(0, 1, asteroid(1), P::Constructor, 1),
         ]);
 
         assert_eq!(
@@ -503,56 +495,72 @@ mod tests {
             asteroid(1),
             "the unit stayed home"
         );
-        let kept = world.frames(0, asteroid(0), CONSTRUCTOR);
+        let kept = world.frames(0, asteroid(0), P::Constructor);
         assert_eq!(kept, 1, "the send cancelled a frame the want covers");
         let building = world.progress(0, asteroid(0)) > progress;
         assert!(building, "the frame stopped building");
-        let opened = world.frames(0, asteroid(1), CONSTRUCTOR);
+        let opened = world.frames(0, asteroid(1), P::Constructor);
         assert_eq!(opened, 0, "the send opened a frame it fills itself");
     }
 
     #[test]
     fn lowering_a_want_nothing_else_wants_cancels_the_frame_and_keeps_the_unit() {
-        let (mut world, unit) = a_unit_and_a_frame_of_one_row_at_one_asteroid();
+        let (mut world, unit) = a_unit_and_a_frame_of_one_pattern_at_one_asteroid();
 
-        world.tick(&[Issued::want(0, asteroid(0), CONSTRUCTOR, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Constructor, 1)]);
 
         assert_eq!(
             world.state.entity(unit).home(),
             asteroid(0),
             "the unit left"
         );
-        let left = world.frames(0, asteroid(0), CONSTRUCTOR);
+        let left = world.frames(0, asteroid(0), P::Constructor);
         assert_eq!(left, 0, "a frame nothing wants kept building");
     }
 
     #[test]
-    fn a_post_opens_one_frame_of_a_row_at_a_time_and_rows_build_in_parallel() {
+    fn a_post_opens_one_frame_of_a_pattern_at_a_time_and_patterns_build_in_parallel() {
         let mut world = World::started(&[TeamId(0)]);
-        world.tick(&[Issued::want(0, asteroid(0), SHIPYARD, 1)]);
+        world.tick(&[Issued::want(0, asteroid(0), P::Shipyard, 1)]);
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), STORAGE, 3),
-            Issued::numbered(0, 1, asteroid(0), METALS_EXTRACTOR, 2),
+            Issued::numbered(0, 0, asteroid(0), P::Storage, 3),
+            Issued::numbered(0, 1, asteroid(0), P::Extractor(Material::Metals), 2),
         ]);
 
-        let open = |world: &World, row| world.frames(0, asteroid(0), row);
-        assert_eq!(open(&world, STORAGE), 1, "a shortfall of three opened more");
-        assert_eq!(open(&world, METALS_EXTRACTOR), 1, "rows build in parallel");
+        let open = |world: &World, pattern| world.frames(0, asteroid(0), pattern);
+        assert_eq!(
+            open(&world, P::Storage),
+            1,
+            "a shortfall of three opened more"
+        );
+        assert_eq!(
+            open(&world, P::Extractor(Material::Metals)),
+            1,
+            "patterns build in parallel"
+        );
 
         for _ in 0..30 * u64::from(TICKS_PER_SECOND) {
-            if world.count(0, asteroid(0), STORAGE) == 1 {
+            if world.count(0, asteroid(0), P::Storage) == 1 {
                 break;
             }
             world.tick(&[]);
         }
-        assert_eq!(world.count(0, asteroid(0), STORAGE), 1, "none completed");
-        assert_eq!(open(&world, STORAGE), 0, "its frame closed on completion");
+        assert_eq!(world.count(0, asteroid(0), P::Storage), 1, "none completed");
+        assert_eq!(
+            open(&world, P::Storage),
+            0,
+            "its frame closed on completion"
+        );
 
         world.tick(&[]);
 
-        assert_eq!(open(&world, STORAGE), 1, "the next frame opened");
-        assert_eq!(world.count(0, asteroid(0), STORAGE), 1, "and only the next");
+        assert_eq!(open(&world, P::Storage), 1, "the next frame opened");
+        assert_eq!(
+            world.count(0, asteroid(0), P::Storage),
+            1,
+            "and only the next"
+        );
     }
 
     #[test]
@@ -560,14 +568,14 @@ mod tests {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
 
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), SHIPYARD, 1),
-            Issued::numbered(0, 1, asteroid(0), FRIGATE, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Shipyard, 1),
+            Issued::numbered(0, 1, asteroid(0), P::Frigate, 1),
         ]);
-        let prey = world.fix(1, STORAGE, asteroid(0));
+        let prey = world.fix(1, P::Storage, asteroid(0));
 
-        let building = world.state[FRIGATE].cost.total() / 15.0;
+        let building = P::Frigate.cost().total() / 15.0;
         world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
-        assert_eq!(world.count(0, asteroid(0), FRIGATE), 1);
+        assert_eq!(world.count(0, asteroid(0), P::Frigate), 1);
 
         let interval = u64::from(TICKS_PER_SECOND) / 2;
         let hit = world
@@ -604,10 +612,10 @@ mod tests {
     #[test]
     fn a_damage_effect_fires_at_every_enemy_in_range_at_its_asteroid() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let reach = world.state[LANCER].max_damage_range();
-        let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
-        let near = world.hold(1, STORAGE, asteroid(0), reach - 1.0);
-        let far = world.hold(1, STORAGE, asteroid(0), reach + 1.0);
+        let reach = P::Lancer.max_damage_range();
+        let shooter = world.hold(0, P::Lancer, asteroid(0), 0.0);
+        let near = world.hold(1, P::Storage, asteroid(0), reach - 1.0);
+        let far = world.hold(1, P::Storage, asteroid(0), reach + 1.0);
 
         let hits = world.shots().hits;
 
@@ -624,8 +632,8 @@ mod tests {
     fn a_falloff_reduces_damage_with_distance_and_the_targets_plating_is_subtracted_per_hit() {
         let dealt = |meters: f64| {
             let mut world = World::started(&[TeamId(0), TeamId(1)]);
-            let raider = world.hold(0, RAIDER, asteroid(0), 0.0);
-            let plated = world.hold(1, FRIGATE, asteroid(0), meters);
+            let raider = world.hold(0, P::Raider, asteroid(0), 0.0);
+            let plated = world.hold(1, P::Frigate, asteroid(0), meters);
             world
                 .shots()
                 .hits
@@ -661,9 +669,9 @@ mod tests {
     #[test]
     fn a_damage_effect_keeps_its_target_from_one_tick_to_the_next_until_it_dies() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
-        let first = world.hold(1, STORAGE, asteroid(0), 2.0);
-        let second = world.hold(1, STORAGE, asteroid(0), 3.0);
+        let shooter = world.hold(0, P::Lancer, asteroid(0), 0.0);
+        let first = world.hold(1, P::Storage, asteroid(0), 2.0);
+        let second = world.hold(1, P::Storage, asteroid(0), 3.0);
 
         let held: Vec<EntityId> = (0..5)
             .filter_map(|_| {
@@ -705,9 +713,9 @@ mod tests {
     #[test]
     fn a_damage_effect_lets_a_target_go_the_tick_it_leaves_its_range() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let range = world.state[LANCER].max_damage_range();
-        let shooter = world.hold(0, LANCER, asteroid(0), 0.0);
-        let strays = world.hold(1, CONSTRUCTOR, asteroid(0), range - 1.0);
+        let range = P::Lancer.max_damage_range();
+        let shooter = world.hold(0, P::Lancer, asteroid(0), 0.0);
+        let strays = world.hold(1, P::Constructor, asteroid(0), range - 1.0);
         world.run(u64::from(TICKS_PER_SECOND) + 1);
         assert_eq!(kept_by(&world, shooter), Some(strays));
 
@@ -729,10 +737,10 @@ mod tests {
 
     fn two_lancers_over_one_dying_store() -> (World, [EntityId; 2], [EntityId; 2]) {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let sooner = world.hold(0, LANCER, asteroid(0), 0.0);
-        let later = world.hold(0, LANCER, asteroid(0), 0.5);
-        let doomed = world.hold(1, STORAGE, asteroid(0), 1.0);
-        let spared = world.hold(1, STORAGE, asteroid(0), 1.5);
+        let sooner = world.hold(0, P::Lancer, asteroid(0), 0.0);
+        let later = world.hold(0, P::Lancer, asteroid(0), 0.5);
+        let doomed = world.hold(1, P::Storage, asteroid(0), 1.0);
+        let spared = world.hold(1, P::Storage, asteroid(0), 1.5);
         let hp = world.state.entity(doomed).hp();
         world.state.entities.hurt(doomed, hp - 1.0);
         assert!(sooner < later, "the shooters were spawned out of id order");
@@ -763,10 +771,10 @@ mod tests {
             .ready()
             .find(|ready| ready.entity() == later)
             .cloned()
-            .expect("a lancer carries the ready instant of its damage place");
+            .expect("a lancer carries the ready instant of its gun");
         world
             .state
-            .set_ready(later, firing.place(), firing.at().after(-1.0), None);
+            .set_ready(later, firing.slot(), firing.at().after(-1.0), None);
 
         let staggered = world.shots().hits;
 
@@ -786,12 +794,12 @@ mod tests {
     #[test]
     fn a_force_spreads_its_fire_past_a_target_this_ticks_damage_already_kills() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
-        let range = world.state[LANCER].max_damage_range();
+        let range = P::Lancer.max_damage_range();
         for at in 0..6 {
-            world.hold(0, LANCER, asteroid(0), f64::from(at) * 0.1);
+            world.hold(0, P::Lancer, asteroid(0), f64::from(at) * 0.1);
         }
-        let near = world.hold(1, CONSTRUCTOR, asteroid(0), range - 2.0);
-        let far = world.hold(1, CONSTRUCTOR, asteroid(0), range - 1.0);
+        let near = world.hold(1, P::Constructor, asteroid(0), range - 2.0);
+        let far = world.hold(1, P::Constructor, asteroid(0), range - 1.0);
         let hp = world.state.entity(near).hp();
 
         let hits = world.shots().hits;
@@ -824,12 +832,12 @@ mod tests {
     fn fire_never_targets_a_flying_unit() {
         let mut world = World::started(&[TeamId(0), TeamId(1)]);
         world.tick(&[
-            Issued::numbered(0, 0, asteroid(0), SHIPYARD, 1),
-            Issued::numbered(0, 1, asteroid(0), FRIGATE, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Shipyard, 1),
+            Issued::numbered(0, 1, asteroid(0), P::Frigate, 1),
         ]);
         world.draft(1, asteroid(5));
-        let prey = world.hold(1, CONSTRUCTOR, asteroid(0), 5.0);
-        let building = world.state[FRIGATE].cost.total() / 15.0;
+        let prey = world.hold(1, P::Constructor, asteroid(0), 5.0);
+        let building = P::Frigate.cost().total() / 15.0;
         world.run((building * f64::from(TICKS_PER_SECOND)) as u64 + 2);
         let interval = u64::from(TICKS_PER_SECOND) / 2;
         assert!(
@@ -838,8 +846,8 @@ mod tests {
         );
 
         world.tick(&[
-            Issued::numbered(1, 1, asteroid(0), CONSTRUCTOR, 0),
-            Issued::numbered(1, 2, asteroid(1), CONSTRUCTOR, 1),
+            Issued::numbered(1, 1, asteroid(0), P::Constructor, 0),
+            Issued::numbered(1, 2, asteroid(1), P::Constructor, 1),
         ]);
 
         assert!(world.state.entity(prey).is_flying());
@@ -854,7 +862,11 @@ mod tests {
     fn a_seat_with_no_entity_and_an_empty_reserve_is_eliminated() {
         let mut world = World::seated(vec![
             Seat::new(TeamId(0), Materials::ZERO, BTreeMap::new()),
-            Seat::new(TeamId(1), Materials::ZERO, BTreeMap::from([(SHIPYARD, 1)])),
+            Seat::new(
+                TeamId(1),
+                Materials::ZERO,
+                BTreeMap::from([(P::Shipyard, 1)]),
+            ),
         ]);
 
         world.tick(&[]);
@@ -862,7 +874,7 @@ mod tests {
         assert!(!world.state[SeatId(0)].alive());
         assert!(world.state[SeatId(1)].alive());
         assert_eq!(
-            world.refusal(Issued::want(0, asteroid(0), SHIPYARD, 1)),
+            world.refusal(Issued::want(0, asteroid(0), P::Shipyard, 1)),
             Some(Rejected::DeadSeat)
         );
     }
@@ -873,19 +885,15 @@ mod tests {
 
         let refusals = [
             (
-                Issued::want(9, asteroid(0), SHIPYARD, 1),
+                Issued::want(9, asteroid(0), P::Shipyard, 1),
                 Rejected::NoSuchSeat,
             ),
             (
-                Issued::want(0, asteroid(u32::MAX), SHIPYARD, 1),
+                Issued::want(0, asteroid(u32::MAX), P::Shipyard, 1),
                 Rejected::NoSuchAsteroid,
             ),
             (
-                Issued::want(0, asteroid(0), RowId(u16::MAX), 1),
-                Rejected::NoSuchRow,
-            ),
-            (
-                Issued::want(0, asteroid(0), FRIGATE, MAX_WANT + 1),
+                Issued::want(0, asteroid(0), P::Frigate, MAX_WANT + 1),
                 Rejected::TooMany,
             ),
         ];
@@ -896,7 +904,7 @@ mod tests {
             assert_eq!(next.posts().count(), 0, "{issued:?} left a want behind");
         }
         assert_eq!(
-            world.refusal(Issued::want(0, asteroid(0), FRIGATE, MAX_WANT)),
+            world.refusal(Issued::want(0, asteroid(0), P::Frigate, MAX_WANT)),
             None
         );
     }
@@ -906,10 +914,10 @@ mod tests {
         let world = World::started(&[TeamId(0), TeamId(1)]);
 
         let issued = [
-            Issued::numbered(0, 0, asteroid(0), FRIGATE, 3),
-            Issued::numbered(0, 1, asteroid(0), FRIGATE, 7),
-            Issued::numbered(1, 0, asteroid(2), CONSTRUCTOR, 1),
-            Issued::numbered(0, 2, asteroid(1), SHIPYARD, 1),
+            Issued::numbered(0, 0, asteroid(0), P::Frigate, 3),
+            Issued::numbered(0, 1, asteroid(0), P::Frigate, 7),
+            Issued::numbered(1, 0, asteroid(2), P::Constructor, 1),
+            Issued::numbered(0, 2, asteroid(1), P::Shipyard, 1),
         ];
 
         let (ordered, _) = world.state.step(&Batch::of(&issued));
@@ -922,7 +930,7 @@ mod tests {
         assert_eq!(
             ordered
                 .wants(Post::of(0, asteroid(0)))
-                .map(|wants| wants.get(FRIGATE)),
+                .map(|wants| wants.get(P::Frigate)),
             Some(7),
             "the seat's later command is the one that stands"
         );
@@ -942,14 +950,14 @@ mod tests {
                 "unit {already} spawns at {spawn:?}"
             );
             assert_eq!(spawn.vel, home.vel);
-            world.free(0, FRIGATE, asteroid(0), spawn);
+            world.free(0, P::Frigate, asteroid(0), spawn);
         }
     }
 
     #[test]
     fn a_structure_at_the_asteroid_does_not_move_a_spawn() {
         let mut world = World::ring(Gravity::new(4.0e13), 1, &[TeamId(0)]);
-        world.fix(0, FRIGATE, asteroid(0));
+        world.fix(0, P::Frigate, asteroid(0));
         let home = world.state.asteroid_body(asteroid(0));
         let floor = world.state[asteroid(0)].radius() + Belt::SPACING_METERS;
 
@@ -966,7 +974,7 @@ mod tests {
             let home = asteroid(0);
             for at in 0..units {
                 let body = world.state.spawn_body(home, world.state.time());
-                world.free((at % 2) as u8, FRIGATE, home, body);
+                world.free((at % 2) as u8, P::Frigate, home, body);
             }
             let mut state = world.state;
             let over = 100;

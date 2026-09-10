@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use crate::ids::{AsteroidId, EntityId, RowId, SeatId};
+use crate::ids::{AsteroidId, EntityId, SeatId};
 use crate::materials::Materials;
+use crate::pattern::{EntityPattern, Kind};
 use crate::posting::Posting;
-use crate::roster::Kind;
 use crate::state::{Frame, Rolls, State};
 use crate::step::reserve::Placements;
 use crate::time::{RunningSpan, Time};
@@ -16,8 +16,8 @@ pub(crate) struct Cancellation {
 }
 
 impl Cancellation {
-    pub(crate) fn refund(&self, state: &State) -> Materials {
-        let cost = state[self.posting.row()].cost;
+    pub(crate) fn refund(&self) -> Materials {
+        let cost = self.posting.pattern().cost();
         let total = cost.total();
         match total > 0.0 {
             true => cost * (self.progress / total),
@@ -40,7 +40,7 @@ impl Assigned {
         let mut gone: BTreeMap<Posting, u32> = BTreeMap::new();
         for entity in self.sent_to.keys().map(|id| state.entity(*id)) {
             *gone
-                .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+                .entry(Posting::of(entity.home(), entity.seat(), entity.pattern()))
                 .or_default() += 1;
         }
         gone
@@ -55,7 +55,7 @@ pub(crate) struct Fulfilment<'a> {
     opened: Time,
     homed: BTreeMap<Posting, u32>,
     frames: BTreeMap<Posting, Vec<usize>>,
-    surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>>,
+    surplus: BTreeMap<SeatId, BTreeMap<EntityPattern, BTreeMap<AsteroidId, Vec<EntityId>>>>,
 }
 
 impl<'a> Fulfilment<'a> {
@@ -68,15 +68,17 @@ impl<'a> Fulfilment<'a> {
     ) -> Fulfilment<'a> {
         let homed = state.homed();
         let frames = framed(state);
-        let mut surplus: BTreeMap<SeatId, BTreeMap<RowId, BTreeMap<AsteroidId, Vec<EntityId>>>> =
-            BTreeMap::new();
+        let mut surplus: BTreeMap<
+            SeatId,
+            BTreeMap<EntityPattern, BTreeMap<AsteroidId, Vec<EntityId>>>,
+        > = BTreeMap::new();
         for (posting, mut over) in surpluses(state, &homed, &frames) {
-            if state[posting.row()].kind() == Kind::Unit {
+            if posting.pattern().kind() == Kind::Unit {
                 over.reverse();
                 surplus
                     .entry(posting.seat())
                     .or_default()
-                    .entry(posting.row())
+                    .entry(posting.pattern())
                     .or_default()
                     .insert(posting.asteroid(), over);
             }
@@ -126,7 +128,7 @@ impl<'a> Fulfilment<'a> {
         let Some(surplus) = self
             .surplus
             .get_mut(&posting.seat())
-            .and_then(|rows| rows.get_mut(&posting.row()))
+            .and_then(|patterns| patterns.get_mut(&posting.pattern()))
             .filter(|_| asked > 0)
         else {
             return taking;
@@ -159,11 +161,12 @@ impl<'a> Fulfilment<'a> {
         let open = self.open_frames(posting).len();
         match asked {
             0 => self.cancel(assigned, posting, open as u32),
-            _ if open == 0 => {
-                assigned
-                    .openings
-                    .push(Frame::new(posting.post(), posting.row(), 0.0, self.opened))
-            }
+            _ if open == 0 => assigned.openings.push(Frame::new(
+                posting.post(),
+                posting.pattern(),
+                0.0,
+                self.opened,
+            )),
             _ => {}
         }
     }
@@ -181,7 +184,7 @@ impl<'a> Fulfilment<'a> {
                 let want = self
                     .state
                     .wants(posting.post())
-                    .map_or(0, |wants| wants.get(posting.row()));
+                    .map_or(0, |wants| wants.get(posting.pattern()));
                 let gone = leaving.get(*posting).copied().unwrap_or_default();
                 want + gone <= self.count(**posting)
             })
@@ -207,7 +210,7 @@ fn framed(state: &State) -> BTreeMap<Posting, Vec<usize>> {
     let mut framed: BTreeMap<Posting, Vec<usize>> = BTreeMap::new();
     for (at, frame) in state.frames().iter().enumerate() {
         framed
-            .entry(Posting::new(frame.post(), frame.row()))
+            .entry(Posting::new(frame.post(), frame.pattern()))
             .or_default()
             .push(at);
     }
@@ -225,7 +228,7 @@ fn surpluses(
         .filter(|entity| entity.standing().is_some())
     {
         standing
-            .entry(Posting::of(entity.home(), entity.seat(), entity.row()))
+            .entry(Posting::of(entity.home(), entity.seat(), entity.pattern()))
             .or_default()
             .push(entity.id());
     }
@@ -233,7 +236,7 @@ fn surpluses(
         let open = frames.get(posting).map_or(0, Vec::len) as u32;
         let covered = state
             .wants(posting.post())
-            .map_or(0, |wants| wants.get(posting.row()))
+            .map_or(0, |wants| wants.get(posting.pattern()))
             .saturating_sub(open);
         let over = homed
             .get(posting)

@@ -1,7 +1,7 @@
 use mirage_engine::egui::Color32;
 use mirage_engine::mesh::{Mesh, MeshData, Quad};
 use mirage_engine::{Assets, Catalog, Color, Material, TextureData};
-use neumannarch_sim::roster::{Glyph, Roster};
+use neumannarch_sim::pattern::{EntityPattern, Glyph};
 use neumannarch_sim::{MAX_SEATS, SeatId};
 
 use crate::display::glyph::{Drawing, encode};
@@ -24,19 +24,20 @@ pub fn seat_color32(seat: SeatId) -> Color32 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GlyphQuad {
-    pub glyph: Glyph,
+    pub pattern: EntityPattern,
     pub seat: SeatId,
 }
 
 impl Catalog for GlyphQuad {
     fn catalog() -> Vec<Self> {
-        let roster = Roster::shipped();
         (0..MAX_SEATS as u8)
             .flat_map(|seat| {
-                roster.iter().map(move |(_, row)| GlyphQuad {
-                    glyph: row.glyph(),
-                    seat: SeatId(seat),
-                })
+                EntityPattern::EVERY
+                    .into_iter()
+                    .map(move |pattern| GlyphQuad {
+                        pattern,
+                        seat: SeatId(seat),
+                    })
             })
             .collect()
     }
@@ -45,7 +46,7 @@ impl Catalog for GlyphQuad {
 impl Mesh for GlyphQuad {
     fn build(&self, assets: &Assets) -> MeshData {
         Quad.build(assets)
-            .with_texture(rasterize(self.glyph, seat_colour(self.seat)))
+            .with_texture(rasterize(self.pattern.glyph(), seat_colour(self.seat)))
             .with_material(Material::lit(Color::WHITE).cutout())
     }
 }
@@ -56,6 +57,8 @@ pub fn rasterize(glyph: Glyph, colour: Color) -> TextureData {
 
 #[cfg(test)]
 mod tests {
+    use neumannarch_sim::pattern::EntityPattern as P;
+
     use super::*;
 
     fn opaque(texture: &TextureData) -> usize {
@@ -67,44 +70,40 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_holds_one_cell_per_shipped_row_and_seat() {
+    fn the_catalog_holds_one_cell_per_pattern_and_seat() {
         let cells = GlyphQuad::catalog();
-        assert_eq!(cells.len(), MAX_SEATS * Roster::shipped().iter().count());
-        let mut keys: Vec<(Glyph, SeatId)> = cells.iter().map(|it| (it.glyph, it.seat)).collect();
+        assert_eq!(cells.len(), MAX_SEATS * P::EVERY.len());
+        let mut keys: Vec<(Glyph, SeatId)> = cells
+            .iter()
+            .map(|it| (it.pattern.glyph(), it.seat))
+            .collect();
         keys.sort();
         keys.dedup();
         assert_eq!(keys.len(), cells.len(), "no cell twice");
     }
 
     #[test]
-    fn a_rows_cell_is_its_silhouette_in_the_seats_colour_with_its_role_cut_out() {
-        let roster = Roster::shipped();
+    fn a_patterns_cell_is_its_silhouette_in_the_seats_colour_with_its_role_cut_out() {
         let texels =
             (crate::display::glyph::CELL_PIXELS * crate::display::glyph::CELL_PIXELS) as usize;
         let mut seen = Vec::new();
-        for (_, row) in roster.iter() {
-            let cell = rasterize(row.glyph(), seat_colour(SeatId(0)));
+        for pattern in P::EVERY {
+            let cell = rasterize(pattern.glyph(), seat_colour(SeatId(0)));
             let filled = opaque(&cell);
             assert!(
                 filled > texels / 5 && filled < texels * 4 / 5,
                 "{} fills {filled} of {texels} texels",
-                row.name
+                pattern.name()
             );
             assert!(
                 !seen.contains(&cell.pixels().to_vec()),
                 "{} repeats a cell",
-                row.name
+                pattern.name()
             );
             seen.push(cell.pixels().to_vec());
         }
-        let red = rasterize(
-            roster[neumannarch_sim::roster::FRIGATE].glyph(),
-            seat_colour(SeatId(0)),
-        );
-        let blue = rasterize(
-            roster[neumannarch_sim::roster::FRIGATE].glyph(),
-            seat_colour(SeatId(1)),
-        );
+        let red = rasterize(P::Frigate.glyph(), seat_colour(SeatId(0)));
+        let blue = rasterize(P::Frigate.glyph(), seat_colour(SeatId(1)));
         assert_eq!(opaque(&red), opaque(&blue), "the colour changes no shape");
         assert_ne!(red.pixels(), blue.pixels());
     }

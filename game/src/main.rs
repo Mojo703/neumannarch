@@ -61,8 +61,8 @@ mod tests {
     use neumannarch_game::screens::play::Play;
     use neumannarch_game::screens::{control, lobby, title};
     use neumannarch_protocol::Notice;
-    use neumannarch_sim::roster::SHIPYARD;
-    use neumannarch_sim::{AsteroidId, RowId, Time};
+    use neumannarch_sim::pattern::EntityPattern;
+    use neumannarch_sim::{AsteroidId, Time};
 
     use super::*;
 
@@ -333,7 +333,7 @@ mod tests {
         );
         settled(session);
 
-        let button = button_of(session, centre, SHIPYARD);
+        let button = button_of(session, centre, EntityPattern::Shipyard);
         click_at(session, button);
         while play(session).session().state().drafting() {
             session.tick();
@@ -346,7 +346,7 @@ mod tests {
             .view()
             .present
             .iter()
-            .find(|present| present.row == SHIPYARD && present.seat == mine)
+            .find(|present| present.pattern == EntityPattern::Shipyard && present.seat == mine)
             .expect("the reserve placed the shipyard");
         assert_eq!(shipyard.home, ASTEROID);
 
@@ -355,14 +355,18 @@ mod tests {
         save(session, "wheel");
     }
 
-    fn button_of(session: &Offscreen<Probe>, pointer: egui::Pos2, row: RowId) -> egui::Pos2 {
+    fn button_of(
+        session: &Offscreen<Probe>,
+        pointer: egui::Pos2,
+        pattern: EntityPattern,
+    ) -> egui::Pos2 {
         let wheels = play(session).wheels(&viewport(session), Some(pointer), &mut Still);
         wheels
             .iter()
             .find(|wheel| wheel.asteroid() == ASTEROID)
             .expect("the selected asteroid carries a wheel")
-            .button(row, WheelButton::Plus(1))
-            .expect("the row's button is on the wheel")
+            .button(pattern, WheelButton::Plus(1))
+            .expect("the pattern's button is on the wheel")
     }
 
     fn paused(session: &mut Offscreen<Probe>) {

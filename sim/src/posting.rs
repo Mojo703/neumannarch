@@ -1,19 +1,20 @@
-use crate::ids::{AsteroidId, RowId, SeatId};
+use crate::ids::{AsteroidId, SeatId};
+use crate::pattern::EntityPattern;
 use crate::post::Post;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Posting {
     post: Post,
-    row: RowId,
+    pattern: EntityPattern,
 }
 
 impl Posting {
-    pub fn new(post: Post, row: RowId) -> Posting {
-        Posting { post, row }
+    pub fn new(post: Post, pattern: EntityPattern) -> Posting {
+        Posting { post, pattern }
     }
 
-    pub fn of(asteroid: AsteroidId, seat: SeatId, row: RowId) -> Posting {
-        Posting::new(Post { asteroid, seat }, row)
+    pub fn of(asteroid: AsteroidId, seat: SeatId, pattern: EntityPattern) -> Posting {
+        Posting::new(Post { asteroid, seat }, pattern)
     }
 
     pub fn post(self) -> Post {
@@ -28,11 +29,11 @@ impl Posting {
         self.post.seat
     }
 
-    pub fn row(self) -> RowId {
-        self.row
+    pub fn pattern(self) -> EntityPattern {
+        self.pattern
     }
 
     pub fn seated(self, seat: SeatId) -> Posting {
-        Posting::of(self.asteroid(), seat, self.row)
+        Posting::of(self.asteroid(), seat, self.pattern)
     }
 }

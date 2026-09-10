@@ -107,9 +107,9 @@ fn folded(log: Vec<Stamped>) -> Result<BTreeMap<Tick, Batch>, BadRecord> {
 
 #[cfg(test)]
 mod tests {
-    use neumannarch_sim::roster::{CONSTRUCTOR, SHIPYARD};
+    use neumannarch_sim::pattern::EntityPattern as P;
     use neumannarch_sim::state::{Command, Issued};
-    use neumannarch_sim::{AsteroidId, Retention, RowId, SeatId, TeamId, Time};
+    use neumannarch_sim::{AsteroidId, Retention, SeatId, TeamId, Time};
 
     use super::*;
     use crate::wire::Codec;
@@ -118,17 +118,47 @@ mod tests {
 
     const UNTIL: Tick = Tick(10_000);
 
+    const PAST_EVERY_PATTERN: u8 = P::EVERY.len() as u8;
+
+    #[derive(Deserialize, Serialize)]
+    struct FieldsByCode {
+        setup: Setup,
+        log: Vec<StampedByCode>,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct StampedByCode {
+        tick: Tick,
+        issued: IssuedByCode,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct IssuedByCode {
+        seat: SeatId,
+        seq: u32,
+        command: CommandByCode,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    enum CommandByCode {
+        Want {
+            asteroid: AsteroidId,
+            pattern: u8,
+            count: u32,
+        },
+    }
+
     fn setup() -> Setup {
         Setup::new(vec![TeamId(0), TeamId(1)], 11, CLOCK).expect("two seats are a match")
     }
 
-    fn want(seq: u32, row: RowId) -> Issued {
+    fn want(seq: u32, pattern: P) -> Issued {
         Issued {
             seat: SeatId(0),
             seq,
             command: Command::Want {
                 asteroid: AsteroidId(0),
-                row,
+                pattern,
                 count: 1,
             },
         }
@@ -140,11 +170,11 @@ mod tests {
         for stamped in [
             Stamped {
                 tick: Tick(2),
-                issued: want(0, SHIPYARD),
+                issued: want(0, P::Shipyard),
             },
             Stamped {
                 tick: Tick(2),
-                issued: want(1, CONSTRUCTOR),
+                issued: want(1, P::Constructor),
             },
         ] {
             session.insert(stamped).expect("a command of its own tick");
@@ -187,11 +217,11 @@ mod tests {
             log: vec![
                 Stamped {
                     tick: Tick(2),
-                    issued: want(0, SHIPYARD),
+                    issued: want(0, P::Shipyard),
                 },
                 Stamped {
                     tick: Tick(2),
-                    issued: want(0, CONSTRUCTOR),
+                    issued: want(0, P::Constructor),
                 },
             ],
         };
@@ -206,5 +236,59 @@ mod tests {
         }
         .to_string();
         assert!(refused.contains(&named), "{refused} does not name {named}");
+    }
+
+    #[test]
+    fn bytes_naming_a_code_no_pattern_has_are_not_a_record() {
+        let unnamed = FieldsByCode {
+            setup: setup(),
+            log: vec![StampedByCode {
+                tick: Tick(2),
+                issued: IssuedByCode {
+                    seat: SeatId(0),
+                    seq: 0,
+                    command: CommandByCode::Want {
+                        asteroid: AsteroidId(0),
+                        pattern: PAST_EVERY_PATTERN,
+                        count: 1,
+                    },
+                },
+            }],
+        };
+
+        let refused = Record::decode(&unnamed.encoded())
+            .expect_err("a pattern code no pattern has is not a record")
+            .to_string();
+
+        assert!(
+            refused.contains(&PAST_EVERY_PATTERN.to_string()),
+            "{refused} does not name the code {PAST_EVERY_PATTERN}"
+        );
+    }
+
+    #[test]
+    fn a_record_of_a_want_of_every_pattern_replays_to_the_hash_it_holds() {
+        for pattern in P::EVERY {
+            let record = Record::played(
+                setup(),
+                BTreeMap::from([(Tick(2), batch(want(0, pattern)))]),
+            );
+
+            let read = Record::decode(&record.encoded()).expect("its own bytes are a record");
+
+            assert_eq!(read, record, "{}", pattern.name());
+            assert_eq!(
+                read.replay(Tick(20)).hash(),
+                record.replay(Tick(20)).hash(),
+                "{}",
+                pattern.name()
+            );
+        }
+    }
+
+    fn batch(issued: Issued) -> Batch {
+        let mut batch = Batch::new();
+        batch.insert(issued).expect("one command is a batch");
+        batch
     }
 }

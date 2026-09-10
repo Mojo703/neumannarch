@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use neumannarch_sim::roster::Roster;
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::view::View;
-use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId, Time};
+use neumannarch_sim::{AsteroidId, Posting, SeatId, Time};
 
 use neumannarch_protocol::Bot;
 
 use super::played_match::PlayedMatch;
-use crate::bots::scripted::roles::Roles;
+use crate::bots::scripted::personality::armed_units;
 
 const BRIMMING: f64 = 0.99;
 
@@ -57,8 +57,7 @@ impl Extraction {
 
 impl Guarantees {
     pub fn over(seated: &[Bot], clock: Time) -> Guarantees {
-        let roster = Roster::shipped();
-        let army = Roles::of(&roster).army;
+        let army: Vec<EntityPattern> = armed_units().collect();
         let mut played = PlayedMatch::of(seated, clock);
         let mut watched = Guarantees {
             clock,
@@ -77,16 +76,16 @@ impl Guarantees {
             played.advance();
             let now = played.state().time();
             for seat in played.decided().to_vec() {
-                watched.read_frames(&played.view(seat), &roster);
+                watched.read_frames(&played.view(seat));
             }
             for seat in watched.seats() {
                 let view = played.view(seat);
-                watched.read_stockpile(&view, &roster, &army);
+                watched.read_stockpile(&view, &army);
                 watched.read_income(&view);
                 if view
                     .present
                     .iter()
-                    .any(|it| it.seat == seat && roster[it.row].does_damage())
+                    .any(|it| it.seat == seat && it.pattern.does_damage())
                 {
                     watched.fielded.entry(seat).or_insert(now);
                 }
@@ -187,7 +186,7 @@ impl Guarantees {
         }
     }
 
-    fn read_frames(&mut self, view: &View, roster: &Roster) {
+    fn read_frames(&mut self, view: &View) {
         if self.unbuilt_frame.is_some() {
             return;
         }
@@ -202,9 +201,9 @@ impl Guarantees {
             let composition = view.compositions.get(&posting.post());
             let arriving = composition.is_some_and(|composition| {
                 composition
-                    .rows
+                    .patterns
                     .iter()
-                    .any(|(row, held)| held.arriving > 0 && builds(roster, *row))
+                    .any(|(pattern, held)| held.arriving > 0 && pattern.build_rate() > 0.0)
             });
             if composition.is_some_and(|composition| composition.builder) || arriving {
                 continue;
@@ -214,39 +213,36 @@ impl Guarantees {
                 continue;
             }
             let homed = composition
-                .and_then(|composition| composition.rows.get(&posting.row()))
+                .and_then(|composition| composition.patterns.get(&posting.pattern()))
                 .map_or(0, |held| held.present + held.arriving);
             self.unbuilt_frame = Some(format!(
                 "at {:.0}s seat {} still wants {want} {} at {:?} a decision on, where {homed} are homed and no builder of its own stands or arrives",
                 view.time.seconds(),
                 view.seat.0,
-                named(roster, posting.row()),
+                posting.pattern().name(),
                 posting.asteroid()
             ));
             return;
         }
     }
 
-    fn read_stockpile(&mut self, view: &View, roster: &Roster, army: &[RowId]) {
+    fn read_stockpile(&mut self, view: &View, army: &[EntityPattern]) {
         if self.hoard.is_some() {
             return;
         }
         let stock = view.stockpile.stock();
         let capacity = view.stockpile.capacity();
-        let affordable = army
-            .iter()
-            .filter_map(|row| roster.get(*row))
-            .any(|row| (stock - row.cost).amounts().all(|(_, left)| left >= 0.0));
+        let affordable = army.iter().any(|pattern| {
+            (stock - pattern.cost())
+                .amounts()
+                .all(|(_, left)| left >= 0.0)
+        });
         let build_rate: f64 = view
             .compositions
             .iter()
             .filter(|(post, _)| post.seat == view.seat)
-            .flat_map(|(_, composition)| composition.rows.iter())
-            .filter_map(|(row, held)| {
-                roster
-                    .get(*row)
-                    .map(|stats| stats.builds().sum::<f64>() * f64::from(held.present))
-            })
+            .flat_map(|(_, composition)| composition.patterns.iter())
+            .map(|(pattern, held)| pattern.build_rate() * f64::from(held.present))
             .sum();
         let builders_busy = view.spend.total() >= BUILDERS_BUSY_SHARE * build_rate;
         if !affordable || builders_busy || stock.total() < BRIMMING * capacity.total() {
@@ -256,7 +252,7 @@ impl Guarantees {
         let from = *self.full_since.entry(view.seat).or_insert(view.time);
         if view.time.since(from).seconds() >= HOARDING_SECONDS {
             self.hoard = Some(format!(
-                "seat {} sat at its stockpile's capacity from {:.0}s to {:.0}s spending {:.0} a second against builders that could spend {build_rate:.0}, with a row that does damage it could afford",
+                "seat {} sat at its stockpile's capacity from {:.0}s to {:.0}s spending {:.0} a second against builders that could spend {build_rate:.0}, with a pattern that does damage it could afford",
                 view.seat.0,
                 from.seconds(),
                 view.time.seconds(),
@@ -297,7 +293,7 @@ fn is_taken(view: &View, asteroid: AsteroidId) -> bool {
         .filter(|(post, _)| post.asteroid == asteroid)
         .any(|(_, composition)| {
             composition
-                .rows
+                .patterns
                 .values()
                 .any(|held| held.present + held.arriving > 0)
         })
@@ -308,16 +304,6 @@ fn apart(view: &View, from: AsteroidId, to: AsteroidId) -> f64 {
         (Some(from), Some(to)) => from.pos.distance(to.pos),
         _ => f64::INFINITY,
     }
-}
-
-fn builds(roster: &Roster, row: RowId) -> bool {
-    roster
-        .get(row)
-        .is_some_and(|row| row.builds().next().is_some())
-}
-
-fn named(roster: &Roster, row: RowId) -> &str {
-    roster.get(row).map_or("an unknown row", |row| row.name)
 }
 
 #[cfg(test)]

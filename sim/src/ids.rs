@@ -7,9 +7,6 @@ pub struct AsteroidId(pub u32);
 pub struct EntityId(pub(crate) u32);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-pub struct RowId(pub u16);
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct SeatId(pub u8);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

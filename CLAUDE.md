@@ -37,7 +37,10 @@ ticks everywhere else; angles in radians; a phase is a fraction of a turn
 in `0..1`. Every `f64` parameter or field states its unit in its name or
 its type. Iteration order is id order: a `BTreeMap` where a map is needed,
 a sorted `Vec` where a set is needed. `pub(crate)` by default; `pub` is the
-surface `lib.rs` re-exports.
+surface `lib.rs` re-exports. Never a glob import of an enum's variants
+(owner, 2026-09-10): a variant shadows whatever shares its name in
+scope, silently; a test module that names variants often aliases the
+enum, `use EntityPattern as P;`, and writes `P::Shipyard`.
 
 ## Layout
 

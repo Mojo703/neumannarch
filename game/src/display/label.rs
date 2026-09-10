@@ -12,8 +12,7 @@ pub fn refusal(refused: Rejected) -> Option<&'static str> {
         Rejected::TooMany
         | Rejected::DeadSeat
         | Rejected::NoSuchSeat
-        | Rejected::NoSuchAsteroid
-        | Rejected::NoSuchRow => None,
+        | Rejected::NoSuchAsteroid => None,
     }
 }
 
@@ -51,7 +50,7 @@ pub(crate) fn is_a_phrase(text: &str) -> bool {
 mod tests {
     use mirage_engine::egui::{Pos2, Rect};
     use neumannarch_protocol::{Bot, Holder, Lobby, PlayerId, Refused};
-    use neumannarch_sim::roster::{FRIGATE, Roster};
+    use neumannarch_sim::pattern::EntityPattern;
     use neumannarch_sim::state::view::Building;
     use neumannarch_sim::{AsteroidId, Materials, Stockpile, TeamId, Tick};
 
@@ -98,8 +97,7 @@ mod tests {
     ];
 
     fn every_string() -> Vec<String> {
-        let roster = Roster::shipped();
-        let name = titled(roster[FRIGATE].name);
+        let name = titled(EntityPattern::Frigate.name());
         let screen = LobbyScreen::of(Lobby::skirmish(PlayerId::HOST), PlayerId::HOST);
         let entries = [
             Entry::Present(2),
@@ -219,12 +217,8 @@ mod tests {
                     .flat_map(|material| [bar.phrase(material), bar.net(material)]),
             )
             .chain([bar.elapsed()])
-            .chain(bars.iter().map(|spoken| spoken.phrase(&roster)))
-            .chain(
-                refused_buttons
-                    .iter()
-                    .map(|refused| refused.phrase(&roster)),
-            )
+            .chain(bars.iter().map(Spoken::phrase))
+            .chain(refused_buttons.iter().map(Spoken::phrase))
             .chain((0..8u64).flat_map(|seed| seat_names(seated.seating(), PlayerId::HOST, seed)))
             .chain(["Draft".to_string(), "Clock".to_string()])
             .chain([asteroid_name(AsteroidId(11))])

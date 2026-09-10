@@ -11,7 +11,7 @@ use neumannarch_game::net::transport::Transport;
 use neumannarch_protocol::{
     Bot, CLOCK_RANGE, Lobby, LobbyEdit, Notice, PlayerId, Relayed, Request, Started,
 };
-use neumannarch_sim::roster::SHIPYARD;
+use neumannarch_sim::pattern::EntityPattern;
 use neumannarch_sim::state::{Command, Issued};
 use neumannarch_sim::{AsteroidId, SeatId, Stamped, Tick};
 
@@ -202,10 +202,7 @@ fn decide(machine: &mut Machine, agent: &mut Seated) {
 }
 
 fn seated(seat: SeatId, bot: Bot) -> Seated {
-    Seated::new(
-        seat,
-        Shipped::of(bot).seated(&neumannarch_sim::roster::Roster::shipped()),
-    )
+    Seated::new(seat, Shipped::of(bot).seated())
 }
 
 fn agreed(theirs: &Hashes, ours: &Hashes) -> Vec<Tick> {
@@ -267,7 +264,7 @@ fn sent() -> Stamped {
             seq: 0,
             command: Command::Want {
                 asteroid: AsteroidId(0),
-                row: SHIPYARD,
+                pattern: EntityPattern::Shipyard,
                 count: 1,
             },
         },

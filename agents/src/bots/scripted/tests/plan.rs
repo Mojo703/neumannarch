@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::roster::{FRIGATE, Roster, SHIPYARD};
+use neumannarch_sim::pattern::EntityPattern;
+use neumannarch_sim::pattern::EntityPattern as P;
 use neumannarch_sim::state::{Command, MAX_COMMANDS_PER_TICK, MAX_WANT};
-use neumannarch_sim::{Posting, RowId, SeatId};
+use neumannarch_sim::{Posting, SeatId};
 
 use crate::bots::scripted::commitments::Commitments;
 use crate::bots::scripted::dice::Dice;
@@ -10,14 +11,12 @@ use crate::bots::scripted::personality::Personality;
 use crate::bots::scripted::plan::*;
 use crate::harness::fixture::{Fixture, surveyed};
 
-fn damage_rows(count: usize) -> Vec<RowId> {
-    let roster = Roster::shipped();
-    let rows: Vec<RowId> = roster
-        .iter()
-        .map(|(id, _)| id)
-        .filter(|row| roster[*row].does_damage())
+fn damage_patterns(count: usize) -> Vec<EntityPattern> {
+    let patterns: Vec<EntityPattern> = EntityPattern::EVERY
+        .into_iter()
+        .filter(|pattern| pattern.does_damage())
         .collect();
-    (0..count).map(|at| rows[at % rows.len()]).collect()
+    (0..count).map(|at| patterns[at % patterns.len()]).collect()
 }
 
 #[test]
@@ -25,8 +24,8 @@ fn damage_rows(count: usize) -> Vec<RowId> {
 fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
-    fixture.want(0, free, SHIPYARD, 1);
-    fixture.want(0, free, FRIGATE, 3);
+    fixture.want(0, free, P::Shipyard, 1);
+    fixture.want(0, free, P::Frigate, 3);
     fixture.run(1);
     let view = fixture.view(0);
     let plan = Plan {
@@ -36,7 +35,7 @@ fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
     let commands = plan.commands(&view);
 
     assert!(
-        commands.contains(&want(Posting::of(free, SeatId(0), FRIGATE), 0)),
+        commands.contains(&want(Posting::of(free, SeatId(0), P::Frigate), 0)),
         "the standing want was left alone: {commands:?}"
     );
 }
@@ -46,8 +45,7 @@ fn a_want_the_plan_no_longer_carries_is_lowered_to_nothing() {
 fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at() {
     let fixture = Fixture::drafted([Some(Personality::expand()), None]);
     let view = fixture.view(0);
-    let roster = Roster::shipped();
-    let survey = surveyed(&view, &roster);
+    let survey = surveyed(&view);
 
     let plan = Plan::of(
         &survey,
@@ -60,7 +58,7 @@ fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at()
         plan.wants
             .keys()
             .all(|posting| survey.builds_at(posting.asteroid())
-                || survey.count(posting.asteroid(), posting.row()) > 0),
+                || survey.count(posting.asteroid(), posting.pattern()) > 0),
         "it wants {:?} where nothing of its own stands or builds",
         plan.wants
     );
@@ -71,15 +69,15 @@ fn a_decision_asks_for_nothing_at_an_asteroid_no_builder_of_the_seat_stands_at()
 fn a_decision_over_the_tick_s_cap_keeps_every_lowering_and_loses_only_its_lowest_raises() {
     let mut fixture = Fixture::drafted([None, Some(Personality::expand())]);
     let free = fixture.free(1)[0];
-    fixture.want(0, free, SHIPYARD, 1);
-    fixture.want(0, free, FRIGATE, 3);
+    fixture.want(0, free, P::Shipyard, 1);
+    fixture.want(0, free, P::Frigate, 3);
     fixture.run(1);
     let view = fixture.view(0);
     let asking: Vec<Posting> = fixture
         .free(2 * MAX_COMMANDS_PER_TICK)
         .into_iter()
-        .zip(damage_rows(2 * MAX_COMMANDS_PER_TICK))
-        .map(|(asteroid, row)| Posting::of(asteroid, SeatId(0), row))
+        .zip(damage_patterns(2 * MAX_COMMANDS_PER_TICK))
+        .map(|(asteroid, pattern)| Posting::of(asteroid, SeatId(0), pattern))
         .collect();
     let plan = Plan {
         wants: asking

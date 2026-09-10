@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use neumannarch_sim::{AsteroidId, RowId};
+use neumannarch_sim::AsteroidId;
+use neumannarch_sim::Material;
+use neumannarch_sim::pattern::EntityPattern;
 
 use super::commitments::Commitments;
 use super::personality::Personality;
@@ -10,6 +12,17 @@ use super::survey::Survey;
 
 pub struct Offence;
 
+fn yields_on_completion() -> Vec<EntityPattern> {
+    vec![
+        EntityPattern::Shipyard,
+        EntityPattern::Constructor,
+        EntityPattern::Storage,
+        EntityPattern::Extractor(Material::Metals),
+        EntityPattern::Extractor(Material::Volatiles),
+        EntityPattern::Extractor(Material::Energy),
+    ]
+}
+
 impl Offence {
     pub fn proposals(
         survey: &Survey,
@@ -17,7 +30,7 @@ impl Offence {
         commitments: &mut Commitments,
     ) -> Vec<Proposal> {
         let weights = personality.shares(survey);
-        let unit_cost = personality.damage_unit_cost(survey.roster, &weights);
+        let unit_cost = Personality::damage_unit_cost(&weights);
         if unit_cost <= 0.0 {
             return Vec::new();
         }
@@ -34,10 +47,10 @@ impl Offence {
             .collect()
     }
 
-    fn wave_landed(survey: &Survey, weights: &[(RowId, f64)], target: AsteroidId) -> bool {
+    fn wave_landed(survey: &Survey, weights: &[(EntityPattern, f64)], target: AsteroidId) -> bool {
         weights
             .iter()
-            .all(|(row, _)| survey.arriving(target, *row) == 0)
+            .all(|(pattern, _)| survey.arriving(target, *pattern) == 0)
     }
 
     fn attacked(
@@ -75,39 +88,42 @@ impl Offence {
     fn wave(
         survey: &Survey,
         personality: &Personality,
-        weights: &[(RowId, f64)],
+        weights: &[(EntityPattern, f64)],
         unit_cost: f64,
         target: AsteroidId,
     ) -> Vec<Proposal> {
-        let mut sent: BTreeMap<RowId, u32> = BTreeMap::new();
+        let mut sent: BTreeMap<EntityPattern, u32> = BTreeMap::new();
         let mut proposals = Vec::new();
         for asteroid in Offence::mustering(survey, target) {
             let units = personality.garrison(survey.threat_at(asteroid), unit_cost) / unit_cost;
-            for (row, share) in weights {
+            for (pattern, share) in weights {
                 let garrisoned =
-                    Proposal::rounded(survey, Reason::Offence, asteroid, *row, share * units).count;
-                let going = survey.standing(asteroid, *row).saturating_sub(garrisoned);
+                    Proposal::rounded(survey, Reason::Offence, asteroid, *pattern, share * units)
+                        .count;
+                let going = survey
+                    .standing(asteroid, *pattern)
+                    .saturating_sub(garrisoned);
                 if going == 0 {
                     continue;
                 }
-                *sent.entry(*row).or_default() += going;
-                let keeping = garrisoned + survey.arriving(asteroid, *row);
+                *sent.entry(*pattern).or_default() += going;
+                let keeping = garrisoned + survey.arriving(asteroid, *pattern);
                 proposals.push(Proposal::at(
                     survey,
                     Reason::Offence,
                     asteroid,
-                    *row,
+                    *pattern,
                     keeping,
                 ));
             }
         }
-        for (row, going) in sent {
-            let homed = survey.count(target, row);
+        for (pattern, going) in sent {
+            let homed = survey.count(target, pattern);
             proposals.push(Proposal::at(
                 survey,
                 Reason::Offence,
                 target,
-                row,
+                pattern,
                 homed + going,
             ));
         }
@@ -121,8 +137,8 @@ impl Offence {
             .filter(move |asteroid| *asteroid != target)
     }
 
-    fn arming(survey: &Survey, weights: &[(RowId, f64)]) -> Vec<Proposal> {
-        let yielding = survey.roles.yields_on_completion();
+    fn arming(survey: &Survey, weights: &[(EntityPattern, f64)]) -> Vec<Proposal> {
+        let yielding = yields_on_completion();
         survey
             .building()
             .into_iter()
@@ -135,42 +151,47 @@ impl Offence {
 
     fn keeping_at(
         survey: &Survey,
-        weights: &[(RowId, f64)],
+        weights: &[(EntityPattern, f64)],
         asteroid: AsteroidId,
     ) -> Vec<Proposal> {
         weights
             .iter()
-            .map(|(row, _)| {
-                let homed = survey.count(asteroid, *row);
-                Proposal::at(survey, Reason::Offence, asteroid, *row, homed)
+            .map(|(pattern, _)| {
+                let homed = survey.count(asteroid, *pattern);
+                Proposal::at(survey, Reason::Offence, asteroid, *pattern, homed)
             })
             .collect()
     }
 
-    fn arming_at(survey: &Survey, weights: &[(RowId, f64)], asteroid: AsteroidId) -> Vec<Proposal> {
-        let homed_or_framed =
-            |row: RowId| survey.count(asteroid, row) + u32::from(survey.frame_open(asteroid, row));
+    fn arming_at(
+        survey: &Survey,
+        weights: &[(EntityPattern, f64)],
+        asteroid: AsteroidId,
+    ) -> Vec<Proposal> {
+        let homed_or_framed = |pattern: EntityPattern| {
+            survey.count(asteroid, pattern) + u32::from(survey.frame_open(asteroid, pattern))
+        };
         let force = f64::from(
             weights
                 .iter()
-                .map(|(row, _)| homed_or_framed(*row))
+                .map(|(pattern, _)| homed_or_framed(*pattern))
                 .sum::<u32>()
                 + 1,
         );
-        let raising = Ranking::by(weights.iter().map(|(row, _)| *row), |row| {
+        let raising = Ranking::by(weights.iter().map(|(pattern, _)| *pattern), |pattern| {
             let share = weights
                 .iter()
-                .find(|(id, _)| *id == row)
+                .find(|(held, _)| *held == pattern)
                 .map(|(_, share)| *share)?;
-            Some(share * force - f64::from(homed_or_framed(row)))
+            Some(share * force - f64::from(homed_or_framed(pattern)))
         })
         .best();
         weights
             .iter()
-            .map(|(row, _)| {
-                let more = u32::from(Some(*row) == raising);
-                let count = homed_or_framed(*row) + more;
-                Proposal::at(survey, Reason::Offence, asteroid, *row, count)
+            .map(|(pattern, _)| {
+                let more = u32::from(Some(*pattern) == raising);
+                let count = homed_or_framed(*pattern) + more;
+                Proposal::at(survey, Reason::Offence, asteroid, *pattern, count)
             })
             .collect()
     }

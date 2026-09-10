@@ -1,4 +1,3 @@
-use neumannarch_sim::roster::Roster;
 use neumannarch_sim::state::State;
 use neumannarch_sim::state::view::View;
 use neumannarch_sim::step::fire::Shots;
@@ -43,14 +42,13 @@ impl PlayedMatch {
     pub fn of(seated: &[Bot], clock: Time) -> PlayedMatch {
         let teams = free_for_all(seated.len());
         let setup = Setup::new(teams, BELT_SEED, clock).expect("a match of these teams");
-        let roster = Roster::shipped();
         let playing = seated
             .iter()
             .enumerate()
             .map(|(at, bot)| {
                 Seated::new(
                     SeatId(u8::try_from(at).expect("a seat a bot")),
-                    Shipped::of(*bot).seated(&roster),
+                    Shipped::of(*bot).seated(),
                 )
             })
             .collect();

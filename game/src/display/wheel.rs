@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use mirage_engine::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
-use neumannarch_sim::roster::{Glyph, Kind, Roster, Row};
+use neumannarch_sim::pattern::{EntityPattern, Kind};
 use neumannarch_sim::state::Rejected;
 use neumannarch_sim::state::view::Building;
-use neumannarch_sim::{AsteroidId, Posting, RowId, SeatId};
+use neumannarch_sim::{AsteroidId, Posting, SeatId};
 
 use crate::display::belt;
 use crate::display::glyph::{self, Cell, Drawing, Look};
@@ -40,7 +40,7 @@ pub(crate) const CELL_GAP: f32 = 6.0;
 
 pub(crate) const PAD: f32 = 3.0;
 
-pub(crate) const ROW_GAP: f32 = 3.0;
+pub(crate) const SECTION_GAP: f32 = 3.0;
 
 const SECTOR_GAP: f32 = 12.0;
 
@@ -100,13 +100,13 @@ impl ButtonRefusals {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Buttons {
     pub step: u32,
-    pub wants: BTreeMap<RowId, u32>,
-    pub refusals: BTreeMap<RowId, ButtonRefusals>,
+    pub wants: BTreeMap<EntityPattern, u32>,
+    pub refusals: BTreeMap<EntityPattern, ButtonRefusals>,
 }
 
 impl Buttons {
-    fn refusal_of(&self, row: RowId, button: WheelButton) -> Option<Rejected> {
-        self.refusals.get(&row)?.of(button)
+    fn refusal_of(&self, pattern: EntityPattern, button: WheelButton) -> Option<Rejected> {
+        self.refusals.get(&pattern)?.of(button)
     }
 }
 
@@ -150,8 +150,7 @@ struct Sector {
 }
 
 struct Slot {
-    row: RowId,
-    glyph: Glyph,
+    pattern: EntityPattern,
     frame: Rect,
     lines: Vec<Line>,
 }
@@ -177,14 +176,13 @@ impl Footprint {
         centre: Pos2,
         stand_off: f32,
         view: &WheelView,
-        roster: &Roster,
         seat: SeatId,
     ) -> Footprint {
         Footprint {
             asteroid,
             centre,
             stand_off,
-            rect: stacked(centre, stand_off, view, roster, seat, 1.0, true)
+            rect: stacked(centre, stand_off, view, seat, 1.0, true)
                 .iter()
                 .flat_map(|sector| &sector.slots)
                 .fold(pick_square(centre), |bounds, slot| bounds.union(slot.frame)),
@@ -197,13 +195,7 @@ impl Footprint {
 }
 
 impl Wheel {
-    pub fn over(
-        placed: Placed,
-        view: &WheelView,
-        roster: &Roster,
-        seat: SeatId,
-        buttons: Option<Buttons>,
-    ) -> Wheel {
+    pub fn over(placed: Placed, view: &WheelView, seat: SeatId, buttons: Option<Buttons>) -> Wheel {
         let Placed {
             asteroid,
             centre,
@@ -220,21 +212,13 @@ impl Wheel {
             scale,
             alpha,
             shrinking,
-            sectors: stacked(
-                centre,
-                stand_off,
-                view,
-                roster,
-                seat,
-                scale,
-                buttons.is_some(),
-            ),
+            sectors: stacked(centre, stand_off, view, seat, scale, buttons.is_some()),
             buttons,
         }
     }
 
     pub fn stand_off(zone_points: f32) -> f32 {
-        zoom::floored(zone_points + ROW_GAP, belt::ENTITY_FLOOR_POINTS)
+        zoom::floored(zone_points + SECTION_GAP, belt::ENTITY_FLOOR_POINTS)
     }
 
     pub fn asteroid(&self) -> AsteroidId {
@@ -265,20 +249,23 @@ impl Wheel {
         self.slots().map(|slot| slot.frame)
     }
 
-    pub fn button(&self, row: RowId, button: WheelButton) -> Option<Pos2> {
+    pub fn button(&self, pattern: EntityPattern, button: WheelButton) -> Option<Pos2> {
         let slot = self
             .sectors
             .iter()
             .filter(|sector| sector.edits)
             .flat_map(|sector| &sector.slots)
-            .find(|slot| slot.row == row)?;
+            .find(|slot| slot.pattern == pattern)?;
         Some(slot.button(button, self.scale).center())
     }
 
     pub fn button_at(&self, at: Pos2) -> Option<ButtonAt> {
         let buttons = self.buttons.as_ref()?;
-        self.button_under(at)
-            .filter(|at| buttons.refusal_of(at.posting.row(), at.button).is_none())
+        self.button_under(at).filter(|at| {
+            buttons
+                .refusal_of(at.posting.pattern(), at.button)
+                .is_none()
+        })
     }
 
     pub fn spoken_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
@@ -288,16 +275,16 @@ impl Wheel {
                 match line {
                     Some(line) => Some((
                         line.cell.center(),
-                        Spoken::Row {
-                            row: slot.row,
+                        Spoken::Pattern {
+                            pattern: slot.pattern,
                             shown: line.speaks(),
                         },
                     )),
                     None => slot.glyph_rect(self.scale).contains(at).then(|| {
                         (
                             slot.glyph_rect(self.scale).center(),
-                            Spoken::Row {
-                                row: slot.row,
+                            Spoken::Pattern {
+                                pattern: slot.pattern,
                                 shown: None,
                             },
                         )
@@ -310,9 +297,9 @@ impl Wheel {
     fn refusal_at(&self, at: Pos2) -> Option<(Pos2, Spoken)> {
         let buttons = self.buttons.as_ref()?;
         let under = self.button_under(at)?;
-        let row = under.posting.row();
-        let why = label::refusal(buttons.refusal_of(row, under.button)?)?;
-        let slot = self.slots().find(|slot| slot.row == row)?;
+        let pattern = under.posting.pattern();
+        let why = label::refusal(buttons.refusal_of(pattern, under.button)?)?;
+        let slot = self.slots().find(|slot| slot.pattern == pattern)?;
         Some((
             egui::pos2(slot.frame.right(), slot.frame.center().y),
             Spoken::Refused {
@@ -335,7 +322,7 @@ impl Wheel {
                     .into_iter()
                     .find(|button| slot.button(*button, self.scale).contains(at))
                     .map(|button| ButtonAt {
-                        posting: Posting::of(self.asteroid, self.viewer, slot.row),
+                        posting: Posting::of(self.asteroid, self.viewer, slot.pattern),
                         button,
                     })
             })
@@ -416,7 +403,7 @@ impl Wheel {
             true => (Fill::Solid, self.alpha),
             false => (Fill::Hollow, self.alpha * glyph::DIM_ALPHA),
         };
-        Drawing::of(slot.glyph).paint(
+        Drawing::of(slot.pattern.glyph()).paint(
             painter,
             Cell {
                 centre: slot.glyph_rect(self.scale).center(),
@@ -535,16 +522,16 @@ impl Wheel {
         let Some(buttons) = &self.buttons else {
             return;
         };
-        let want = buttons.wants.get(&slot.row).copied().unwrap_or(0);
+        let want = buttons.wants.get(&slot.pattern).copied().unwrap_or(0);
         for button in [
             WheelButton::Plus(buttons.step),
             WheelButton::Minus(buttons.step),
         ] {
             let at = slot.button(button, self.scale);
-            let spent = buttons.refusal_of(slot.row, button).is_some()
+            let spent = buttons.refusal_of(slot.pattern, button).is_some()
                 || (matches!(button, WheelButton::Minus(_)) && button.wanted(want) == want);
             let over = hovered.is_some_and(|hovered| {
-                hovered.button == button && hovered.posting.row() == slot.row
+                hovered.button == button && hovered.posting.pattern() == slot.pattern
             });
             if over && !spent {
                 painter.rect_filled(at, 0.0, self.faded(panel::HOVER_FILL));
@@ -712,40 +699,40 @@ fn stacked(
     centre: Pos2,
     stand_off: f32,
     view: &WheelView,
-    roster: &Roster,
     seat: SeatId,
     scale: f32,
     edits: bool,
 ) -> Vec<Sector> {
-    let rows: Vec<(&SectorView, bool, Vec<Unlaid>)> = view
+    let stacks: Vec<(&SectorView, bool, Vec<Unlaid>)> = view
         .sectors
         .iter()
         .map(|sector| {
             let edits = edits && sector.seat == seat;
-            (sector, edits, rows_of(sector, roster, edits))
+            (sector, edits, patterns_of(sector, edits))
         })
-        .filter(|(sector, _, rows)| !rows.is_empty() || sector.arc.is_some())
+        .filter(|(sector, _, patterns)| !patterns.is_empty() || sector.arc.is_some())
         .collect();
-    let height = |rows: &[Unlaid], arc: bool| {
-        let tall = rows.len().min(STRIPS_PER_COLUMN);
-        let stacked =
-            tall as f32 * SECTION_HEIGHT * scale + tall.saturating_sub(1) as f32 * ROW_GAP * scale;
+    let height = |patterns: &[Unlaid], arc: bool| {
+        let tall = patterns.len().min(STRIPS_PER_COLUMN);
+        let stacked = tall as f32 * SECTION_HEIGHT * scale
+            + tall.saturating_sub(1) as f32 * SECTION_GAP * scale;
         match arc {
             true => stacked.max(BAR_LENGTH * scale),
             false => stacked,
         }
     };
-    let total: f32 = rows
+    let total: f32 = stacks
         .iter()
-        .map(|(sector, _, rows)| height(rows, sector.arc.is_some()))
+        .map(|(sector, _, patterns)| height(patterns, sector.arc.is_some()))
         .sum::<f32>()
-        + rows.len().saturating_sub(1) as f32 * SECTOR_GAP * scale;
+        + stacks.len().saturating_sub(1) as f32 * SECTOR_GAP * scale;
     let mut top = -total / 2.0;
-    rows.into_iter()
-        .map(|(sector, edits, rows)| {
-            let bottom = top + height(&rows, sector.arc.is_some());
+    stacks
+        .into_iter()
+        .map(|(sector, edits, patterns)| {
+            let bottom = top + height(&patterns, sector.arc.is_some());
             let mut across = 0.0;
-            let slots = rows
+            let slots = patterns
                 .chunks(STRIPS_PER_COLUMN)
                 .flat_map(|column| {
                     let left = across;
@@ -755,7 +742,7 @@ fn stacked(
                         .fold(0.0, f32::max);
                     across += widest + COLUMN_GAP * scale;
                     column.iter().enumerate().map(move |(index, unlaid)| {
-                        let y = top + index as f32 * (SECTION_HEIGHT + ROW_GAP) * scale;
+                        let y = top + index as f32 * (SECTION_HEIGHT + SECTION_GAP) * scale;
                         unlaid.laid(centre, scale, stand_off, y, left, edits)
                     })
                 })
@@ -775,8 +762,7 @@ fn stacked(
 }
 
 struct Unlaid {
-    row: RowId,
-    glyph: Glyph,
+    pattern: EntityPattern,
     lines: Vec<(Mark, Vec<Shown>)>,
 }
 
@@ -853,21 +839,20 @@ impl Unlaid {
             })
             .collect();
         Slot {
-            row: self.row,
-            glyph: self.glyph,
+            pattern: self.pattern,
             frame: Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)),
             lines,
         }
     }
 }
 
-fn rows_of(view: &SectorView, roster: &Roster, edits: bool) -> Vec<Unlaid> {
-    let mut structures: Vec<(RowId, &Row)> = Vec::new();
-    let mut units: Vec<(RowId, &Row)> = Vec::new();
-    for (row, data) in roster.iter() {
-        match data.kind() {
-            Kind::Structure => structures.push((row, data)),
-            Kind::Unit => units.push((row, data)),
+fn patterns_of(view: &SectorView, edits: bool) -> Vec<Unlaid> {
+    let mut structures: Vec<EntityPattern> = Vec::new();
+    let mut units: Vec<EntityPattern> = Vec::new();
+    for pattern in EntityPattern::EVERY {
+        match pattern.kind() {
+            Kind::Structure => structures.push(pattern),
+            Kind::Unit => units.push(pattern),
         }
     }
     by_cost_descending(&mut structures);
@@ -875,15 +860,14 @@ fn rows_of(view: &SectorView, roster: &Roster, edits: bool) -> Vec<Unlaid> {
     structures
         .into_iter()
         .chain(units)
-        .map(|(row, data)| {
+        .map(|pattern| {
             let entries: &[Shown] = view
-                .rows
+                .patterns
                 .iter()
-                .find(|shown| shown.row == row)
+                .find(|shown| shown.pattern == pattern)
                 .map_or(&[], |shown| &shown.entries);
             Unlaid {
-                row,
-                glyph: data.glyph(),
+                pattern,
                 lines: lines(entries)
                     .into_iter()
                     .filter(|(_, entries)| !entries.is_empty())
@@ -919,19 +903,19 @@ fn marked(entry: Entry) -> Mark {
     }
 }
 
-fn by_cost_descending(rows: &mut [(RowId, &Row)]) {
-    rows.sort_by(|(_, a), (_, b)| b.cost.total().total_cmp(&a.cost.total()));
+fn by_cost_descending(patterns: &mut [EntityPattern]) {
+    patterns.sort_by(|a, b| b.cost().total().total_cmp(&a.cost().total()));
 }
 
 const _: () = assert!(GLYPH_SLOT < SECTION_HEIGHT);
 
 #[cfg(test)]
 mod tests {
-    use neumannarch_sim::roster::{FRIGATE, SHIPYARD};
+    use neumannarch_sim::pattern::EntityPattern as P;
     use neumannarch_sim::state::{Command, MAX_WANT};
 
     use super::*;
-    use crate::display::scene::RowView;
+    use crate::display::scene::PatternView;
 
     const ASTEROID: AsteroidId = AsteroidId(0);
 
@@ -950,23 +934,22 @@ mod tests {
         }
     }
 
-    fn row(row: RowId, entries: Vec<Entry>) -> RowView {
-        RowView {
-            row,
+    fn strip(pattern: EntityPattern, entries: Vec<Entry>) -> PatternView {
+        PatternView {
+            pattern,
             entries: entries.into_iter().map(shown).collect(),
         }
     }
 
-    fn sector(seat: SeatId, rows: Vec<RowView>) -> SectorView {
+    fn sector(seat: SeatId, patterns: Vec<PatternView>) -> SectorView {
         SectorView {
             seat,
-            rows,
+            patterns,
             arc: None,
         }
     }
 
     fn wheel(sectors: Vec<SectorView>, buttons: Option<Buttons>) -> Wheel {
-        let roster = Roster::shipped();
         Wheel::over(
             Placed {
                 asteroid: ASTEROID,
@@ -980,7 +963,6 @@ mod tests {
                 asteroid: ASTEROID,
                 sectors,
             },
-            &roster,
             MINE,
             buttons,
         )
@@ -989,7 +971,7 @@ mod tests {
     fn selected() -> Buttons {
         Buttons {
             step: 1,
-            wants: BTreeMap::from([(FRIGATE, 2)]),
+            wants: BTreeMap::from([(P::Frigate, 2)]),
             refusals: BTreeMap::new(),
         }
     }
@@ -997,8 +979,8 @@ mod tests {
     fn held() -> Vec<SectorView> {
         vec![sector(
             MINE,
-            vec![row(
-                FRIGATE,
+            vec![strip(
+                P::Frigate,
                 vec![
                     Entry::Present(2),
                     Entry::Arriving {
@@ -1021,20 +1003,19 @@ mod tests {
             .flat_map(|sector| sector.slots.iter().map(move |slot| (sector, slot)))
     }
 
-    fn slot_of(wheel: &Wheel, row: RowId) -> &Slot {
+    fn slot_of(wheel: &Wheel, pattern: EntityPattern) -> &Slot {
         slots(wheel)
-            .find(|(_, slot)| slot.row == row)
+            .find(|(_, slot)| slot.pattern == pattern)
             .map(|(_, slot)| slot)
-            .expect("the row has a section")
+            .expect("the pattern has a section")
     }
 
     #[test]
-    fn a_selected_wheel_stands_a_section_per_row_to_the_asteroids_right_structures_first() {
-        let roster = Roster::shipped();
+    fn a_selected_wheel_stands_a_section_per_pattern_to_the_asteroids_right_structures_first() {
         let wheel = wheel(vec![sector(MINE, Vec::new())], Some(selected()));
 
         let slots: Vec<&Slot> = slots(&wheel).map(|(_, slot)| slot).collect();
-        assert_eq!(slots.len(), roster.iter().count());
+        assert_eq!(slots.len(), P::EVERY.len());
         assert!(
             slots.iter().all(|slot| slot.frame.left() > CENTRE.x),
             "every section stands right of the asteroid"
@@ -1049,11 +1030,11 @@ mod tests {
         );
         let last_structure = slots
             .iter()
-            .rposition(|slot| roster[slot.row].kind() == Kind::Structure)
+            .rposition(|slot| slot.pattern.kind() == Kind::Structure)
             .expect("a structure");
         let first_unit = slots
             .iter()
-            .position(|slot| roster[slot.row].kind() == Kind::Unit)
+            .position(|slot| slot.pattern.kind() == Kind::Unit)
             .expect("a unit");
         assert!(last_structure < first_unit, "structures stand above units");
         let stack = slots
@@ -1086,7 +1067,7 @@ mod tests {
     fn a_section_is_one_strip_with_its_counts_in_a_row_beside_its_glyph() {
         let full = wheel(held(), None);
 
-        let slot = slot_of(&full, FRIGATE);
+        let slot = slot_of(&full, P::Frigate);
         assert_eq!(slot.lines.len(), 3, "here, arriving and wanted");
         assert_eq!(slot.lines[0].count, 2);
         assert_eq!(slot.lines[1].count, 3);
@@ -1115,8 +1096,8 @@ mod tests {
         let wanted_alone = wheel(
             vec![sector(
                 MINE,
-                vec![row(
-                    FRIGATE,
+                vec![strip(
+                    P::Frigate,
                     vec![Entry::Wanted {
                         count: 1,
                         dashed: false,
@@ -1126,7 +1107,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            slot_of(&wanted_alone, FRIGATE).lines[0].cell.left(),
+            slot_of(&wanted_alone, P::Frigate).lines[0].cell.left(),
             slot.lines[0].cell.left(),
             "a lone count stands where the first count stands"
         );
@@ -1138,11 +1119,11 @@ mod tests {
             let wheel = wheel(
                 vec![sector(
                     MINE,
-                    vec![row(FRIGATE, vec![Entry::Present(count)])],
+                    vec![strip(P::Frigate, vec![Entry::Present(count)])],
                 )],
                 None,
             );
-            let slot = slot_of(&wheel, FRIGATE);
+            let slot = slot_of(&wheel, P::Frigate);
             (slot.lines[0].cell.width(), slot.frame.width())
         };
 
@@ -1153,9 +1134,9 @@ mod tests {
     }
 
     #[test]
-    fn a_row_at_rest_stands_as_its_glyph_alone_and_only_where_it_takes_an_edit() {
+    fn a_pattern_at_rest_stands_as_its_glyph_alone_and_only_where_it_takes_an_edit() {
         let open = wheel(vec![sector(MINE, Vec::new())], Some(selected()));
-        assert!(slot_of(&open, FRIGATE).lines.is_empty());
+        assert!(slot_of(&open, P::Frigate).lines.is_empty());
 
         let shut = wheel(vec![sector(MINE, Vec::new())], None);
         assert!(
@@ -1167,8 +1148,8 @@ mod tests {
     #[test]
     fn several_seats_stack_from_the_top_in_seat_order_each_in_its_own_sector() {
         let theirs = vec![
-            row(FRIGATE, vec![Entry::Present(1)]),
-            row(SHIPYARD, vec![Entry::Present(1)]),
+            strip(P::Frigate, vec![Entry::Present(1)]),
+            strip(P::Shipyard, vec![Entry::Present(1)]),
         ];
         let wheel = wheel(
             vec![sector(MINE, Vec::new()), sector(THEIRS, theirs)],
@@ -1195,10 +1176,9 @@ mod tests {
 
     #[test]
     fn a_sector_taller_than_the_column_wraps_into_the_next_column_beside_it() {
-        let roster = Roster::shipped();
-        let every = roster
-            .iter()
-            .map(|(id, _)| row(id, vec![Entry::Present(1)]))
+        let every = P::EVERY
+            .into_iter()
+            .map(|pattern| strip(pattern, vec![Entry::Present(1)]))
             .collect();
         let wheel = wheel(vec![sector(THEIRS, every)], None);
 
@@ -1220,7 +1200,7 @@ mod tests {
         let sector = &wheel.sectors[0];
         assert!(
             sector.bottom - sector.top
-                < (STRIPS_PER_COLUMN as f32 + 0.5) * (SECTION_HEIGHT + ROW_GAP),
+                < (STRIPS_PER_COLUMN as f32 + 0.5) * (SECTION_HEIGHT + SECTION_GAP),
             "the sector is no taller than one column"
         );
     }
@@ -1231,14 +1211,14 @@ mod tests {
             wheel(
                 vec![sector(
                     MINE,
-                    vec![row(FRIGATE, vec![Entry::Present(count)])],
+                    vec![strip(P::Frigate, vec![Entry::Present(count)])],
                 )],
                 Some(selected()),
             )
         };
         let nine = counted(9);
         let ten = counted(10);
-        let mine = slot_of(&nine, FRIGATE).frame.left();
+        let mine = slot_of(&nine, P::Frigate).frame.left();
         let next = slots(&nine)
             .map(|(_, slot)| slot.frame.left())
             .filter(|left| *left > mine + 1.0)
@@ -1248,7 +1228,7 @@ mod tests {
             "the roster wraps past the frigate's column"
         );
 
-        let grown = slot_of(&ten, FRIGATE).frame.right() + STEP_WIDTH;
+        let grown = slot_of(&ten, P::Frigate).frame.right() + STEP_WIDTH;
         assert!(
             grown <= next,
             "{grown} runs under the next column at {next}"
@@ -1264,10 +1244,10 @@ mod tests {
         };
         let wheel = wheel(
             vec![
-                sector(MINE, vec![row(FRIGATE, vec![Entry::Present(1)])]),
+                sector(MINE, vec![strip(P::Frigate, vec![Entry::Present(1)])]),
                 SectorView {
                     seat: THEIRS,
-                    rows: Vec::new(),
+                    patterns: Vec::new(),
                     arc: Some(arc),
                 },
             ],
@@ -1288,35 +1268,35 @@ mod tests {
         let sectors = || {
             vec![
                 sector(MINE, Vec::new()),
-                sector(THEIRS, vec![row(FRIGATE, vec![Entry::Present(1)])]),
+                sector(THEIRS, vec![strip(P::Frigate, vec![Entry::Present(1)])]),
             ]
         };
         let open = wheel(sectors(), Some(selected()));
         let mine = |button| ButtonAt {
-            posting: Posting::of(ASTEROID, MINE, FRIGATE),
+            posting: Posting::of(ASTEROID, MINE, P::Frigate),
             button,
         };
 
         let plus = open
-            .button(FRIGATE, WheelButton::Plus(1))
+            .button(P::Frigate, WheelButton::Plus(1))
             .expect("the frigate's own section takes a button");
         let minus = open
-            .button(FRIGATE, WheelButton::Minus(1))
+            .button(P::Frigate, WheelButton::Minus(1))
             .expect("and both buttons");
         assert!(plus.y < minus.y, "plus stands above minus");
         assert_eq!(open.button_at(plus), Some(mine(WheelButton::Plus(1))));
         assert_eq!(open.button_at(minus), Some(mine(WheelButton::Minus(1))));
 
-        let slot = slot_of(&open, FRIGATE);
+        let slot = slot_of(&open, P::Frigate);
         assert_eq!(
             open.button_at(slot.glyph_rect(1.0).center()),
             None,
             "the glyph itself is no button"
         );
         let theirs = slots(&open)
-            .find(|(sector, slot)| slot.row == FRIGATE && sector.seat == THEIRS)
+            .find(|(sector, slot)| slot.pattern == P::Frigate && sector.seat == THEIRS)
             .map(|(_, slot)| slot)
-            .expect("the rival holds the same rows");
+            .expect("the rival holds the same patterns");
         assert_eq!(
             open.button_at(theirs.button(WheelButton::Plus(1), 1.0).center()),
             None,
@@ -1325,7 +1305,7 @@ mod tests {
 
         let shut = wheel(sectors(), None);
         assert_eq!(shut.button_at(plus), None, "an unselected wheel takes none");
-        assert_eq!(shut.button(FRIGATE, WheelButton::Plus(1)), None);
+        assert_eq!(shut.button(P::Frigate, WheelButton::Plus(1)), None);
     }
 
     #[test]
@@ -1347,13 +1327,13 @@ mod tests {
         assert_eq!(WheelButton::Minus(1).wanted(0), 0);
         assert_eq!(
             ButtonAt {
-                posting: Posting::of(ASTEROID, SeatId(0), FRIGATE),
+                posting: Posting::of(ASTEROID, SeatId(0), P::Frigate),
                 button: WheelButton::Plus(1),
             }
             .edit(2),
             Command::Want {
                 asteroid: ASTEROID,
-                row: FRIGATE,
+                pattern: P::Frigate,
                 count: 3
             }
         );
@@ -1362,29 +1342,29 @@ mod tests {
     #[test]
     fn what_is_under_the_pointer_says_what_it_is_and_why() {
         let wheel = wheel(held(), None);
-        let slot = slot_of(&wheel, FRIGATE);
+        let slot = slot_of(&wheel, P::Frigate);
         let at = |line: usize| slot.lines[line].cell.center();
 
         let said = |at: Pos2| wheel.spoken_at(at).map(|(_, spoken)| spoken);
 
         assert_eq!(
             said(at(0)),
-            Some(Spoken::Row {
-                row: FRIGATE,
+            Some(Spoken::Pattern {
+                pattern: P::Frigate,
                 shown: Some(shown(Entry::Present(2)))
             })
         );
         assert_eq!(
-            said(at(1)).map(|spoken| spoken.phrase(&Roster::shipped())),
+            said(at(1)).map(|spoken| spoken.phrase()),
             Some("Frigate arriving from Asteroid 5".to_string())
         );
         assert_eq!(
             said(slot.glyph_rect(1.0).center()),
-            Some(Spoken::Row {
-                row: FRIGATE,
+            Some(Spoken::Pattern {
+                pattern: P::Frigate,
                 shown: None
             }),
-            "the glyph names its row alone"
+            "the glyph names its pattern alone"
         );
         assert_eq!(said(CENTRE), None, "the middle carries nothing");
     }
@@ -1393,7 +1373,7 @@ mod tests {
     fn a_refused_button_takes_no_click_and_says_why_beside_its_strip() {
         let refused = Buttons {
             refusals: BTreeMap::from([(
-                FRIGATE,
+                P::Frigate,
                 ButtonRefusals {
                     adding: Some(Rejected::NotYet),
                     removing: Some(Rejected::NotYet),
@@ -1402,7 +1382,7 @@ mod tests {
             ..selected()
         };
         let wheel = wheel(vec![sector(MINE, Vec::new())], Some(refused));
-        let slot = slot_of(&wheel, FRIGATE);
+        let slot = slot_of(&wheel, P::Frigate);
         let plus = slot.button(WheelButton::Plus(1), 1.0).center();
 
         assert_eq!(
@@ -1420,13 +1400,13 @@ mod tests {
             ))
         );
 
-        let live = slot_of(&wheel, SHIPYARD)
+        let live = slot_of(&wheel, P::Shipyard)
             .button(WheelButton::Plus(1), 1.0)
             .center();
         assert_eq!(
             wheel.button_at(live),
             Some(ButtonAt {
-                posting: Posting::of(ASTEROID, MINE, SHIPYARD),
+                posting: Posting::of(ASTEROID, MINE, P::Shipyard),
                 button: WheelButton::Plus(1),
             })
         );
@@ -1442,8 +1422,8 @@ mod tests {
         let wheel = wheel(
             vec![sector(
                 MINE,
-                vec![row(
-                    FRIGATE,
+                vec![strip(
+                    P::Frigate,
                     vec![
                         Entry::Building(starved),
                         Entry::Wanted {
@@ -1455,7 +1435,7 @@ mod tests {
             )],
             None,
         );
-        let line = &slot_of(&wheel, FRIGATE).lines[0];
+        let line = &slot_of(&wheel, P::Frigate).lines[0];
 
         assert_eq!(line.mark, Mark::Wanted);
         assert_eq!(line.count, 2, "the frame counts among what is to come");
@@ -1469,7 +1449,10 @@ mod tests {
     #[test]
     fn a_section_of_a_rival_seat_shows_what_it_holds_and_takes_no_button() {
         let wheel = wheel(
-            vec![sector(THEIRS, vec![row(SHIPYARD, vec![Entry::Present(1)])])],
+            vec![sector(
+                THEIRS,
+                vec![strip(P::Shipyard, vec![Entry::Present(1)])],
+            )],
             Some(selected()),
         );
 
@@ -1479,12 +1462,11 @@ mod tests {
 
     #[test]
     fn a_footprint_covers_the_asteroid_and_every_section() {
-        let roster = Roster::shipped();
         let view = WheelView {
             asteroid: ASTEROID,
             sectors: held(),
         };
-        let footprint = Footprint::of(ASTEROID, CENTRE, STAND_OFF, &view, &roster, MINE);
+        let footprint = Footprint::of(ASTEROID, CENTRE, STAND_OFF, &view, MINE);
 
         assert!(footprint.rect().contains(CENTRE), "the asteroid is on it");
         let full = wheel(held(), Some(selected()));
@@ -1494,7 +1476,7 @@ mod tests {
                 "every section stands on the footprint"
             );
         }
-        let slot = slot_of(&full, FRIGATE);
+        let slot = slot_of(&full, P::Frigate);
         assert!(
             full.holds(slot.button(WheelButton::Plus(1), 1.0).center()),
             "a wheel holds its own buttons"
